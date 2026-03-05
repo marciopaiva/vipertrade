@@ -1,0 +1,14 @@
+# ViperTrade
+
+**/.env
+**/.env.*
+!/.env.example
+secrets/*.key
+target/
+node_modules/
+.DS_Store
+*.log
+.idea/
+.vscode/
+dist/
+build/
