@@ -44,16 +44,22 @@ ViperTrade é um sistema de trading automatizado projetado para operar como **Le
    podman-compose up -d
    ```
 
-## 🏗 Arquitetura
+## Arquitetura
 
-O sistema é composto pelos seguintes serviços:
+O sistema é composto por 8 serviços principais rodando em containers (Podman/Docker):
 
-- **Market Data**: Ingestão de dados via WebSocket da Bybit.
-- **Strategy**: Engine Tupã + Gerenciamento de Risco.
-- **Executor**: Execução de ordens via REST API.
-- **Monitor**: Health checks, reconciliação e notificações Discord.
-- **Database**: PostgreSQL para persistência de trades e eventos.
-- **Cache**: Redis para comunicação Pub/Sub entre serviços.
+1. **Market Data Service**: Coleta dados de mercado via WebSocket (Bybit) e publica no Redis.
+2. **Strategy Engine**: Processa dados de mercado usando pipelines Tupã (.tp) e gera sinais.
+3. **Execution Service**: Recebe sinais e executa ordens na exchange.
+4. **Risk Monitor**: Monitora exposição, PnL e saúde do sistema.
+5. **Backtest Engine**: Executa simulações de estratégias com dados históricos.
+6. **Web Interface**: Dashboard para visualização de métricas e controle manual (Next.js).
+7. **API Service**: Backend REST para a interface web e integrações externas.
+8. **Infrastructure**:
+   - **PostgreSQL**: Persistência de trades, snapshots e logs de auditoria.
+   - **Redis**: Barramento de mensagens e cache de alta velocidade.
+
+Todos os serviços se comunicam através de uma rede isolada `vipertrade-net` (subnet 172.20.0.0/16).
 
 ## 📚 Documentação
 
