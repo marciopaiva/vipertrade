@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    "services/market-data",
+    "services/strategy", 
+    "services/executor",
+    "services/monitor",
+    "services/backtest",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.8.0-rc"
+edition = "2021"
+license = "MIT"
+authors = ["ViperTrade Team"]
+description = "Lead Trader Bot for Bybit Copy Trading Classic"
+repository = "https://github.com/seu-usuario/vipertrade"
+
+[workspace.dependencies]
+# Tupã v0.8.0-rc (git source for RC stability)
+tupa-runtime = { git = "https://github.com/marciopaiva/tupalang.git", branch = "main", version = "0.8.0-rc", features = ["trading", "audit", "backtest"] }
+tupa-codegen = { git = "https://github.com/marciopaiva/tupalang.git", branch = "main", version = "0.8.0-rc" }
+tupa-audit = { git = "https://github.com/marciopaiva/tupalang.git", branch = "main", version = "0.8.0-rc" }
+tupa-effects = { git = "https://github.com/marciopaiva/tupalang.git", branch = "main", version = "0.8.0-rc" }
+
+# Async runtime
+tokio = { version = "1", features = ["full", "tracing"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+sha2 = "0.10"
+
+# Redis
+redis = { version = "0.23", features = ["tokio-comp"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Rate limiting
+governor = "0.6"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
