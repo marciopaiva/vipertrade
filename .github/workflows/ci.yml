@@ -27,7 +27,7 @@ jobs:
       - name: Format Check
         run: cargo fmt --all -- --check
       - name: Cargo Check
-        run: cargo check --workspace
+        run: cargo check --workspace --locked
 
   web:
     name: Web Build
