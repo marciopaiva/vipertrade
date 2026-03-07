@@ -14,3 +14,13 @@ Guidelines:
 - Avoid generic titles like `chore` or `feat` alone.
 - Keep subject in imperative mood.
 - Prefer explicit scope (`api`, `strategy`, `compose`, `docs`, `ci`).
+
+## Local Hook Setup
+
+Enable local commit message validation:
+
+```bash
+./scripts/setup-git-hooks.sh
+```
+
+This configures `core.hooksPath=.githooks` and blocks generic commit subjects.
