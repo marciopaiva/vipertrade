@@ -1,69 +1,64 @@
-# 🐍 VIPERTRADE v0.8.1
+# ViperTrade v0.8.1
 
-> **Lead Trader Bot para Bybit Copy Trading Classic**
-> *Otimizado para Smart Copy Mode com Trailing Stop Dinâmico*
+Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 
-## 📋 Visão Geral
+## Stack
+- Rust microservices (market-data, strategy, executor, monitor, backtest, api)
+- PostgreSQL + Redis
+- Web dashboard (Next.js)
+- Orquestracao com Podman Compose
 
-ViperTrade é um sistema de trading automatizado projetado para operar como **Lead Trader** na Bybit. Ele utiliza uma arquitetura de microsserviços orientada a eventos e uma engine de estratégia determinística baseada na linguagem **Tupã**.
+## Ambiente recomendado (WSL Fedora + Podman)
 
-### Principais Diferenciais
-- **Tupã Engine**: Lógica de trading auditável e determinística.
-- **Smart Copy Optimized**: Otimização de position sizing para maximizar a taxa de sucesso dos seguidores.
-- **Dynamic Trailing Stop**: Proteção de lucros com mecanismo de "ratcheting".
-- **Risk Management Multi-Camada**: Circuit breakers e limites de perda diária.
+### Pre-requisitos
+- WSL Fedora
+- Podman + podman-compose
+- Git
 
-## 🚀 Como Iniciar
+### Setup rapido
+```bash
+git clone https://github.com/marciopaiva/vipertrade.git
+cd vipertrade
+cp compose/.env.example compose/.env
+./scripts/init-secrets.sh
+./scripts/security-check.sh
+```
 
-### Pré-requisitos
-- Podman & Podman Compose
-- Rust (para desenvolvimento)
-- Conta na Bybit (Testnet para desenvolvimento)
+### Subir ambiente
+```bash
+podman-compose -f compose/docker-compose.yml up -d
+```
 
-### Setup Inicial
+### Validar saude
+```bash
+./scripts/health-check.sh
+```
 
-1. **Clone o repositório**
-   ```bash
-   git clone https://github.com/seu-usuario/vipertrade.git
-   cd vipertrade
-   ```
+### Logs uteis
+```bash
+podman logs -f vipertrade-strategy
+podman logs -f vipertrade-market-data
+podman logs -f vipertrade-api
+```
 
-2. **Inicialize os Segredos**
-   ```bash
-   ./scripts/init-secrets.sh
-   ```
+### Parar ambiente
+```bash
+podman-compose -f compose/docker-compose.yml down
+```
 
-3. **Verifique a Segurança**
-   ```bash
-   ./scripts/security-check.sh
-   ```
+## CI
+GitHub Actions ativo em PR/push:
+- Rust: `cargo fmt --check` + `cargo check --workspace --locked`
+- Web: `yarn install --frozen-lockfile` + `yarn build`
 
-4. **Inicie os Serviços**
-   ```bash
-   cd compose
-   podman-compose up -d
-   ```
+Workflow: `.github/workflows/ci.yml`
 
-## Arquitetura
+## Documentacao
+- Especificacao: `VIPERTRADE_SPEC.md`
+- Arquitetura: `docs/ARCHITECTURE_V2.md`
+- Plano fase 1: `docs/PHASE1_PLAN.md`
 
-O sistema é composto por 8 serviços principais rodando em containers (Podman/Docker):
-
-1. **Market Data Service**: Coleta dados de mercado via WebSocket (Bybit) e publica no Redis.
-2. **Strategy Engine**: Processa dados de mercado usando pipelines Tupã (.tp) e gera sinais.
-3. **Execution Service**: Recebe sinais e executa ordens na exchange.
-4. **Risk Monitor**: Monitora exposição, PnL e saúde do sistema.
-5. **Backtest Engine**: Executa simulações de estratégias com dados históricos.
-6. **Web Interface**: Dashboard para visualização de métricas e controle manual (Next.js).
-7. **API Service**: Backend REST para a interface web e integrações externas.
-8. **Infrastructure**:
-   - **PostgreSQL**: Persistência de trades, snapshots e logs de auditoria.
-   - **Redis**: Barramento de mensagens e cache de alta velocidade.
-
-Todos os serviços se comunicam através de uma rede isolada `vipertrade-net` (subnet 172.20.0.0/16).
-
-## 📚 Documentação
-
-Para detalhes completos da especificação técnica, consulte [VIPERTRADE_SPEC.md](VIPERTRADE_SPEC.md).
-
----
-**Status:** Em desenvolvimento (Bloco 1: Setup)
+## Status atual (RC sem tag)
+- Infra e servicos sobem com Podman Compose
+- Health checks principais respondendo
+- Debito tecnico aberto: pipeline do strategy falhando parse (`Unexpected(Ident("type"))`)
