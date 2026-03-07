@@ -162,8 +162,13 @@ fn close_action_to_position_side(action: &str) -> Option<&'static str> {
 #[derive(Debug)]
 enum CloseReconcileResult {
     NoLocalOpen,
-    Partial { trade_id: String, remaining_qty: f64 },
-    Closed { trade_id: String },
+    Partial {
+        trade_id: String,
+        remaining_qty: f64,
+    },
+    Closed {
+        trade_id: String,
+    },
     CloseQtyExceedsOpen {
         trade_id: String,
         open_qty: f64,
