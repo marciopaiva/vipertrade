@@ -48,3 +48,6 @@ Thumbs.db
 api/logs/
 .tupa_version
 test.tp
+
+# Local generated artifacts
+viper_smart_copy.plan.json

@@ -49,7 +49,11 @@ else
 fi
 
 step "Podman compose config validation"
-$COMPOSE_CMD -f compose/docker-compose.yml config >/dev/null
+COMPOSE_ENV_FILE="compose/.env"
+if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
+  COMPOSE_ENV_FILE="compose/.env.example"
+fi
+$COMPOSE_CMD --env-file "$COMPOSE_ENV_FILE" -f compose/docker-compose.yml config >/dev/null
 
 if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
   if command -v markdownlint >/dev/null 2>&1; then
