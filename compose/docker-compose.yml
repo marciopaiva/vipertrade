@@ -7,8 +7,7 @@ services:
   postgres:
     image: docker.io/library/postgres:16-alpine
     container_name: vipertrade-postgres
-    ports:
-      - "5432:5432"
+    network_mode: host
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-vipertrade}
       POSTGRES_USER: ${POSTGRES_USER:-viper}
@@ -18,8 +17,6 @@ services:
       - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ../database/init.sql:/docker-entrypoint-initdb.d/02-init.sql:ro
       - ../database/migrations:/docker-entrypoint-initdb.d/migrations:ro
-    networks:
-      - vipertrade-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-viper} -d ${POSTGRES_DB:-vipertrade} -h 127.0.0.1"]
       interval: 10s
@@ -35,13 +32,10 @@ services:
   redis:
     image: docker.io/library/redis:7-alpine
     container_name: vipertrade-redis
-    ports:
-      - "6379:6379"
+    network_mode: host
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    networks:
-      - vipertrade-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -60,25 +54,29 @@ services:
   market-data:
     build:
       context: ..
-      dockerfile: market-data/Dockerfile
+      dockerfile: services/market-data/Dockerfile
       args:
         RUST_VERSION: "1.83"
     container_name: vipertrade-market-data
+    network_mode: host
     environment:
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC}
       TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
-      REDIS_HOST: redis
+      REDIS_HOST: localhost
       REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_market_data=${LOG_LEVEL:-info},tupa=warn"
-    networks:
-      - vipertrade-net
     volumes:
       - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
@@ -89,30 +87,33 @@ services:
   strategy:
     build:
       context: ..
-      dockerfile: strategy/Dockerfile
+      dockerfile: services/strategy/Dockerfile
       args:
-        TUPA_VERSION: "v0.8.0-rc"
+        TUPA_VERSION: "v0.8.0-rc.3"
         TUPA_BACKEND: ${TUPA_BACKEND:-hybrid}
         RUST_VERSION: "1.83"
     container_name: vipertrade-strategy
+    network_mode: host
     environment:
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
+      PROFILE_CONFIG: /app/config/system/profiles.yaml
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: ${PYO3_USE_ABI3_FORWARD_COMPATIBILITY:-1}
       TUPA_PIPELINE_PATH: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_smart_copy.tp}
       TUPA_AUDIT_PATH: /app/logs/audit
+      REDIS_URL: redis://localhost:6379
       TUPA_SEED: ${TUPA_SEED:-42}
       TUPA_BACKEND: ${TUPA_BACKEND:-hybrid}
       TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
-      REDIS_HOST: redis
+      REDIS_HOST: localhost
       REDIS_PORT: 6379
-      DB_HOST: postgres
+      DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      RUST_LOG: "vipertrade_strategy=info,tupa=warn"
-    networks:
-      - vipertrade-net
+      RUST_LOG: ${RUST_LOG:-info}
+      LD_LIBRARY_PATH: /usr/local/lib
     volumes:
       - ../config:/app/config:ro
       - ../logs:/app/logs
@@ -123,7 +124,12 @@ services:
       redis:
         condition: service_healthy
       market-data:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
@@ -134,27 +140,26 @@ services:
   executor:
     build:
       context: ..
-      dockerfile: executor/Dockerfile
+      dockerfile: services/executor/Dockerfile
       args:
         RUST_VERSION: "1.83"
     container_name: vipertrade-executor
+    network_mode: host
     environment:
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_API_KEY: ${BYBIT_API_KEY}
       BYBIT_API_SECRET: ${BYBIT_API_SECRET}
       BYBIT_WS_PRIVATE: ${BYBIT_WS_PRIVATE}
       TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
-      REDIS_HOST: redis
+      REDIS_HOST: localhost
       REDIS_PORT: 6379
-      DB_HOST: postgres
+      DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_executor=info,tupa=warn"
-    networks:
-      - vipertrade-net
     volumes:
       - ../config:/app/config:ro
     depends_on:
@@ -163,7 +168,12 @@ services:
       redis:
         condition: service_healthy
       strategy:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
@@ -174,15 +184,16 @@ services:
   monitor:
     build:
       context: ..
-      dockerfile: monitor/Dockerfile
+      dockerfile: services/monitor/Dockerfile
       args:
         RUST_VERSION: "1.83"
     container_name: vipertrade-monitor
+    network_mode: host
     environment:
       DISCORD_WEBHOOK_CRITICAL: ${DISCORD_WEBHOOK_CRITICAL}
       DISCORD_WEBHOOK_WARNING: ${DISCORD_WEBHOOK_WARNING}
       DISCORD_WEBHOOK_INFO: ${DISCORD_WEBHOOK_INFO}
-      DB_HOST: postgres
+      DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
@@ -191,13 +202,16 @@ services:
       RECONCILIATION_INTERVAL_MIN: ${RECONCILIATION_INTERVAL_MIN:-5}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_monitor=info,tupa=warn"
-    networks:
-      - vipertrade-net
     volumes:
       - ../config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
@@ -208,24 +222,28 @@ services:
   backtest:
     build:
       context: ..
-      dockerfile: backtest/Dockerfile
+      dockerfile: services/backtest/Dockerfile
       args:
         RUST_VERSION: "1.83"
     container_name: vipertrade-backtest
+    network_mode: host
     environment:
-      DB_HOST: postgres
+      DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    networks:
-      - vipertrade-net
     volumes:
       - ../config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -242,18 +260,15 @@ services:
       args:
         NODE_VERSION: "20"
     container_name: vipertrade-web
-    ports:
-      - "3000:3000"
+    network_mode: host
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
       NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
-      DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB:-vipertrade}
+      REDIS_URL: redis://localhost:6379
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    networks:
-      - vipertrade-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
@@ -261,6 +276,7 @@ services:
       retries: 3
     volumes:
       - ../web:/app
+      - /app/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -276,20 +292,17 @@ services:
   api:
     build:
       context: ..
-      dockerfile: api/Dockerfile
+      dockerfile: services/api/Dockerfile
       args:
         RUST_VERSION: "1.83"
     container_name: vipertrade-api
-    ports:
-      - "8080:8080"
+    network_mode: host
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB:-vipertrade}
+      REDIS_URL: redis://localhost:6379
       JWT_SECRET: ${JWT_SECRET:-generate_me}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_api=info"
-    networks:
-      - vipertrade-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -317,13 +330,3 @@ volumes:
   postgres_data:
   redis_data:
   tupa-cache:
-
-# ═══════════════════════════════════════════════════════════
-# NETWORKS
-# ═══════════════════════════════════════════════════════════
-networks:
-  vipertrade-net:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16

@@ -26,7 +26,7 @@ echo "📦 Tupã version: $TUPA_VERSION"
 # Clean cache if version changed
 if [[ -f .tupa_version ]] && [[ "$(cat .tupa_version 2>/dev/null)" != "$TUPA_VERSION" ]]; then
     echo "🔄 Versão do Tupã mudou - limpando cache..."
-    cargo clean -p tupa-runtime -p tupa-codegen -p tupa-audit 2>/dev/null || true
+    cargo clean -p tupa-runtime -p tupa-codegen 2>/dev/null || true
 fi
 echo "$TUPA_VERSION" > .tupa_version
 
@@ -57,7 +57,6 @@ echo "🚀 Building strategy service with Tupã trading features..."
 
 cargo build -p viper-strategy \
     --release \
-    --features "trading,audit,backtest" \
     --config 'net.git-fetch-with-cli=true'
 
 # Verify binary
@@ -72,21 +71,32 @@ fi
 
 # Validate pipeline compilation
 echo "🔍 Validando pipeline Tupã..."
-# tupa-cli might not be in the workspace members I defined. 
-# I defined: market-data, strategy, executor, monitor, backtest.
-# tupa-cli is likely a binary from the tupa-runtime or tupa-codegen crate, OR a separate tool.
-# If it's not installed, this will fail.
-# The user script tries to run `cargo run -p tupa-cli`.
-# This implies `tupa-cli` should be in the workspace or dependencies.
-# It is NOT in my workspace members.
-# It might be an external crate.
-# I will keep the command but if it fails, the script has a `||` check (implicit in the if).
-# Actually `if cargo run ...; then` handles the failure gracefully.
 
-if cargo run -p tupa-cli -- codegen --check config/strategies/viper_smart_copy.tp 2>/dev/null; then
-    echo -e "${GREEN}✅ Pipeline válido!${NC}"
+# Try to use installed tupa binary first
+if command -v tupa &> /dev/null; then
+    TUPA_CMD="tupa"
+elif [[ -f "$HOME/.local/bin/tupa" ]]; then
+    TUPA_CMD="$HOME/.local/bin/tupa"
 else
-    echo -e "${YELLOW}⚠️  Pipeline validation skipped (tupa-cli may not be built or found)${NC}"
+    # Fallback to cargo run if tupa-cli is available (which it isn't in workspace anymore)
+    # But let's keep it as a last resort or just skip
+    TUPA_CMD=""
+fi
+
+if [[ -n "$TUPA_CMD" ]]; then
+    if $TUPA_CMD codegen --check config/strategies/viper_smart_copy.tp 2>/dev/null; then
+        echo -e "${GREEN}✅ Pipeline válido!${NC}"
+    else
+        echo -e "${RED}❌ Pipeline validation failed!${NC}"
+        # Optional: exit 1 if strict
+    fi
+else
+    # Try cargo run as fallback (legacy)
+    if cargo run -p tupa-cli -- codegen --check config/strategies/viper_smart_copy.tp 2>/dev/null; then
+        echo -e "${GREEN}✅ Pipeline válido!${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Pipeline validation skipped (tupa CLI not found)${NC}"
+    fi
 fi
 
 echo ""
