@@ -36,6 +36,7 @@ Build a reliable execution backbone for WSL Fedora + Podman with deterministic T
 - docs/ARCHITECTURE_V2.md
 - docs/PHASE1_PLAN.md
 - scripts/ci-local.sh
+- scripts/validate-runtime.sh
 
 ## Risks
 - Tupa API changes between RC versions.
