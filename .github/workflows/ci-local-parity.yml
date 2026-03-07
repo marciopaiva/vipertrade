@@ -1,0 +1,36 @@
+name: CI Local Parity
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop/**
+
+jobs:
+  parity:
+    name: ci-local parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.83
+          components: rustfmt, clippy
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install markdownlint-cli
+        run: npm i -g markdownlint-cli@0.41.0
+
+      - name: Run ci-local parity (no compose)
+        run: CI_LOCAL_SKIP_COMPOSE=1 CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh

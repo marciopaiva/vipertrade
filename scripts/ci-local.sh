@@ -38,8 +38,11 @@ run_docs_lint() {
 cd "$(dirname "$0")/.."
 
 command -v cargo >/dev/null 2>&1 || fail "cargo not found"
-command -v podman >/dev/null 2>&1 || fail "podman not found"
-[[ -x scripts/compose.sh ]] || fail "scripts/compose.sh not found or not executable"
+
+if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
+  command -v podman >/dev/null 2>&1 || fail "podman not found"
+  [[ -x scripts/compose.sh ]] || fail "scripts/compose.sh not found or not executable"
+fi
 
 step "Rust format check"
 cargo fmt --all -- --check
@@ -57,8 +60,12 @@ else
   warn "scripts/validate-pipeline.sh not found; skipping pipeline validation"
 fi
 
-step "Podman compose config validation"
-./scripts/compose.sh config >/dev/null
+if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
+  step "Podman compose config validation"
+  ./scripts/compose.sh config >/dev/null
+else
+  warn "Compose validation skipped (CI_LOCAL_SKIP_COMPOSE=1)"
+fi
 
 if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
   step "Markdown lint (strict)"
