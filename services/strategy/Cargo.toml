@@ -17,6 +17,7 @@ tupa-parser = { workspace = true }
 tupa-codegen = { workspace = true }
 tupa-runtime = { workspace = true }
 tupa-typecheck = "0.8.0"
+viper-domain = { workspace = true }
 
 [features]
 default = []
