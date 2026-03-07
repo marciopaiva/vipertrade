@@ -29,6 +29,18 @@ cp compose/.env.example compose/.env
 ./scripts/compose.sh up -d
 ```
 
+
+### Modo host local (WSL workaround)
+```bash
+./scripts/compose-host.sh up -d
+./scripts/health-check.sh
+```
+
+Para parar:
+```bash
+./scripts/compose-host.sh down
+```
+
 ### Validar saude
 ```bash
 ./scripts/health-check.sh
