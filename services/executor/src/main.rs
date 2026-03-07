@@ -1,1 +1,23 @@
-fn main() { println!("Starting viper-executor"); }
+use tokio::net::TcpListener;
+use tokio::io::AsyncWriteExt;
+use std::error::Error;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    println!("Starting viper-executor");
+
+    // Start health check server on port 8083
+    let listener = TcpListener::bind("0.0.0.0:8083").await?;
+    println!("Health check server running on :8083");
+
+    loop {
+        let (mut socket, _) = listener.accept().await?;
+
+        tokio::spawn(async move {
+            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                eprintln!("failed to write to socket; err = {:?}", e);
+            }
+        });
+    }
+}
