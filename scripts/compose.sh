@@ -47,16 +47,26 @@ force_cleanup_viper() {
   podman network rm compose_viper-net >/dev/null 2>&1 || true
 }
 
-cd "$COMPOSE_DIR"
-
-if [[ "${1:-}" == "down" ]]; then
+run_down_tolerant() {
+  local tmp rc
+  tmp=$(mktemp)
   set +e
-  run_compose down --timeout "$DOWN_TIMEOUT" "${@:2}"
+  run_compose down --timeout "$DOWN_TIMEOUT" "${@:2}" > >(cat) 2>"$tmp"
   rc=$?
   set -e
 
-  if [[ $rc -ne 0 ]]; then
-    echo "WARN: compose down failed (rc=$rc), applying fallback cleanup" >&2
+  # Suppress noisy, benign not-found errors common in WSL+Podman down cleanup.
+  grep -Ev 'no such container|no pod with name or ID' "$tmp" >&2 || true
+  rm -f "$tmp"
+
+  return $rc
+}
+
+cd "$COMPOSE_DIR"
+
+if [[ "${1:-}" == "down" ]]; then
+  if ! run_down_tolerant "$@"; then
+    echo "WARN: compose down failed, applying fallback cleanup" >&2
     force_cleanup_viper
     exit 0
   fi
