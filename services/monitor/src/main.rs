@@ -1,7 +1,40 @@
 use std::error::Error;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+
+#[derive(Debug, Clone)]
+struct MonitorConfig {
+    health_check_interval_sec: u64,
+    reconciliation_interval_sec: u64,
+    max_position_drift_notional_usdt: f64,
+}
+
+impl MonitorConfig {
+    fn from_env() -> Self {
+        let health_check_interval_sec = std::env::var("HEALTH_CHECK_INTERVAL_SEC")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(60);
+
+        let reconciliation_interval_sec = std::env::var("RECONCILIATION_INTERVAL_SEC")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(300);
+
+        let max_position_drift_notional_usdt = std::env::var("MAX_POSITION_DRIFT_NOTIONAL_USDT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(5.0);
+
+        Self {
+            health_check_interval_sec,
+            reconciliation_interval_sec,
+            max_position_drift_notional_usdt,
+        }
+    }
+}
 
 async fn shutdown_signal() {
     #[cfg(unix)]
@@ -31,6 +64,14 @@ async fn shutdown_signal() {
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Starting viper-monitor");
 
+    let cfg = MonitorConfig::from_env();
+    println!(
+        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT",
+        cfg.health_check_interval_sec,
+        cfg.reconciliation_interval_sec,
+        cfg.max_position_drift_notional_usdt
+    );
+
     let listener = TcpListener::bind("0.0.0.0:8084").await?;
     println!("Health check server running on :8084");
 
@@ -39,6 +80,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         shutdown_signal().await;
         let _ = shutdown_signal_tx.send(true);
+    });
+
+    let mut health_task_shutdown = shutdown_rx.clone();
+    let health_interval = cfg.health_check_interval_sec;
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(health_interval));
+        loop {
+            tokio::select! {
+                _ = health_task_shutdown.changed() => {
+                    break;
+                }
+                _ = ticker.tick() => {
+                    // Phase 2 baseline: periodic monitor heartbeat.
+                    println!("monitor heartbeat: health checks scheduled");
+                }
+            }
+        }
+    });
+
+    let mut recon_task_shutdown = shutdown_rx.clone();
+    let recon_interval = cfg.reconciliation_interval_sec;
+    let max_drift = cfg.max_position_drift_notional_usdt;
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(recon_interval));
+        loop {
+            tokio::select! {
+                _ = recon_task_shutdown.changed() => {
+                    break;
+                }
+                _ = ticker.tick() => {
+                    // Phase 2 baseline: reconciliation scheduler placeholder.
+                    println!(
+                        "reconciliation cycle: validating position drift threshold {} USDT",
+                        max_drift
+                    );
+                }
+            }
+        }
     });
 
     loop {

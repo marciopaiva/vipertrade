@@ -97,7 +97,8 @@ Workflow: `.github/workflows/ci.yml`
 
 ## Documentacao
 
-- Especificacao: `VIPERTRADE_SPEC.md`
+- Especificacao modular: `docs/spec/README.md`
+- Especificacao legado: `VIPERTRADE_SPEC.md`
 - Arquitetura: `docs/ARCHITECTURE_V2.md`
 - Plano fase 1: `docs/PHASE1_PLAN.md`
 
