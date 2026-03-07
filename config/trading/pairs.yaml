@@ -1,0 +1,331 @@
+# config/trading/pairs.yaml
+# ViperTrade v0.8.0-rc - Trading Pairs Configuration
+# Otimizado para Smart Copy Mode com Trailing Stop Dinâmico
+
+# ═══════════════════════════════════════════════════════════
+# GLOBAL SETTINGS
+# ═══════════════════════════════════════════════════════════
+
+global:
+  # Smart Copy constraints
+  smart_copy:
+    enabled: true
+    min_position_usdt: 5      # Abaixo não copia bem
+    max_position_usdt: 30     # Acima exclui followers pequenos
+    target_position_usdt: 10-20  # Sweet spot
+    max_position_change_pct: 0.30  # Máx 30% variação entre trades
+  
+  # Trailing Stop Dinâmico (global defaults)
+  trailing_stop:
+    enabled: true
+    check_interval_ms: 500
+    max_updates_per_min: 10
+    min_move_threshold_pct: 0.002  # Só atualiza se mover >= 0.2%
+  
+  # Risk limits globais
+  risk:
+    max_daily_loss_pct: 0.03
+    max_consecutive_losses: 3
+    max_open_positions: 2
+    max_total_exposure_pct: 0.50
+  
+  # Entry timing filters
+  entry_filters:
+    avoid_hours_utc: ["00:00-02:00", "22:00-23:59"]  # Rollover funding
+    min_volume_24h_usdt: 30000000  # $30M mínimo
+    max_spread_pct: 0.001  # 0.1% máximo
+    max_atr_pct: 0.05  # 5% volatilidade máxima
+    max_funding_rate_pct: 0.015  # 1.5% funding máximo
+
+# ═══════════════════════════════════════════════════════════
+# DOGEUSDT - Meme Coin (Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+DOGEUSDT:
+  enabled: true
+  category: "meme_coin"
+  volatility_profile: "high"
+  
+  # Bybit-specific settings
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
+  # Risk parameters (mais conservador devido à volatilidade)
+  risk:
+    stop_loss_pct: 0.02        # 2% (mais amplo que BTC)
+    take_profit_pct: 0.04      # 4% (4:1 R/R compensa volatilidade)
+    max_position_usdt: 15.00   # Máx 15% do capital
+    atr_period: 14
+    atr_multiplier: 0.5        # Reduz sizing em alta volatilidade
+  
+  # Trailing Stop Dinâmico (específico para DOGE)
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      MEDIUM:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.015
+          - at_profit_pct: 0.08
+            trail_pct: 0.025
+        move_to_break_even_at: 0.025
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.025
+        initial_trail_pct: 0.012
+        ratchet_levels:
+          - at_profit_pct: 0.05
+            trail_pct: 0.02
+          - at_profit_pct: 0.10
+            trail_pct: 0.035
+        move_to_break_even_at: 0.03
+  
+  # Liquidity filters
+  liquidity:
+    min_24h_volume_usdt: 50000000  # $50M mínimo
+    max_spread_pct: 0.001          # 0.1% spread máximo
+    avoid_during_low_liquidity: true
+  
+  # Smart Copy specific
+  smart_copy:
+    recommended_for_beginners: false
+    warning: "High volatility - use Conservative profile"
+
+# ═══════════════════════════════════════════════════════════
+# XRPUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+XRPUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium-high"
+  
+  bybit:
+    price_precision: 4
+    qty_precision: 1
+    tick_size: 0.0001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
+  risk:
+    stop_loss_pct: 0.018
+    take_profit_pct: 0.036
+    max_position_usdt: 20.00
+    atr_period: 14
+    atr_multiplier: 0.6
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.01
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.018
+          - at_profit_pct: 0.08
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 100000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
+
+# ═══════════════════════════════════════════════════════════
+# TRXUSDT - Large Cap Alt (Média Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+TRXUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium"
+  
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
+  risk:
+    stop_loss_pct: 0.015       # TRX tende a ser menos volátil
+    take_profit_pct: 0.030
+    max_position_usdt: 20.00
+    atr_period: 14
+    atr_multiplier: 0.7        # Mais agressivo devido à menor volatilidade
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.01
+        initial_trail_pct: 0.005
+        ratchet_levels:
+          - at_profit_pct: 0.02
+            trail_pct: 0.008
+          - at_profit_pct: 0.04
+            trail_pct: 0.015
+        move_to_break_even_at: 0.015
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+          - at_profit_pct: 0.10
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 80000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
+
+# ═══════════════════════════════════════════════════════════
+# XLMUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+XLMUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium-high"
+  
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
+  risk:
+    stop_loss_pct: 0.018
+    take_profit_pct: 0.036
+    max_position_usdt: 20.00
+    atr_period: 14
+    atr_multiplier: 0.6
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.01
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.018
+          - at_profit_pct: 0.08
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 60000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
+
+# ═══════════════════════════════════════════════════════════
+# RISK PROFILES (Overrides globais por perfil)
+# ═══════════════════════════════════════════════════════════
+
+profiles:
+  CONSERVATIVE:
+    risk_per_trade_pct: 0.75
+    max_leverage: 2
+    max_daily_loss_pct: 0.02
+    max_open_positions: 1
+    max_total_exposure_pct: 0.30
+    trailing_stop_aggressiveness: "high"  # Aperta rápido
+    position_sizing_multiplier: 0.6       # Reduz sizing base
+  
+  MEDIUM:
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
+    max_daily_loss_pct: 0.03
+    max_open_positions: 2
+    max_total_exposure_pct: 0.50
+    trailing_stop_aggressiveness: "medium"
+    position_sizing_multiplier: 1.0
+  
+  AGGRESSIVE:
+    risk_per_trade_pct: 2.00
+    max_leverage: 3
+    max_daily_loss_pct: 0.05
+    max_open_positions: 3
+    max_total_exposure_pct: 0.70
+    trailing_stop_aggressiveness: "low"   # Dá mais espaço
+    position_sizing_multiplier: 1.4       # Aumenta sizing base
