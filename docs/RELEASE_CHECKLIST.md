@@ -1,12 +1,14 @@
 # Release Checklist (WSL Fedora + Podman)
 
 ## Preflight
+
 - Ensure clean workspace: `git status --short`
 - Run local CI: `./scripts/ci-local.sh`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 - Validate pipeline: `./scripts/validate-pipeline.sh`
 
 ## Runtime Validation (Bridge Primary)
+
 - Start and validate bridge mode:
   - `./scripts/validate-runtime.sh bridge`
 - Confirm subscribers:
@@ -16,12 +18,14 @@
   - `./scripts/compose.sh logs --tail 80 executor`
 
 ## Runtime Validation (Host Fallback)
+
 - Start and validate host mode:
   - `./scripts/validate-runtime.sh host`
 - Validate health:
   - `./scripts/health-check.sh`
 
 ## Rollback Plan
+
 - Stop current stack:
   - `./scripts/compose.sh down`
   - `./scripts/compose-host.sh down`
@@ -34,6 +38,7 @@
   - `./scripts/fix-podman-wsl-network.sh`
 
 ## Release Evidence
+
 - Capture command outputs for:
   - `./scripts/ci-local.sh`
   - `./scripts/validate-runtime.sh bridge`
