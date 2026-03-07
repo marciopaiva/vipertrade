@@ -2,7 +2,32 @@ use futures_util::StreamExt;
 use std::error::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use viper_domain::{StrategyDecision, StrategyDecisionEvent};
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -11,15 +36,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("0.0.0.0:8083").await?;
     println!("Health check server running on :8083");
 
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let shutdown_signal_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_signal_tx.send(true);
+    });
+
+    let mut health_shutdown_rx = shutdown_rx.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok((mut socket, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                    if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+            tokio::select! {
+                _ = health_shutdown_rx.changed() => {
+                    break;
+                }
+                accept_result = listener.accept() => {
+                    if let Ok((mut socket, _)) = accept_result {
+                        tokio::spawn(async move {
+                            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                                eprintln!("failed to write to socket; err = {:?}", e);
+                            }
+                        });
                     }
-                });
+                }
             }
         }
     });
@@ -34,27 +74,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pubsub.subscribe("viper:decisions").await?;
     println!("Subscribed to viper:decisions");
 
-    while let Some(msg) = pubsub.on_message().next().await {
-        let payload: String = msg.get_payload()?;
+    let mut messages = pubsub.on_message();
 
-        if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
-            println!(
-                "Executor received decision event {} from {} action={} symbol={}",
-                event.event_id, event.source_event_id, event.decision.action, event.decision.symbol
-            );
-            continue;
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                println!("Received shutdown signal, stopping viper-executor");
+                break;
+            }
+            maybe_msg = messages.next() => {
+                let Some(msg) = maybe_msg else {
+                    println!("Decision stream ended, stopping viper-executor");
+                    break;
+                };
+
+                let payload: String = msg.get_payload()?;
+
+                if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
+                    println!(
+                        "Executor received decision event {} from {} action={} symbol={}",
+                        event.event_id, event.source_event_id, event.decision.action, event.decision.symbol
+                    );
+                    continue;
+                }
+
+                if let Ok(decision) = serde_json::from_str::<StrategyDecision>(&payload) {
+                    println!(
+                        "Executor received legacy decision action={} symbol={}",
+                        decision.action, decision.symbol
+                    );
+                    continue;
+                }
+
+                eprintln!("Executor failed to parse decision payload");
+            }
         }
-
-        if let Ok(decision) = serde_json::from_str::<StrategyDecision>(&payload) {
-            println!(
-                "Executor received legacy decision action={} symbol={}",
-                decision.action, decision.symbol
-            );
-            continue;
-        }
-
-        eprintln!("Executor failed to parse decision payload");
     }
+
+    let _ = shutdown_tx.send(true);
 
     Ok(())
 }

@@ -7,6 +7,7 @@ use std::fs;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
 use tupa_parser::{parse_program, Item, PipelineDecl, Program};
 use tupa_runtime::Runtime;
@@ -380,6 +381,30 @@ fn register_strategy_steps(runtime: &Runtime, plan: &ExecutionPlan, cfg: Arc<Str
     }
 }
 
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Starting viper-strategy");
@@ -387,15 +412,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("0.0.0.0:8082").await?;
     println!("Health check server running on :8082");
 
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let shutdown_signal_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_signal_tx.send(true);
+    });
+
+    let mut health_shutdown_rx = shutdown_rx.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok((mut socket, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                    if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+            tokio::select! {
+                _ = health_shutdown_rx.changed() => {
+                    break;
+                }
+                accept_result = listener.accept() => {
+                    if let Ok((mut socket, _)) = accept_result {
+                        tokio::spawn(async move {
+                            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                                eprintln!("failed to write to socket; err = {:?}", e);
+                            }
+                        });
                     }
-                });
+                }
             }
         }
     });
@@ -438,63 +478,80 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Subscribed to viper:market_data");
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
-    while let Some(msg) = pubsub.on_message().next().await {
-        let payload: String = msg.get_payload()?;
+    let mut messages = pubsub.on_message();
 
-        let signal_event: MarketSignalEvent = match serde_json::from_str(&payload) {
-            Ok(evt) => evt,
-            Err(_) => {
-                let legacy_signal: MarketSignal = match serde_json::from_str(&payload) {
-                    Ok(s) => s,
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                println!("Received shutdown signal, stopping viper-strategy");
+                break;
+            }
+            maybe_msg = messages.next() => {
+                let Some(msg) = maybe_msg else {
+                    println!("Market data stream ended, stopping viper-strategy");
+                    break;
+                };
+
+                let payload: String = msg.get_payload()?;
+
+                let signal_event: MarketSignalEvent = match serde_json::from_str(&payload) {
+                    Ok(evt) => evt,
+                    Err(_) => {
+                        let legacy_signal: MarketSignal = match serde_json::from_str(&payload) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("Failed to parse market signal event: {}", e);
+                                continue;
+                            }
+                        };
+                        MarketSignalEvent::new(legacy_signal)
+                    }
+                };
+
+                let input = serde_json::to_value(&signal_event.signal)?;
+                let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
+                    Ok(v) => v,
                     Err(e) => {
-                        eprintln!("Failed to parse market signal event: {}", e);
+                        eprintln!("In-process Tupa runtime failed: {}", e);
                         continue;
                     }
                 };
-                MarketSignalEvent::new(legacy_signal)
-            }
-        };
 
-        let input = serde_json::to_value(&signal_event.signal)?;
-        let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("In-process Tupa runtime failed: {}", e);
-                continue;
-            }
-        };
+                let decision_value = runtime_output.get("decision").cloned();
+                let Some(decision_value) = decision_value else {
+                    eprintln!("Pipeline output missing 'decision' step result");
+                    continue;
+                };
 
-        let decision_value = runtime_output.get("decision").cloned();
-        let Some(decision_value) = decision_value else {
-            eprintln!("Pipeline output missing 'decision' step result");
-            continue;
-        };
-
-        match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
-            Ok(decision) => {
-                let decision_event =
-                    StrategyDecisionEvent::new(signal_event.event_id.clone(), decision);
-                let decision_json = serde_json::to_string(&decision_event)?;
-                publish_conn
-                    .publish::<_, _, ()>("viper:decisions", decision_json)
-                    .await?;
-                println!(
-                    "Published decision event {} for {}",
-                    decision_event.event_id, signal_event.signal.symbol
-                );
-            }
-            Err(_) => {
-                let decision_json = serde_json::to_string(&decision_value)?;
-                publish_conn
-                    .publish::<_, _, ()>("viper:decisions", decision_json)
-                    .await?;
-                println!(
-                    "Published decision (raw) for {}",
-                    signal_event.signal.symbol
-                );
+                match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
+                    Ok(decision) => {
+                        let decision_event =
+                            StrategyDecisionEvent::new(signal_event.event_id.clone(), decision);
+                        let decision_json = serde_json::to_string(&decision_event)?;
+                        publish_conn
+                            .publish::<_, _, ()>("viper:decisions", decision_json)
+                            .await?;
+                        println!(
+                            "Published decision event {} for {}",
+                            decision_event.event_id, signal_event.signal.symbol
+                        );
+                    }
+                    Err(_) => {
+                        let decision_json = serde_json::to_string(&decision_value)?;
+                        publish_conn
+                            .publish::<_, _, ()>("viper:decisions", decision_json)
+                            .await?;
+                        println!(
+                            "Published decision (raw) for {}",
+                            signal_event.signal.symbol
+                        );
+                    }
+                }
             }
         }
     }
+
+    let _ = shutdown_tx.send(true);
 
     Ok(())
 }
