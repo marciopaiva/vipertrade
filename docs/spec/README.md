@@ -1,11 +1,13 @@
 # Spec Modularization Plan
 
-This folder prepares the split of `VIPERTRADE_SPEC.md` into maintainable documents.
+This folder contains the modularized technical specification.
 
 ## Current Status
 
-- Source of truth is still `VIPERTRADE_SPEC.md`.
-- This folder defines the target structure for incremental migration.
+- Source of truth: `VIPERTRADE_SPEC.md`
+- Modular docs started:
+  - `01-overview.md`
+  - `02-architecture.md`
 
 ## Target Structure
 
@@ -18,4 +20,5 @@ This folder prepares the split of `VIPERTRADE_SPEC.md` into maintainable documen
 
 ## Migration Rule
 
-When moving sections, preserve headings and keep links/backrefs to the source spec.
+- Move sections incrementally from `VIPERTRADE_SPEC.md`.
+- Keep references to original line ranges while migrating.
