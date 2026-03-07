@@ -23,14 +23,7 @@ cd "$(dirname "$0")/.."
 
 command -v cargo >/dev/null 2>&1 || fail "cargo not found"
 command -v podman >/dev/null 2>&1 || fail "podman not found"
-
-if podman compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="podman compose"
-elif command -v podman-compose >/dev/null 2>&1; then
-  COMPOSE_CMD="podman-compose"
-else
-  fail "podman compose/podman-compose not found"
-fi
+[[ -x scripts/compose.sh ]] || fail "scripts/compose.sh not found or not executable"
 
 step "Rust format check"
 cargo fmt --all -- --check
@@ -49,11 +42,7 @@ else
 fi
 
 step "Podman compose config validation"
-COMPOSE_ENV_FILE="compose/.env"
-if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
-  COMPOSE_ENV_FILE="compose/.env.example"
-fi
-$COMPOSE_CMD --env-file "$COMPOSE_ENV_FILE" -f compose/docker-compose.yml config >/dev/null
+./scripts/compose.sh config >/dev/null
 
 if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
   if command -v markdownlint >/dev/null 2>&1; then

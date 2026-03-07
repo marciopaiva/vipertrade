@@ -23,7 +23,7 @@ Build a reliable execution backbone for WSL Fedora + Podman with deterministic T
 - Remove `network_mode: host` where possible.
 - Add explicit network and health/readiness checks.
 - Definition of done:
-  - `podman compose -f compose/docker-compose.yml config` passes.
+  - `./scripts/compose.sh config` passes.
   - Services expose deterministic health endpoints.
 
 ### 4. Local CI Parity

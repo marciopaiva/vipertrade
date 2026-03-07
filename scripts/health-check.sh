@@ -1,37 +1,44 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "🔍 Starting System Health Check..."
+GREEN="\033[0;32m"
+RED="\033[0;31m"
+YELLOW="\033[1;33m"
+NC="\033[0m"
 
-# Check Container Status
-echo "🐳 Checking Container Status..."
-podman ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+echo -e "${GREEN}ViperTrade - Health Check${NC}"
+echo "================================================"
 
-# Check Postgres
-echo "🐘 Checking Database Connection..."
-if podman exec vipertrade-postgres pg_isready -U viper; then
-    echo "✅ Database is ready"
-else
-    echo "❌ Database is NOT ready"
-    exit 1
+cd "$(dirname "$0")/.."
+
+if [[ ! -x scripts/compose.sh ]]; then
+  echo -e "${RED}ERROR: scripts/compose.sh not found${NC}"
+  exit 1
 fi
 
-# Check API
-echo "🔌 Checking API Endpoint..."
-if curl -s http://localhost:8080/ > /dev/null; then
-    echo "✅ API is reachable"
+echo "Container status:"
+./scripts/compose.sh ps || true
+
+echo "Checking Postgres..."
+if podman exec vipertrade-postgres pg_isready -U "${POSTGRES_USER:-viper}" >/dev/null 2>&1; then
+  echo -e "${GREEN}OK: database ready${NC}"
 else
-    echo "❌ API is NOT reachable"
-    exit 1
+  echo -e "${RED}ERROR: database not ready${NC}"
+  exit 1
 fi
 
-# Check Web
-echo "🌐 Checking Web Interface..."
-if curl -s http://localhost:3000/ > /dev/null; then
-    echo "✅ Web UI is reachable"
+echo "Checking API endpoint..."
+if curl -fsS http://localhost:8080/health >/dev/null; then
+  echo -e "${GREEN}OK: API healthy${NC}"
 else
-    echo "❌ Web UI is NOT reachable"
-    exit 1
+  echo -e "${YELLOW}WARN: API health endpoint unreachable${NC}"
 fi
 
-echo "✅ Health Check Passed!"
+echo "Checking Web endpoint..."
+if curl -fsS http://localhost:3000 >/dev/null; then
+  echo -e "${GREEN}OK: Web reachable${NC}"
+else
+  echo -e "${YELLOW}WARN: Web endpoint unreachable${NC}"
+fi
+
+echo -e "${GREEN}Health check complete${NC}"

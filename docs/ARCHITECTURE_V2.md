@@ -32,7 +32,7 @@
 - Every message must include: event_id, symbol, timestamp, schema_version.
 
 ## Podman Standards
-- Use `podman compose` as default.
+- Use `./scripts/compose.sh` as default compose entrypoint (prefers `podman-compose`).
 - Prefer bridge network over `network_mode: host` for service isolation.
 - Keep volumes explicit for: postgres, redis, audit logs, plan cache.
 - Healthchecks must verify dependencies (DB/Redis/Bybit reachability).
