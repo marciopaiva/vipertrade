@@ -30,7 +30,7 @@ cp compose/.env.example compose/.env
 ```
 
 
-### Modo host local (WSL workaround)
+### Modo host local (fallback de emergencia)
 ```bash
 ./scripts/compose-host.sh up -d
 ./scripts/health-check.sh
@@ -39,6 +39,18 @@ cp compose/.env.example compose/.env
 Para parar:
 ```bash
 ./scripts/compose-host.sh down
+```
+
+### Corrigir rede bridge no WSL
+```bash
+./scripts/fix-podman-wsl-network.sh
+```
+
+### Validar runtime end-to-end
+```bash
+./scripts/validate-runtime.sh bridge
+# fallback local
+./scripts/validate-runtime.sh host
 ```
 
 ### Validar saude
@@ -73,4 +85,4 @@ Workflow: `.github/workflows/ci.yml`
 ## Status atual (RC sem tag)
 - Infra e servicos sobem com Podman Compose
 - Health checks principais respondendo
-- Debito tecnico aberto: pipeline do strategy falhando parse (`Unexpected(Ident("type"))`)
+- Bridge padrao validado no WSL com netavark + iptables
