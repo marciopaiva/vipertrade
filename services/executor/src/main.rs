@@ -24,7 +24,9 @@ struct ExecutorConfig {
     bybit_api_key: String,
     bybit_api_secret: String,
     recv_window: String,
+    bybit_account_type: String,
     live_orders_enabled: bool,
+    live_symbol_allowlist: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -52,9 +54,16 @@ impl ExecutorConfig {
         let bybit_api_key = std::env::var("BYBIT_API_KEY").unwrap_or_default();
         let bybit_api_secret = std::env::var("BYBIT_API_SECRET").unwrap_or_default();
         let recv_window = std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
+        let bybit_account_type =
+            std::env::var("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|_| "UNIFIED".to_string());
         let live_orders_enabled = std::env::var("EXECUTOR_ENABLE_LIVE_ORDERS")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let live_symbol_allowlist = parse_allowlist(
+            std::env::var("EXECUTOR_LIVE_SYMBOL_ALLOWLIST")
+                .unwrap_or_else(|_| "DOGEUSDT".to_string())
+                .as_str(),
+        );
 
         Self {
             redis_url,
@@ -63,7 +72,9 @@ impl ExecutorConfig {
             bybit_api_key,
             bybit_api_secret,
             recv_window,
+            bybit_account_type,
             live_orders_enabled,
+            live_symbol_allowlist,
         }
     }
 
@@ -74,6 +85,20 @@ impl ExecutorConfig {
             "https://api-testnet.bybit.com"
         }
     }
+
+    fn is_symbol_allowed_live(&self, symbol: &str) -> bool {
+        if self.live_symbol_allowlist.is_empty() {
+            return true;
+        }
+        self.live_symbol_allowlist.contains(&symbol.to_uppercase())
+    }
+}
+
+fn parse_allowlist(raw: &str) -> HashSet<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 async fn shutdown_signal() {
@@ -127,6 +152,107 @@ fn decision_hash(event: &StrategyDecisionEvent) -> String {
     let payload = serde_json::to_vec(event).unwrap_or_default();
     hasher.update(payload);
     hex::encode(hasher.finalize())
+}
+
+async fn bybit_public_get(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    path: &str,
+) -> Result<Value, Box<dyn Error>> {
+    let url = format!("{}{}", cfg.bybit_base_url(), path);
+    let res = http.get(url).send().await?;
+    let status = res.status();
+    let value: Value = res.json().await?;
+    if !status.is_success() {
+        return Err(format!("bybit public http={} body={}", status, value).into());
+    }
+    Ok(value)
+}
+
+async fn bybit_private_get(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    path: &str,
+    query: &str,
+) -> Result<Value, Box<dyn Error>> {
+    let ts = now_ms();
+    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, query);
+    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
+
+    let mut url = format!("{}{}", cfg.bybit_base_url(), path);
+    if !query.is_empty() {
+        url = format!("{}?{}", url, query);
+    }
+
+    let res = http
+        .get(url)
+        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
+        .header("X-BAPI-SIGN", sign)
+        .header("X-BAPI-SIGN-TYPE", "2")
+        .header("X-BAPI-TIMESTAMP", ts)
+        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
+        .send()
+        .await?;
+
+    let status = res.status();
+    let value: Value = res.json().await?;
+    if !status.is_success() {
+        return Err(format!("bybit private http={} body={}", status, value).into());
+    }
+    Ok(value)
+}
+
+async fn run_bybit_sanity_checks(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+) -> Result<(), String> {
+    let time_value = bybit_public_get(http, cfg, "/v5/market/time")
+        .await
+        .map_err(|e| format!("market/time failed: {}", e))?;
+
+    let time_ret = time_value
+        .get("retCode")
+        .and_then(Value::as_i64)
+        .unwrap_or(-1);
+    if time_ret != 0 {
+        return Err(format!(
+            "market/time retCode={} body={}",
+            time_ret, time_value
+        ));
+    }
+
+    println!("Bybit sanity check: market/time OK");
+
+    if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
+        if cfg.live_orders_enabled {
+            return Err("live orders enabled but BYBIT_API_KEY/SECRET missing".to_string());
+        }
+        println!("Bybit sanity check: wallet skipped (no API credentials)");
+        return Ok(());
+    }
+
+    let query = format!("accountType={}", cfg.bybit_account_type);
+    let wallet_value = bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query)
+        .await
+        .map_err(|e| format!("wallet-balance failed: {}", e))?;
+
+    let wallet_ret = wallet_value
+        .get("retCode")
+        .and_then(Value::as_i64)
+        .unwrap_or(-1);
+    if wallet_ret != 0 {
+        return Err(format!(
+            "wallet-balance retCode={} body={}",
+            wallet_ret, wallet_value
+        ));
+    }
+
+    println!(
+        "Bybit sanity check: wallet-balance OK (accountType={})",
+        cfg.bybit_account_type
+    );
+
+    Ok(())
 }
 
 async fn already_processed(
@@ -335,6 +461,23 @@ async fn handle_decision_event(
         return Ok(());
     }
 
+    if cfg.live_orders_enabled && !cfg.is_symbol_allowed_live(&event.decision.symbol) {
+        println!(
+            "Live order blocked by allowlist event_id={} symbol={} allowlist={:?}",
+            event.event_id, event.decision.symbol, cfg.live_symbol_allowlist
+        );
+        mark_processed(
+            state,
+            &event.event_id,
+            &event,
+            "blocked_symbol_allowlist",
+            None,
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
     if !cfg.live_orders_enabled {
         println!(
             "Live orders disabled; dry-run for event_id={} action={} symbol={}",
@@ -393,11 +536,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = ExecutorConfig::from_env();
     println!(
-        "Executor mode env={} live_orders_enabled={} base_url={}",
+        "Executor mode env={} live_orders_enabled={} base_url={} allowlist={:?}",
         cfg.bybit_env,
         cfg.live_orders_enabled,
-        cfg.bybit_base_url()
+        cfg.bybit_base_url(),
+        cfg.live_symbol_allowlist
     );
+
+    let http = reqwest::Client::new();
+    match run_bybit_sanity_checks(&http, &cfg).await {
+        Ok(_) => {}
+        Err(err) => {
+            if cfg.live_orders_enabled {
+                return Err(format!(
+                    "Bybit sanity checks failed with live orders enabled: {}",
+                    err
+                )
+                .into());
+            }
+            eprintln!("Bybit sanity checks warning (continuing dry-run): {}", err);
+        }
+    }
 
     let db_pool = match PgPoolOptions::new()
         .max_connections(5)
@@ -462,7 +621,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Subscribed to viper:decisions");
 
     let mut messages = pubsub.on_message();
-    let http = reqwest::Client::new();
 
     loop {
         tokio::select! {
@@ -526,5 +684,14 @@ mod tests {
         let sig = bybit_sign("secret", "payload").expect("must sign");
         assert!(!sig.is_empty());
         assert_eq!(sig.len(), 64);
+    }
+
+    #[test]
+    fn parses_allowlist() {
+        let set = parse_allowlist("dogeusdt, xrpusdt ,, TRXUSDT");
+        assert!(set.contains("DOGEUSDT"));
+        assert!(set.contains("XRPUSDT"));
+        assert!(set.contains("TRXUSDT"));
+        assert_eq!(set.len(), 3);
     }
 }

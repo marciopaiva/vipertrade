@@ -61,3 +61,37 @@ Fallback host:
 ```
 
 This generates a single report file under `logs/`.
+
+## 7) Live Testnet Rollout (Gradual)
+
+Default is safe dry-run (`EXECUTOR_ENABLE_LIVE_ORDERS=false`).
+
+1. Keep live disabled and validate sanity checks/logs.
+2. Set allowlist to one symbol only (example: `DOGEUSDT`).
+3. Enable live orders and restart only executor.
+
+```bash
+# compose/.env
+EXECUTOR_ENABLE_LIVE_ORDERS=true
+EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT
+BYBIT_ACCOUNT_TYPE=UNIFIED
+
+./scripts/compose.sh up -d --no-deps executor
+./scripts/compose.sh logs -f executor
+```
+
+Smoke publish for ENTER order path:
+
+```bash
+./scripts/publish-test-decision.sh DOGEUSDT ENTER_LONG 10
+```
+
+## 8) Rollback (Immediate)
+
+```bash
+# compose/.env
+EXECUTOR_ENABLE_LIVE_ORDERS=false
+
+./scripts/compose.sh up -d --no-deps executor
+./scripts/compose.sh logs -f executor
+```
