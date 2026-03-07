@@ -2661,7 +2661,7 @@ checksum = "d2599bd6c20c4a5e61a9d7969e000961d480db362fef9f06c2231fbbe6bbcd54"
 [[package]]
 name = "tupa-lexer"
 version = "0.8.0"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=23b65b6a621a7d260eb794fe6494f381985efcdc#23b65b6a621a7d260eb794fe6494f381985efcdc"
+source = "git+https://github.com/marciopaiva/tupalang.git?tag=v0.8.0-rc.5#271b9870dbaf969f53641a14925814dd76531c2d"
 dependencies = [
  "nom",
  "serde",
@@ -2672,7 +2672,7 @@ dependencies = [
 [[package]]
 name = "tupa-parser"
 version = "0.8.0"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=23b65b6a621a7d260eb794fe6494f381985efcdc#23b65b6a621a7d260eb794fe6494f381985efcdc"
+source = "git+https://github.com/marciopaiva/tupalang.git?tag=v0.8.0-rc.5#271b9870dbaf969f53641a14925814dd76531c2d"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
