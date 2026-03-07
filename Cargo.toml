@@ -57,3 +57,9 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true
+
+[patch.crates-io]
+tupa-parser = { git = "https://github.com/marciopaiva/tupalang.git", rev = "23b65b6a621a7d260eb794fe6494f381985efcdc" }
+tupa-lexer = { git = "https://github.com/marciopaiva/tupalang.git", rev = "23b65b6a621a7d260eb794fe6494f381985efcdc" }
+
+
