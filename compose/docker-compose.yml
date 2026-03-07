@@ -23,6 +23,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -45,6 +47,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -85,6 +89,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -141,6 +147,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -189,6 +197,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -230,6 +240,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -264,6 +276,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -306,6 +321,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -343,6 +360,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     networks:
       - viper-net
     deploy:
@@ -365,3 +384,4 @@ volumes:
 networks:
   viper-net:
     driver: bridge
+

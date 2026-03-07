@@ -19,6 +19,22 @@ fail() {
   exit 1
 }
 
+run_docs_lint() {
+  local -a targets=(README.md docs/*.md)
+
+  if command -v markdownlint >/dev/null 2>&1; then
+    markdownlint "${targets[@]}"
+    return
+  fi
+
+  if command -v npx >/dev/null 2>&1; then
+    npx --yes markdownlint-cli@0.41.0 "${targets[@]}"
+    return
+  fi
+
+  fail "Docs lint requires markdownlint or npx"
+}
+
 cd "$(dirname "$0")/.."
 
 command -v cargo >/dev/null 2>&1 || fail "cargo not found"
@@ -45,12 +61,8 @@ step "Podman compose config validation"
 ./scripts/compose.sh config >/dev/null
 
 if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
-  if command -v markdownlint >/dev/null 2>&1; then
-    step "Markdown lint"
-    markdownlint "**/*.md"
-  else
-    fail "CI_LOCAL_STRICT_DOCS=1 but markdownlint is not installed"
-  fi
+  step "Markdown lint (batch 1)"
+  run_docs_lint
 else
   warn "Docs lint skipped (set CI_LOCAL_STRICT_DOCS=1 to enable)"
 fi

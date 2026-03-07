@@ -29,7 +29,6 @@ cp compose/.env.example compose/.env
 ./scripts/compose.sh up -d
 ```
 
-
 ### Modo host local (fallback de emergencia)
 ```bash
 ./scripts/compose-host.sh up -d
@@ -65,10 +64,7 @@ Para parar:
 ./scripts/compose.sh logs -f api
 ```
 
-### Parar ambiente
-```bash
-./scripts/compose.sh down
-```
+### Parar ambiente`n```bash`n./scripts/compose.sh down`n```n`nOpcional (timeout de shutdown):`n```bash`nCOMPOSE_DOWN_TIMEOUT=20 ./scripts/compose.sh down`n```
 
 ## CI
 GitHub Actions ativo em PR/push:
@@ -86,3 +82,8 @@ Workflow: `.github/workflows/ci.yml`
 - Infra e servicos sobem com Podman Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
+
+## Checklist de release
+- Operacao e rollback: docs/RELEASE_CHECKLIST.md
+- Validacao local estrita de docs:
+  - CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh

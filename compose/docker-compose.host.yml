@@ -22,6 +22,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -41,6 +43,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -77,6 +81,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -130,6 +136,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -175,6 +183,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -213,6 +223,8 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -244,6 +256,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -283,6 +298,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -317,6 +334,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
     deploy:
       resources:
         limits:
@@ -330,3 +349,4 @@ volumes:
   postgres_data:
   redis_data:
   tupa-cache:
+

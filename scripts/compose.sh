@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_DIR="$ROOT_DIR/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 COMPOSE_ENV_FILE="$COMPOSE_DIR/.env"
+DOWN_TIMEOUT="${COMPOSE_DOWN_TIMEOUT:-20}"
 
 if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
   COMPOSE_ENV_FILE="$COMPOSE_DIR/.env.example"
@@ -23,10 +24,45 @@ else
   exit 1
 fi
 
+run_compose() {
+  if [[ "$PROVIDER" == "podman-compose" ]]; then
+    podman-compose -f "$COMPOSE_FILE" "$@"
+  else
+    podman compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  fi
+}
+
+force_cleanup_viper() {
+  local names
+  names=$(podman ps -a --format '{{.Names}}' | grep '^vipertrade-' || true)
+  if [[ -n "$names" ]]; then
+    echo "WARN: forcing cleanup for lingering ViperTrade containers" >&2
+    while IFS= read -r name; do
+      [[ -z "$name" ]] && continue
+      podman stop -t 2 "$name" >/dev/null 2>&1 || true
+      podman rm -f "$name" >/dev/null 2>&1 || true
+    done <<< "$names"
+  fi
+
+  podman network rm compose_viper-net >/dev/null 2>&1 || true
+}
+
 cd "$COMPOSE_DIR"
 
-if [[ "$PROVIDER" == "podman-compose" ]]; then
-  exec podman-compose -f "$COMPOSE_FILE" "$@"
-else
-  exec podman compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+if [[ "${1:-}" == "down" ]]; then
+  set +e
+  run_compose down --timeout "$DOWN_TIMEOUT" "${@:2}"
+  rc=$?
+  set -e
+
+  if [[ $rc -ne 0 ]]; then
+    echo "WARN: compose down failed (rc=$rc), applying fallback cleanup" >&2
+    force_cleanup_viper
+    exit 0
+  fi
+
+  force_cleanup_viper
+  exit 0
 fi
+
+run_compose "$@"

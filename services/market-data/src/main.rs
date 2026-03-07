@@ -3,7 +3,32 @@ use std::error::Error;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use viper_domain::{MarketSignal, MarketSignalEvent};
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -12,15 +37,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("0.0.0.0:8081").await?;
     println!("Health check server running on :8081");
 
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let shutdown_signal_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_signal_tx.send(true);
+    });
+
+    let mut health_shutdown_rx = shutdown_rx.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok((mut socket, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                    if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+            tokio::select! {
+                _ = health_shutdown_rx.changed() => {
+                    break;
+                }
+                accept_result = listener.accept() => {
+                    if let Ok((mut socket, _)) = accept_result {
+                        tokio::spawn(async move {
+                            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                                eprintln!("failed to write to socket; err = {:?}", e);
+                            }
+                        });
                     }
-                });
+                }
             }
         }
     });
@@ -38,6 +78,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut price = 60000.0;
 
     loop {
+        if *shutdown_rx.borrow() {
+            println!("Received shutdown signal, stopping viper-market-data");
+            break;
+        }
+
         for symbol in &symbols {
             let change = (rand::random::<f64>() - 0.5) * 100.0;
             price += change;
@@ -54,13 +99,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let event = MarketSignalEvent::new(signal);
             let json = serde_json::to_string(&event)?;
-            conn.publish::<_, _, ()>("viper:market_data", json).await?;
+            if let Err(e) = conn.publish::<_, _, ()>("viper:market_data", json).await {
+                eprintln!("Failed to publish market data: {}", e);
+                break;
+            }
             println!(
                 "Published market event {} for {}",
                 event.event_id, event.signal.symbol
             );
         }
 
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                println!("Received shutdown signal, stopping viper-market-data");
+                break;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+        }
     }
+
+    let _ = shutdown_tx.send(true);
+
+    Ok(())
 }
