@@ -53,7 +53,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 step "Rust tests"
 cargo test --workspace --locked
 
-if [[ -x scripts/validate-pipeline.sh ]]; then
+if [[ "${CI_LOCAL_SKIP_PIPELINE:-0}" == "1" ]]; then
+  warn "Pipeline validation skipped (CI_LOCAL_SKIP_PIPELINE=1)"
+elif [[ -x scripts/validate-pipeline.sh ]]; then
   step "Tupa pipeline validation"
   ./scripts/validate-pipeline.sh
 else
