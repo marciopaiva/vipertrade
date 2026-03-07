@@ -1,0 +1,194 @@
+# config/system/profiles.yaml
+# ViperTrade v0.8.0-rc - Risk Profile Configuration
+
+# ═══════════════════════════════════════════════════════════
+# PERFIL CONSERVADOR
+# ═══════════════════════════════════════════════════════════
+
+CONSERVATIVE:
+  description: "Baixo risco - Ideal para iniciantes ou testes iniciais"
+  icon: "🛡️"
+  color: "#10b981"  # Verde
+  
+  trading_parameters:
+    risk_per_trade_pct: 0.75
+    stop_loss_pct: 0.01
+    take_profit_pct: 0.02
+    risk_reward_ratio: 2.0
+    max_leverage: 2
+    max_daily_loss_pct: 0.02
+    max_daily_trades: 5
+    max_open_positions: 1
+    max_total_exposure_pct: 0.30
+    max_single_pair_pct: 0.30
+  
+  position_sizing:
+    method: "atr_adjusted"
+    base_risk_usd: 0.75
+    min_position_usdt: 5.00
+    max_position_usdt: 15.00
+    atr_multiplier: 0.3
+    volatility_tiers:
+      low: { threshold: 0.015, multiplier: 1.0, max_leverage: 2 }
+      medium: { threshold: 0.03, multiplier: 0.5, max_leverage: 1.5 }
+      high: { threshold: 0.05, multiplier: 0.2, max_leverage: 1 }
+      extreme: { threshold: 0.05, multiplier: 0.1, max_leverage: 1 }
+  
+  trailing_stop:
+    activate_after_profit_pct: 0.01
+    initial_trail_pct: 0.005
+    ratchet_levels:
+      - at_profit_pct: 0.02
+        trail_pct: 0.008
+      - at_profit_pct: 0.04
+        trail_pct: 0.012
+      - at_profit_pct: 0.06
+        trail_pct: 0.02
+    move_to_break_even_at: 0.015
+  
+  circuit_breaker:
+    consecutive_losses_limit: 2
+    daily_loss_limit_pct: 0.02
+    volatility_spike_threshold: 0.30
+    flash_crash_threshold: 0.03
+  
+  recommended_for:
+    - "Primeiros 30 dias de operação"
+    - "Capital inicial < $100"
+    - "Baixa tolerância a risco"
+    - "Períodos de alta volatilidade"
+  
+  not_recommended_for:
+    - "Após 90 dias de performance consistente"
+    - "Capital > $500 com baixa tolerância a drawdown"
+
+# ═══════════════════════════════════════════════════════════
+# PERFIL MÉDIO (PADRÃO)
+# ═══════════════════════════════════════════════════════════
+
+MEDIUM:
+  description: "Equilibrado - Ideal para usuários com experiência moderada"
+  icon: "⚖️"
+  color: "#f59e0b"  # Amarelo/Laranja
+  
+  trading_parameters:
+    risk_per_trade_pct: 1.25
+    stop_loss_pct: 0.015
+    take_profit_pct: 0.03
+    risk_reward_ratio: 2.0
+    max_leverage: 2
+    max_daily_loss_pct: 0.03
+    max_daily_trades: 10
+    max_open_positions: 2
+    max_total_exposure_pct: 0.50
+    max_single_pair_pct: 0.40
+  
+  position_sizing:
+    method: "atr_adjusted"
+    base_risk_usd: 1.25
+    min_position_usdt: 5.00
+    max_position_usdt: 30.00
+    atr_multiplier: 0.5
+    volatility_tiers:
+      low: { threshold: 0.015, multiplier: 1.0, max_leverage: 2.5 }
+      medium: { threshold: 0.03, multiplier: 0.7, max_leverage: 2 }
+      high: { threshold: 0.05, multiplier: 0.4, max_leverage: 1.5 }
+      extreme: { threshold: 0.05, multiplier: 0.2, max_leverage: 1 }
+  
+  trailing_stop:
+    activate_after_profit_pct: 0.015
+    initial_trail_pct: 0.008
+    ratchet_levels:
+      - at_profit_pct: 0.03
+        trail_pct: 0.012
+      - at_profit_pct: 0.06
+        trail_pct: 0.02
+      - at_profit_pct: 0.10
+        trail_pct: 0.035
+    move_to_break_even_at: 0.02
+  
+  circuit_breaker:
+    consecutive_losses_limit: 3
+    daily_loss_limit_pct: 0.03
+    volatility_spike_threshold: 0.50
+    flash_crash_threshold: 0.05
+  
+  recommended_for:
+    - "Após 30 dias de operação estável"
+    - "Capital entre $100-$500"
+    - "Tolerância média a risco"
+    - "Condições normais de mercado"
+  
+  not_recommended_for:
+    - "Primeiros 30 dias (use Conservative)"
+    - "Alta volatilidade extrema (use Conservative)"
+
+# ═══════════════════════════════════════════════════════════
+# PERFIL AGRESSIVO
+# ═══════════════════════════════════════════════════════════
+
+AGGRESSIVE:
+  description: "Alto risco - Apenas para usuários experientes"
+  icon: "🚀"
+  color: "#ef4444"  # Vermelho
+  
+  trading_parameters:
+    risk_per_trade_pct: 2.00
+    stop_loss_pct: 0.025
+    take_profit_pct: 0.05
+    risk_reward_ratio: 2.0
+    max_leverage: 3
+    max_daily_loss_pct: 0.05
+    max_daily_trades: 15
+    max_open_positions: 3
+    max_total_exposure_pct: 0.70
+    max_single_pair_pct: 0.50
+  
+  position_sizing:
+    method: "atr_adjusted"
+    base_risk_usd: 2.00
+    min_position_usdt: 10.00
+    max_position_usdt: 50.00
+    atr_multiplier: 0.7
+    volatility_tiers:
+      low: { threshold: 0.015, multiplier: 1.0, max_leverage: 3 }
+      medium: { threshold: 0.03, multiplier: 0.8, max_leverage: 2.5 }
+      high: { threshold: 0.05, multiplier: 0.5, max_leverage: 2 }
+      extreme: { threshold: 0.05, multiplier: 0.3, max_leverage: 1 }
+  
+  trailing_stop:
+    activate_after_profit_pct: 0.02
+    initial_trail_pct: 0.01
+    ratchet_levels:
+      - at_profit_pct: 0.05
+        trail_pct: 0.02
+      - at_profit_pct: 0.10
+        trail_pct: 0.035
+      - at_profit_pct: 0.15
+        trail_pct: 0.05
+    move_to_break_even_at: 0.03
+  
+  circuit_breaker:
+    consecutive_losses_limit: 5
+    daily_loss_limit_pct: 0.05
+    volatility_spike_threshold: 0.70
+    flash_crash_threshold: 0.08
+  
+  warnings:
+    - "Não recomendado para iniciantes"
+    - "Drawdowns podem ser significativos"
+    - "Requer monitoramento frequente"
+    - "Não usar em períodos de alta volatilidade"
+  
+  recommended_for:
+    - "Após 90+ dias de operação consistente"
+    - "Capital > $500"
+    - "Alta tolerância a risco"
+    - "Condições favoráveis de mercado"
+  
+  requirements:
+    min_trading_days: 90
+    min_total_trades: 200
+    min_win_rate: 0.55
+    max_drawdown: 0.08
+    min_profit_factor: 1.5
