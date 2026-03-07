@@ -151,6 +151,14 @@ fn is_close_action(action: &str) -> bool {
     matches!(action, "CLOSE_LONG" | "CLOSE_SHORT")
 }
 
+fn close_action_to_position_side(action: &str) -> Option<&'static str> {
+    match action {
+        "CLOSE_LONG" => Some("Long"),
+        "CLOSE_SHORT" => Some("Short"),
+        _ => None,
+    }
+}
+
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
     let mut hasher = Sha256::new();
     let payload = serde_json::to_vec(event).unwrap_or_default();
@@ -379,6 +387,46 @@ async fn persist_trade(
     Ok(())
 }
 
+async fn close_open_trade(
+    state: &ExecutorState,
+    event: &StrategyDecisionEvent,
+) -> Result<Option<String>, sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(None);
+    };
+
+    let Some(side) = close_action_to_position_side(&event.decision.action) else {
+        return Ok(None);
+    };
+
+    let closed_trade_id: Option<String> = sqlx::query_scalar(
+        "WITH candidate AS (
+            SELECT trade_id
+            FROM trades
+            WHERE symbol = $1
+              AND side = $2
+              AND status = 'open'
+            ORDER BY opened_at DESC
+            LIMIT 1
+            FOR UPDATE
+        )
+        UPDATE trades t
+        SET status = 'closed',
+            close_reason = 'manual',
+            closed_at = NOW(),
+            updated_at = NOW()
+        FROM candidate c
+        WHERE t.trade_id = c.trade_id
+        RETURNING t.trade_id::text",
+    )
+    .bind(&event.decision.symbol)
+    .bind(side)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(closed_trade_id)
+}
+
 async fn submit_market_order(
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
@@ -511,7 +559,29 @@ async fn handle_decision_event(
             let mut status = "submitted";
 
             if is_close_action(&event.decision.action) {
-                status = "submitted_close";
+                match close_open_trade(state, &event).await {
+                    Ok(Some(trade_id)) => {
+                        println!(
+                            "Reconciled local close event_id={} trade_id={} symbol={} action={}",
+                            event.event_id, trade_id, event.decision.symbol, event.decision.action
+                        );
+                        status = "submitted_close";
+                    }
+                    Ok(None) => {
+                        eprintln!(
+                            "No local open trade to close event_id={} symbol={} action={}",
+                            event.event_id, event.decision.symbol, event.decision.action
+                        );
+                        status = "submitted_close_no_local_open";
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to reconcile local close event_id={} order_id={} err={}",
+                            event.event_id, order_id, e
+                        );
+                        status = "submitted_close_no_persist";
+                    }
+                }
             } else if let Err(e) = persist_trade(state, &event, &order_id).await {
                 eprintln!(
                     "Failed to persist trade for event_id={} order_id={} err={}",
@@ -700,6 +770,13 @@ mod tests {
         assert!(is_close_action("CLOSE_SHORT"));
         assert!(!is_close_action("ENTER_LONG"));
         assert!(!is_close_action("HOLD"));
+    }
+
+    #[test]
+    fn maps_close_action_to_position_side() {
+        assert_eq!(close_action_to_position_side("CLOSE_LONG"), Some("Long"));
+        assert_eq!(close_action_to_position_side("CLOSE_SHORT"), Some("Short"));
+        assert_eq!(close_action_to_position_side("ENTER_LONG"), None);
     }
 
     #[test]
