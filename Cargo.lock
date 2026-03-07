@@ -2888,11 +2888,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "viper-domain"
+version = "0.8.0-rc"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "viper-executor"
 version = "0.8.0-rc"
 dependencies = [
  "chrono",
- "redis 0.23.3",
+ "futures-util",
+ "redis 0.27.6",
  "reqwest",
  "serde",
  "serde_json",
@@ -2901,6 +2912,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "viper-domain",
 ]
 
 [[package]]
@@ -2914,6 +2926,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "viper-domain",
 ]
 
 [[package]]
@@ -2947,6 +2960,7 @@ dependencies = [
  "tupa-parser",
  "tupa-runtime",
  "tupa-typecheck",
+ "viper-domain",
 ]
 
 [[package]]

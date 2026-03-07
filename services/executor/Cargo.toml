@@ -11,7 +11,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
-redis = { version = "0.23", features = ["tokio-comp"] }
+redis = { workspace = true, features = ["tokio-comp"] }
+futures-util = "0.3"
+viper-domain = { workspace = true }

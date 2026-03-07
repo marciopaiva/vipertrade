@@ -1,0 +1,11 @@
+[package]
+name = "viper-domain"
+version = "0.8.0-rc"
+edition = "2021"
+description = "Shared domain contracts for ViperTrade event streams"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }

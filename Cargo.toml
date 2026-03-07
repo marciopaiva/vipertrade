@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/viper-domain",
     "services/market-data",
     "services/strategy", 
     "services/executor",
@@ -18,7 +19,9 @@ description = "Lead Trader Bot for Bybit Copy Trading Classic"
 repository = "https://github.com/seu-usuario/vipertrade"
 
 [workspace.dependencies]
-# Tupã v0.8.0
+viper-domain = { path = "crates/viper-domain" }
+
+# Tupa v0.8.0
 tupa-runtime = "0.8.0"
 tupa-codegen = "0.8.0"
 tupa-audit = "0.8.0"
@@ -57,4 +60,3 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true
-

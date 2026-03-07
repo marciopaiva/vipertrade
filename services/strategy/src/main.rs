@@ -1,6 +1,5 @@
 use futures_util::StreamExt;
 use redis::AsyncCommands;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::error::Error;
@@ -12,30 +11,7 @@ use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
 use tupa_parser::{parse_program, Item, PipelineDecl, Program};
 use tupa_runtime::Runtime;
 use tupa_typecheck::typecheck_program;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct MarketSignal {
-    symbol: String,
-    current_price: f64,
-    atr_14: f64,
-    volume_24h: i64,
-    funding_rate: f64,
-    trend_score: f64,
-    spread_pct: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StrategyDecision {
-    action: String,
-    symbol: String,
-    quantity: f64,
-    leverage: f64,
-    entry_price: f64,
-    stop_loss: f64,
-    take_profit: f64,
-    reason: String,
-    smart_copy_compatible: bool,
-}
+use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDecisionEvent};
 
 #[derive(Debug, Clone)]
 struct StrategyConfig {
@@ -465,15 +441,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while let Some(msg) = pubsub.on_message().next().await {
         let payload: String = msg.get_payload()?;
 
-        let signal: MarketSignal = match serde_json::from_str(&payload) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to parse market signal: {}", e);
-                continue;
+        let signal_event: MarketSignalEvent = match serde_json::from_str(&payload) {
+            Ok(evt) => evt,
+            Err(_) => {
+                let legacy_signal: MarketSignal = match serde_json::from_str(&payload) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to parse market signal event: {}", e);
+                        continue;
+                    }
+                };
+                MarketSignalEvent::new(legacy_signal)
             }
         };
 
-        let input = serde_json::to_value(&signal)?;
+        let input = serde_json::to_value(&signal_event.signal)?;
         let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
             Ok(v) => v,
             Err(e) => {
@@ -490,18 +472,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
             Ok(decision) => {
-                let decision_json = serde_json::to_string(&decision)?;
+                let decision_event =
+                    StrategyDecisionEvent::new(signal_event.event_id.clone(), decision);
+                let decision_json = serde_json::to_string(&decision_event)?;
                 publish_conn
                     .publish::<_, _, ()>("viper:decisions", decision_json)
                     .await?;
-                println!("Published decision for {}", signal.symbol);
+                println!(
+                    "Published decision event {} for {}",
+                    decision_event.event_id, signal_event.signal.symbol
+                );
             }
             Err(_) => {
                 let decision_json = serde_json::to_string(&decision_value)?;
                 publish_conn
                     .publish::<_, _, ()>("viper:decisions", decision_json)
                     .await?;
-                println!("Published decision (raw) for {}", signal.symbol);
+                println!(
+                    "Published decision (raw) for {}",
+                    signal_event.signal.symbol
+                );
             }
         }
     }
