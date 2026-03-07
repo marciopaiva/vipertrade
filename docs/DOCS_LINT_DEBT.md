@@ -3,29 +3,30 @@
 ## Batch 1 (completed)
 
 - Scope: `README.md`, `docs/*.md`
-- Rules temporarily relaxed: MD013, MD022, MD031, MD032, MD040, MD047, MD060
-- Outcome: docs lint executable in local CI without blocking delivery.
+- Rules temporarily relaxed to unblock local CI.
 
 ## Batch 2 (completed)
 
 - Re-enabled: MD022 and MD032.
-- Normalized heading/list spacing in:
-  - `README.md`
-  - `docs/ARCHITECTURE_V2.md`
-  - `docs/PHASE1_PLAN.md`
-  - `docs/RELEASE_CHECKLIST.md`
+- Normalized heading/list spacing in core docs.
 
-## Batch 3
+## Batch 3 (completed)
 
-- Re-enable MD031 and MD047.
-- Normalize fenced code block spacing and EOF newline style.
+- Re-enabled: MD031 and MD047.
+- Normalized fenced code block spacing and EOF newline style.
 
-## Batch 4
+## Batch 4 (completed)
 
-- Scope expansion to `VIPERTRADE_SPEC.md`.
-- Re-enable MD040 and MD060 for fenced code language and table formatting.
+- Scope expanded to `VIPERTRADE_SPEC.md` in local docs lint.
+- Re-enabled: MD040 and MD060.
 
-## Batch 5
+## Batch 5 (completed)
 
-- Re-enable MD013 with scoped exceptions only where justified.
-- Close this file when all rules are re-enabled.
+- Re-enabled MD013 globally with practical settings:
+  - `line_length=140`
+  - ignore code blocks and tables
+- No per-file exception currently required after line-length calibration.
+
+## Next
+
+- Gradually reduce the `VIPERTRADE_SPEC.md` MD013 exception by splitting/refactoring sections.

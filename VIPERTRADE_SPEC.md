@@ -14,7 +14,7 @@
 
 ## 📋 **Índice**
 
-```
+```text
 1. Visão Geral do Projeto
 2. Arquitetura do Sistema
 3. Configuração dos 4 Pares de Trading
@@ -43,12 +43,13 @@
 
 ### **1.1 Objetivo**
 
-ViperTrade é um **Lead Trader Bot** automatizado para a plataforma **Bybit Copy Trading Classic**. Ele executa estratégia própria de trading e permite que outros usuários da Bybit copiem suas operações automaticamente via Smart Copy Mode.
+ViperTrade é um **Lead Trader Bot** automatizado para a plataforma **Bybit Copy Trading Classic**.
+Ele executa estratégia própria de trading e permite que outros usuários da Bybit copiem suas operações automaticamente via Smart Copy Mode.
 
 ### **1.2 Diferenciais Competitivos**
 
 | Diferencial | Descrição | Benefício |
-|------------|-----------|-----------|
+| ----------- | ----------- | ----------- |
 | **Tupã Engine** | Linguagem de orquestração determinística | Auditabilidade completa, decisões reproduzíveis |
 | **Trailing Stop Dinâmico** | Ajusta progressivamente conforme lucro aumenta | Protege ganhos, deixa winners correrem |
 | **Smart Copy Optimized** | Position sizing previsível e estável | Menos falhas de copy, mais followers |
@@ -58,7 +59,7 @@ ViperTrade é um **Lead Trader Bot** automatizado para a plataforma **Bybit Copy
 ### **1.3 Metas de Performance (Públicas para Followers)**
 
 | Métrica | Target (30d) | Importância |
-|---------|-------------|-------------|
+| --------- | ------------- | ------------- |
 | Win Rate | 50-60% | Alta - atrai followers |
 | Max Drawdown | < 15% | Crítica - retém followers |
 | Profit Factor | > 1.5 | Alta - credibilidade |
@@ -87,7 +88,7 @@ position_sizing:
 
 ### **2.1 Diagrama de Componentes**
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                    VIPERTRADE v0.0.1                            │
 │                    (Lead Trader Bot)                            │
@@ -135,7 +136,7 @@ position_sizing:
 ### **2.2 Serviços Docker/Podman**
 
 | Serviço | Função | Memória | CPU | Restart |
-|---------|--------|---------|-----|---------|
+| --------- | -------- | --------- | ----- | --------- |
 | postgres | Database | 512MB | 0.5 | unless-stopped |
 | redis | Cache/PubSub | 128MB | 0.25 | unless-stopped |
 | market-data | WebSocket Subscriber | 256MB | 0.5 | unless-stopped |
@@ -147,7 +148,7 @@ position_sizing:
 
 ### **2.3 Fluxo de Decisão de Trading**
 
-```
+```text
 1. Bybit WebSocket → Market Data → Redis Pub/Sub
 2. Redis Pub/Sub → Tupã Strategy Engine → Decision (ENTER_LONG/ENTER_SHORT/HOLD/CLOSE)
 3. Decision → Risk Manager → Validate (daily loss, exposure, circuit breakers)
@@ -242,7 +243,7 @@ XLMUSDT:
 ### **4.1 Três Perfis de Risco**
 
 | Parâmetro | 🟢 Conservative | 🟡 Medium | 🔴 Aggressive |
-|-----------|----------------|-----------|---------------|
+| ----------- | ---------------- | ----------- | --------------- |
 | **Risk por Trade** | 0.75% | 1.25% | 2.00% |
 | **Stop Loss** | 1.0% | 1.5% | 2.5% |
 | **Take Profit** | 2.0% | 3.0% | 5.0% |
@@ -1178,7 +1179,10 @@ pipeline ViperSmartCopy @deterministic(seed=42) {
 
 ### **12.2. Integration Code (`services/strategy/src/main.rs`)**
 
-We use the standalone `tupa` binary for pipeline execution management, communicating via standard I/O (stdin/stdout). This ensures compatibility with the latest Tupã Runtime environment without complex FFI bindings.
+We use the standalone `tupa` binary for pipeline execution management,
+communicating via standard I/O (stdin/stdout).
+This ensures compatibility with the latest Tupã Runtime environment
+without complex FFI bindings.
 
 ```rust
 // Cargo.toml

@@ -41,6 +41,7 @@ cp compose/.env.example compose/.env
 ```
 
 Para parar:
+
 ```bash
 ./scripts/compose-host.sh down
 ```
@@ -73,7 +74,17 @@ Para parar:
 ./scripts/compose.sh logs -f api
 ```
 
-### Parar ambiente`n```bash`n./scripts/compose.sh down`n```n`nOpcional (timeout de shutdown):`n```bash`nCOMPOSE_DOWN_TIMEOUT=20 ./scripts/compose.sh down`n```
+### Parar ambiente
+
+```bash
+./scripts/compose.sh down
+```
+
+Opcional (timeout de shutdown):
+
+```bash
+COMPOSE_DOWN_TIMEOUT=20 ./scripts/compose.sh down
+```
 
 ## CI
 

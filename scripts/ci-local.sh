@@ -20,7 +20,7 @@ fail() {
 }
 
 run_docs_lint() {
-  local -a targets=(README.md docs/*.md)
+  local -a targets=(README.md docs/*.md VIPERTRADE_SPEC.md CONTRIBUTING.md)
 
   if command -v markdownlint >/dev/null 2>&1; then
     markdownlint "${targets[@]}"
@@ -61,7 +61,7 @@ step "Podman compose config validation"
 ./scripts/compose.sh config >/dev/null
 
 if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
-  step "Markdown lint (batch 1)"
+  step "Markdown lint (strict)"
   run_docs_lint
 else
   warn "Docs lint skipped (set CI_LOCAL_STRICT_DOCS=1 to enable)"
