@@ -3,6 +3,7 @@
 Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 
 ## Stack
+
 - Rust microservices (market-data, strategy, executor, monitor, backtest, api)
 - PostgreSQL + Redis
 - Web dashboard (Next.js)
@@ -11,11 +12,13 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 ## Ambiente recomendado (WSL Fedora + Podman)
 
 ### Pre-requisitos
+
 - WSL Fedora
 - Podman + podman-compose (via scripts/compose.sh)
 - Git
 
 ### Setup rapido
+
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
@@ -25,11 +28,13 @@ cp compose/.env.example compose/.env
 ```
 
 ### Subir ambiente
+
 ```bash
 ./scripts/compose.sh up -d
 ```
 
 ### Modo host local (fallback de emergencia)
+
 ```bash
 ./scripts/compose-host.sh up -d
 ./scripts/health-check.sh
@@ -41,11 +46,13 @@ Para parar:
 ```
 
 ### Corrigir rede bridge no WSL
+
 ```bash
 ./scripts/fix-podman-wsl-network.sh
 ```
 
 ### Validar runtime end-to-end
+
 ```bash
 ./scripts/validate-runtime.sh bridge
 # fallback local
@@ -53,11 +60,13 @@ Para parar:
 ```
 
 ### Validar saude
+
 ```bash
 ./scripts/health-check.sh
 ```
 
 ### Logs uteis
+
 ```bash
 ./scripts/compose.sh logs -f strategy
 ./scripts/compose.sh logs -f market-data
@@ -67,23 +76,28 @@ Para parar:
 ### Parar ambiente`n```bash`n./scripts/compose.sh down`n```n`nOpcional (timeout de shutdown):`n```bash`nCOMPOSE_DOWN_TIMEOUT=20 ./scripts/compose.sh down`n```
 
 ## CI
+
 GitHub Actions ativo em PR/push:
+
 - Rust: `cargo fmt --check` + `cargo check --workspace --locked`
 - Web: `yarn install --frozen-lockfile` + `yarn build`
 
 Workflow: `.github/workflows/ci.yml`
 
 ## Documentacao
+
 - Especificacao: `VIPERTRADE_SPEC.md`
 - Arquitetura: `docs/ARCHITECTURE_V2.md`
 - Plano fase 1: `docs/PHASE1_PLAN.md`
 
 ## Status atual (RC sem tag)
+
 - Infra e servicos sobem com Podman Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
 
 ## Checklist de release
+
 - Operacao e rollback: docs/RELEASE_CHECKLIST.md
 - Validacao local estrita de docs:
   - CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
