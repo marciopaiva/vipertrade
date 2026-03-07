@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marciopaiva/vipertrade/schemas/strategy-decision-event-v1.schema.json",
+  "title": "StrategyDecisionEventV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "source_event_id",
+    "timestamp",
+    "decision"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "source_event_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "minLength": 1 },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "symbol",
+        "quantity",
+        "leverage",
+        "entry_price",
+        "stop_loss",
+        "take_profit",
+        "reason",
+        "smart_copy_compatible"
+      ],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "quantity": { "type": "number", "minimum": 0 },
+        "leverage": { "type": "number", "minimum": 0 },
+        "entry_price": { "type": "number" },
+        "stop_loss": { "type": "number" },
+        "take_profit": { "type": "number" },
+        "reason": { "type": "string" },
+        "smart_copy_compatible": { "type": "boolean" }
+      }
+    }
+  }
+}

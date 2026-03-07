@@ -4,12 +4,15 @@ set -eu
 msg_file="$1"
 subject="$(head -n1 "$msg_file")"
 
-case "$subject" in
-  chore|chore:|docs|docs:|feat|feat:|fix|fix:)
-    echo "ERROR: generic commit subject '$subject' is not allowed." >&2
-    echo "Use: type(scope): concise message" >&2
-    exit 1
-    ;;
-esac
+# Require conventional commit with non-empty description.
+# Examples:
+#   feat(strategy): publish versioned decision events
+#   docs: update operations runbook
+if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|chore|refactor|test|ci|build|perf|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+  echo "ERROR: invalid commit subject '$subject'" >&2
+  echo "Use format: type(scope): concise message" >&2
+  echo "Example: feat(strategy): validate decision event contract" >&2
+  exit 1
+fi
 
 exit 0

@@ -91,6 +91,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let payload: String = msg.get_payload()?;
 
                 if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
+                    if let Err(err) = event.validate() {
+                        eprintln!(
+                            "Executor rejected invalid decision event contract event_id={} err={}",
+                            event.event_id, err
+                        );
+                        continue;
+                    }
+
                     println!(
                         "Executor received decision event {} from {} action={} symbol={}",
                         event.event_id, event.source_event_id, event.decision.action, event.decision.symbol
@@ -99,6 +107,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if let Ok(decision) = serde_json::from_str::<StrategyDecision>(&payload) {
+                    if let Err(err) = decision.validate() {
+                        eprintln!("Executor rejected invalid legacy decision err={}", err);
+                        continue;
+                    }
+
                     println!(
                         "Executor received legacy decision action={} symbol={}",
                         decision.action, decision.symbol
