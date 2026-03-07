@@ -955,131 +955,259 @@ alert_recipients:
 
 ## 1️⃣2️⃣ **Tupã Language Integration**
 
-### **12.1 Visão Geral**
+### **12.1. Pipeline Definition (`viper_smart_copy.tp`)**
 
-```yaml
-tupa_integration:
-  
-  usage_model: "embedded_library"
-  
-  components:
-    - "tupa-runtime"      # Execução de pipelines
-    - "tupa-codegen"      # Geração de ExecutionPlan
-    - "tupa-validator"    # Validação de constraints
-  
-  pipeline_files:
-    - "config/strategies/viper_smart_copy.tp"
-    - "config/strategies/viper_conservative.tp"
-    - "config/strategies/viper_medium.tp"
-    - "config/strategies/viper_aggressive.tp"
-  
-  integration_point: "services/strategy/src/tupa_engine.rs"
-  
-  cargo_dependencies:
-    - "tupa-runtime = { path = \"../tupalang/crates/tupa-runtime\" }"
-    - "tupa-codegen = { path = \"../tupalang/crates/tupa-codegen\" }"
-    - "tupa-validator = { path = \"../tupalang/crates/tupa-validator\" }"
-```
-
-### **12.2 Pipeline Tupã para Smart Copy**
-
-```tupã
+```tupa
 // config/strategies/viper_smart_copy.tp
+// ViperTrade v0.8.0-rc - Smart Copy Pipeline com Trailing Stop Dinâmico
+// Compatível com Tupã v0.8.0-rc (hybrid backend, native constraints)
+
+// ═══════════════════════════════════════════════════════════
+// IMPORTS NATIVOS DO TUPÃ
+// ═══════════════════════════════════════════════════════════
+
+@use tupa::constraints::{CircuitBreaker, RiskLimit, DrawdownLimit};
+@use tupa::audit::{log_decision, AuditLevel};
+@use tupa::effects::{IO, State};
+
+// ═══════════════════════════════════════════════════════════
+// TYPE DEFINITIONS
+// ═══════════════════════════════════════════════════════════
 
 type MarketSignal {
-  symbol: string,
-  current_price: f64,
-  atr_14: f64,
-  volume_24h: f64,
-  funding_rate: f64,
-  trend_score: f64,
-  spread_pct: f64,
+    symbol: string,
+    current_price: f64,
+    atr_14: f64,
+    volume_24h: i64,
+    funding_rate: f64,
+    trend_score: f64,      // -1.0 a +1.0
+    spread_pct: f64,
 }
 
 type SmartCopyConfig {
-  profile: string,
-  risk_per_trade_pct: f64,
-  stop_loss_pct: f64,
-  take_profit_pct: f64,
-  max_leverage: f64,
-  min_position_usdt: f64,
-  max_position_usdt: f64,
-  max_position_change_pct: f64,
+    profile: string,       // "CONSERVATIVE", "MEDIUM", "AGGRESSIVE"
+    risk_per_trade_pct: f64,
+    stop_loss_pct: f64,
+    take_profit_pct: f64,
+    max_leverage: f64,
+    min_position_usdt: f64,
+    max_position_usdt: f64,
+    max_position_change_pct: f64,
+}
+
+type TrailingConfig {
+    activate_after_profit_pct: f64,
+    initial_trail_pct: f64,
+    ratchet_levels: [RatchetLevel],
+    move_to_break_even_at: f64,
+}
+
+type RatchetLevel {
+    at_profit_pct: f64,
+    trail_pct: f64,
 }
 
 type TradeDecision {
-  action: string,
-  symbol: string,
-  quantity: f64,
-  leverage: f64,
-  entry_price: f64,
-  stop_loss: f64,
-  take_profit: f64,
-  reason: string,
-  smart_copy_compatible: bool,
+    action: string,        // "ENTER_LONG", "ENTER_SHORT", "HOLD"
+    symbol: string,
+    quantity: f64,
+    leverage: f64,
+    entry_price: f64,
+    stop_loss: f64,
+    take_profit: f64,
+    reason: string,
+    smart_copy_compatible: bool,
+    trailing_config: TrailingConfig,
 }
 
-extern fn viper::calculate_smart_copy_size(signal: MarketSignal, config: SmartCopyConfig, last_position_size: f64): f64;
-extern fn viper::check_smart_copy_constraints(size: f64, config: SmartCopyConfig): bool;
-extern fn viper::validate_entry_conditions(signal: MarketSignal, config: SmartCopyConfig): bool;
+// ═══════════════════════════════════════════════════════════
+// EXTERNAL FUNCTIONS (Implementadas em Rust)
+// ═══════════════════════════════════════════════════════════
+
+// Risk Management
+extern fn viper::calculate_smart_copy_size(signal: MarketSignal, config: SmartCopyConfig, last_position_size: f64) -> f64;
+extern fn viper::check_smart_copy_constraints(size: f64, config: SmartCopyConfig) -> bool;
+extern fn viper::validate_entry_conditions(signal: MarketSignal, config: SmartCopyConfig) -> bool;
+
+// Trailing Stop Dinâmico
+extern fn viper::calculate_dynamic_trail(current_profit_pct: f64, config: TrailingConfig) -> f64;
+extern fn viper::get_trailing_config(profile: string, symbol: string) -> TrailingConfig;
+
+// Risk Checks
+extern fn viper::check_daily_loss(current_loss: f64, max_daily_loss_pct: f64) -> bool;
+extern fn viper::check_consecutive_losses(count: i64, max_count: i64) -> bool;
+extern fn viper::validate_funding_rate(funding: f64, side: string, max_rate: f64) -> bool;
+extern fn viper::check_liquidation_distance(entry: f64, leverage: f64, side: string, min_distance: f64) -> bool;
+
+// ═══════════════════════════════════════════════════════════
+// PIPELINE PRINCIPAL
+// ═══════════════════════════════════════════════════════════
+
+@constraints(
+    circuit_breaker = { max_consecutive_failures: 3, timeout_seconds: 300 },
+    risk_limit = { max_drawdown_pct: 0.10, daily_loss_pct: 0.05 },
+    audit_level = "detailed"
+)
 
 pipeline ViperSmartCopy @deterministic(seed=42) {
-  input: MarketSignal,
-  
-  constraints: [
-    { metric: "win_rate_30d", ge: 0.50 },
-    { metric: "max_drawdown_pct", le: 0.10 },
-    { metric: "avg_risk_reward", ge: 2.0 },
-    { metric: "copy_success_rate", ge: 0.95 },
-    { metric: "avg_slippage_pct", le: 0.01 },
-  ],
-  
-  steps: [
-    step("validate_entry") {
-      viper::validate_entry_conditions(input, config)
-    },
+    input: MarketSignal,
     
-    step("calc_smart_size") {
-      viper::calculate_smart_copy_size(input, config, last_position_size)
-    },
-    
-    step("validate_size") {
-      viper::check_smart_copy_constraints(calc_smart_size, config)
-    },
-    
-    step("decision") {
-      if validate_entry && validate_size && calc_smart_size >= config.min_position_usdt {
-        let side = if input.trend_score > 0 { "Long" } else { "Short" };
-        {
-          action: if side == "Long" { "ENTER_LONG" } else { "ENTER_SHORT" },
-          symbol: input.symbol,
-          quantity: calc_smart_size,
-          leverage: config.max_leverage,
-          entry_price: input.current_price,
-          stop_loss: if side == "Long" { input.current_price * (1 - config.stop_loss_pct) } else { input.current_price * (1 + config.stop_loss_pct) },
-          take_profit: if side == "Long" { input.current_price * (1 + config.take_profit_pct) } else { input.current_price * (1 - config.take_profit_pct) },
-          reason: "smart_copy_optimized",
-          smart_copy_compatible: true
+    steps: [
+        // 1. Verificar perda diária acumulada
+        step("check_daily_loss") {
+            viper::check_daily_loss(current_daily_loss, config.max_daily_loss_pct)
+        },
+        
+        // 2. Verificar losses consecutivos (circuit breaker)
+        step("check_consecutive_losses") {
+            viper::check_consecutive_losses(consecutive_losses, 3)
+        },
+        
+        // 3. Validar condições de entrada (spread, volume, funding)
+        step("validate_entry") {
+            viper::validate_entry_conditions(input, config)
+        },
+        
+        // 4. Validar funding rate para direção do trade
+        step("check_funding") {
+            let side = if input.trend_score > 0 { "Long" } else { "Short" };
+            viper::validate_funding_rate(input.funding_rate, side, 0.015)
+        },
+        
+        // 5. Calcular tamanho da posição (ATR-adjusted + Smart Copy constraints)
+        step("calc_smart_size") {
+            viper::calculate_smart_copy_size(input, config, last_position_size)
+        },
+        
+        // 6. Validar constraints Smart Copy ($5-$30 range)
+        step("validate_size") {
+            viper::check_smart_copy_constraints(calc_smart_size, config)
+        },
+        
+        // 7. Obter configuração de Trailing Stop Dinâmico
+        step("get_trailing_config") {
+            viper::get_trailing_config(config.profile, input.symbol)
+        },
+        
+        // 8. Decisão final de trade
+        step("decision") {
+            if check_daily_loss && 
+               check_consecutive_losses && 
+               validate_entry && 
+               check_funding && 
+               validate_size && 
+               calc_smart_size >= config.min_position_usdt {
+                
+                let side = if input.trend_score > 0 { "Long" } else { "Short" };
+                let entry = input.current_price;
+                let sl = if side == "Long" {
+                    entry * (1 - config.stop_loss_pct)
+                } else {
+                    entry * (1 + config.stop_loss_pct)
+                };
+                let tp = if side == "Long" {
+                    entry * (1 + config.take_profit_pct)
+                } else {
+                    entry * (1 - config.take_profit_pct)
+                };
+                
+                {
+                    action: if side == "Long" { "ENTER_LONG" } else { "ENTER_SHORT" },
+                    symbol: input.symbol,
+                    quantity: calc_smart_size,
+                    leverage: config.max_leverage,
+                    entry_price: entry,
+                    stop_loss: sl,
+                    take_profit: tp,
+                    reason: "smart_copy_optimized",
+                    smart_copy_compatible: true,
+                    trailing_config: get_trailing_config
+                }
+            } else {
+                {
+                    action: "HOLD",
+                    symbol: input.symbol,
+                    quantity: 0,
+                    leverage: 0,
+                    entry_price: 0,
+                    stop_loss: 0,
+                    take_profit: 0,
+                    reason: "risk_constraints_not_met",
+                    smart_copy_compatible: false,
+                    trailing_config: get_trailing_config
+                }
+            }
+        },
+        
+        // 9. Audit logging nativo (Tupã v0.8.0-rc feature)
+        step("audit") {
+            log_decision(decision, level: AuditLevel::Detailed)
         }
-      } else {
-        { action: "HOLD", quantity: 0, smart_copy_compatible: false }
-      }
+    ],
+    
+    // ← Validação nativa com @validate (Tupã v0.8.0-rc syntax)
+    @validate {
+        // Garantir que stop loss sempre existe se ENTER
+        assert(decision.action == "HOLD" || decision.stop_loss > 0);
+        
+        // Garantir que risk/reward >= 2:1
+        let risk = (decision.entry_price - decision.stop_loss).abs();
+        let reward = (decision.take_profit - decision.entry_price).abs();
+        assert(decision.action == "HOLD" || (reward / risk) >= 2.0);
+        
+        // Garantir que posição está dentro dos limits Smart Copy
+        let position_value = decision.quantity * decision.entry_price;
+        assert(decision.action == "HOLD" || 
+               (position_value >= config.min_position_usdt && 
+                position_value <= config.max_position_usdt));
+        
+        // Garantir que trailing config foi carregado
+        assert(decision.trailing_config.activate_after_profit_pct > 0);
+    },
+    
+    output: {
+        decision: decision,
+        execution_hash: hash(decision),  // ← Nativo do Tupã
+        timestamp: now(),
+        pipeline_version: "0.8.0-rc",
+        smart_copy_mode: true,
+        constraints_satisfied: true  // ← Set by Tupã runtime
     }
-  ],
-  
-  validation: {
-    assert(decision.action == "HOLD" || decision.smart_copy_compatible == true);
-    assert(decision.action == "HOLD" || (decision.quantity * decision.entry_price >= config.min_position_usdt && decision.quantity * decision.entry_price <= config.max_position_usdt));
-  },
-  
-  output: {
-    decision: decision,
-    execution_hash: hash(decision),
-    timestamp: now(),
-    pipeline_version: "0.8.1",
-    smart_copy_mode: true
-  }
 }
+```
+
+### **12.2. Integration Code (`services/strategy/src/main.rs`)**
+
+We use the standalone `tupa` binary for pipeline execution management, communicating via standard I/O (stdin/stdout). This ensures compatibility with the latest Tupã Runtime environment without complex FFI bindings.
+
+```rust
+// Cargo.toml
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+```
+
+```rust
+// services/strategy/src/main.rs
+use std::process::Command;
+
+// Execute Tupã pipeline via CLI subprocess
+let mut child = Command::new("tupa")
+    .arg("run")
+    .arg("config/strategies/viper_smart_copy.tp")
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .spawn()?;
+
+// Write input JSON to stdin
+if let Some(mut stdin) = child.stdin.take() {
+    stdin.write_all(input_json.as_bytes())?;
+}
+
+// Read output JSON from stdout
+let output = child.wait_with_output()?;
+let decision: PipelineOutput = serde_json::from_slice(&output.stdout)?;
 ```
 
 ---
