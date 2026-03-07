@@ -1,75 +1,15 @@
-// config/strategies/viper_smart_copy.tp
-// Parser-compatible Smart Copy pipeline (v0.8.0-rc.5)
-
-// Types kept for documentation and future strict parser support
-type MarketSignal {
-    symbol: string,
-    current_price: f64,
-    atr_14: f64,
-    volume_24h: i64,
-    funding_rate: f64,
-    trend_score: f64,
-    spread_pct: f64,
-}
-
-type SmartCopyConfig {
-    profile: string,
-    risk_per_trade_pct: f64,
-    stop_loss_pct: f64,
-    take_profit_pct: f64,
-    max_leverage: f64,
-    min_position_usdt: f64,
-    max_position_usdt: f64,
-    max_position_change_pct: f64,
-}
-
-type TrailingConfig {
-    activate_after_profit_pct: f64,
-    initial_trail_pct: f64,
-    ratchet_levels: [RatchetLevel],
-    move_to_break_even_at: f64,
-}
-
-type RatchetLevel {
-    at_profit_pct: f64,
-    trail_pct: f64,
-}
-
-type TradeDecision {
-    action: string,
-    symbol: string,
-    quantity: f64,
-    leverage: f64,
-    entry_price: f64,
-    stop_loss: f64,
-    take_profit: f64,
-    reason: string,
-    smart_copy_compatible: bool,
-}
-
-// External contracts (currently ignored by parser, preserved for design)
-extern fn viper_calculate_smart_copy_size(signal: MarketSignal, config: SmartCopyConfig, last_position_size: f64) -> f64;
-extern fn viper_check_smart_copy_constraints(size: f64, config: SmartCopyConfig) -> bool;
-extern fn viper_validate_entry_conditions(signal: MarketSignal, config: SmartCopyConfig) -> bool;
-extern fn viper_calculate_dynamic_trail(current_profit_pct: f64, config: TrailingConfig) -> f64;
-extern fn viper_get_trailing_config(profile: string, symbol: string) -> TrailingConfig;
-extern fn viper_check_daily_loss(current_loss: f64, max_daily_loss_pct: f64) -> bool;
-extern fn viper_check_consecutive_losses(count: i64, max_count: i64) -> bool;
-extern fn viper_validate_funding_rate(funding: f64, side: string, max_rate: f64) -> bool;
-extern fn viper_check_liquidation_distance(entry: f64, leverage: f64, side: string, min_distance: f64) -> bool;
-
 pipeline ViperSmartCopy @deterministic(seed=42) {
     input: string,
     steps: [
-        step(check_daily_loss) { true },
-        step(check_consecutive_losses) { true },
-        step(validate_entry) { true },
-        step(check_funding) { true },
-        step(calc_smart_size) { 0.0 },
-        step(validate_size) { true },
-        step(get_trailing_config) { null },
-        step(decision) { null },
-        step(audit) { true }
+        step("check_daily_loss") { true },
+        step("check_consecutive_losses") { true },
+        step("validate_entry") { true },
+        step("check_funding") { true },
+        step("calc_smart_size") { 0.0 },
+        step("validate_size") { true },
+        step("get_trailing_config") { null },
+        step("decision") { null },
+        step("audit") { true }
     ],
     output: string
 }
