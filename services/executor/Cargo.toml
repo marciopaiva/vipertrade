@@ -17,3 +17,6 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 redis = { workspace = true, features = ["tokio-comp"] }
 futures-util = "0.3"
 viper-domain = { workspace = true }
+sha2 = { workspace = true }
+hmac = "0.12"
+hex = "0.4"

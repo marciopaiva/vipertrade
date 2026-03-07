@@ -1,9 +1,80 @@
 use futures_util::StreamExt;
+use hmac::{Hmac, Mac};
+use redis::AsyncCommands;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use std::collections::HashSet;
 use std::error::Error;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{watch, Mutex};
 use viper_domain::{StrategyDecision, StrategyDecisionEvent};
+
+type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Debug, Clone)]
+struct ExecutorConfig {
+    redis_url: String,
+    db_url: String,
+    bybit_env: String,
+    bybit_api_key: String,
+    bybit_api_secret: String,
+    recv_window: String,
+    live_orders_enabled: bool,
+}
+
+#[derive(Clone)]
+struct ExecutorState {
+    db_pool: Option<PgPool>,
+    processed_in_memory: Arc<Mutex<HashSet<String>>>,
+}
+
+impl ExecutorConfig {
+    fn from_env() -> Self {
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| "redis://vipertrade-redis:6379".to_string());
+
+        let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            let host = std::env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());
+            let port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
+            let name = std::env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
+            let user = std::env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
+            let pass = std::env::var("DB_PASSWORD")
+                .unwrap_or_else(|_| "viper_secret_password".to_string());
+            format!("postgres://{}:{}@{}:{}/{}", user, pass, host, port, name)
+        });
+
+        let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+        let bybit_api_key = std::env::var("BYBIT_API_KEY").unwrap_or_default();
+        let bybit_api_secret = std::env::var("BYBIT_API_SECRET").unwrap_or_default();
+        let recv_window = std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
+        let live_orders_enabled = std::env::var("EXECUTOR_ENABLE_LIVE_ORDERS")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
+
+        Self {
+            redis_url,
+            db_url,
+            bybit_env,
+            bybit_api_key,
+            bybit_api_secret,
+            recv_window,
+            live_orders_enabled,
+        }
+    }
+
+    fn bybit_base_url(&self) -> &'static str {
+        if self.bybit_env.eq_ignore_ascii_case("mainnet") {
+            "https://api.bybit.com"
+        } else {
+            "https://api-testnet.bybit.com"
+        }
+    }
+}
 
 async fn shutdown_signal() {
     #[cfg(unix)]
@@ -29,9 +100,327 @@ async fn shutdown_signal() {
     }
 }
 
+fn now_ms() -> String {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    ms.to_string()
+}
+
+fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
+    mac.update(payload.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+fn action_to_side(action: &str) -> Option<&'static str> {
+    match action {
+        "ENTER_LONG" => Some("Buy"),
+        "ENTER_SHORT" => Some("Sell"),
+        _ => None,
+    }
+}
+
+fn decision_hash(event: &StrategyDecisionEvent) -> String {
+    let mut hasher = Sha256::new();
+    let payload = serde_json::to_vec(event).unwrap_or_default();
+    hasher.update(payload);
+    hex::encode(hasher.finalize())
+}
+
+async fn already_processed(
+    state: &ExecutorState,
+    source_event_id: &str,
+) -> Result<bool, sqlx::Error> {
+    if let Some(pool) = &state.db_pool {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1
+                FROM system_events
+                WHERE event_type = 'executor_event_processed'
+                  AND data->>'source_event_id' = $1
+            )",
+        )
+        .bind(source_event_id)
+        .fetch_one(pool)
+        .await?;
+
+        if exists {
+            return Ok(true);
+        }
+    }
+
+    let seen = state.processed_in_memory.lock().await;
+    Ok(seen.contains(source_event_id))
+}
+
+async fn remember_processed(state: &ExecutorState, source_event_id: &str) {
+    let mut seen = state.processed_in_memory.lock().await;
+    seen.insert(source_event_id.to_string());
+}
+
+async fn mark_processed(
+    state: &ExecutorState,
+    source_event_id: &str,
+    event: &StrategyDecisionEvent,
+    status: &str,
+    bybit_order_id: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    if let Some(pool) = &state.db_pool {
+        let data = json!({
+            "source_event_id": source_event_id,
+            "decision_event_id": event.event_id,
+            "action": event.decision.action,
+            "symbol": event.decision.symbol,
+            "status": status,
+            "bybit_order_id": bybit_order_id,
+            "error": error,
+        });
+
+        sqlx::query(
+            "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind("executor_event_processed")
+        .bind(if status == "error" { "error" } else { "info" })
+        .bind("trade")
+        .bind(data)
+        .bind(&event.decision.symbol)
+        .bind(&event.schema_version)
+        .bind(decision_hash(event))
+        .execute(pool)
+        .await?;
+    }
+
+    remember_processed(state, source_event_id).await;
+    Ok(())
+}
+
+async fn persist_trade(
+    state: &ExecutorState,
+    event: &StrategyDecisionEvent,
+    bybit_order_id: &str,
+) -> Result<(), sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(());
+    };
+
+    let side = if event.decision.action == "ENTER_LONG" {
+        "Long"
+    } else {
+        "Short"
+    };
+
+    let hash = decision_hash(event);
+
+    sqlx::query(
+        "INSERT INTO trades (
+            order_link_id,
+            bybit_order_id,
+            symbol,
+            side,
+            quantity,
+            entry_price,
+            leverage,
+            status,
+            decision_hash,
+            smart_copy_compatible,
+            pipeline_version,
+            paper_trade
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,$10,$11)
+        ON CONFLICT (order_link_id) DO NOTHING",
+    )
+    .bind(&event.event_id)
+    .bind(bybit_order_id)
+    .bind(&event.decision.symbol)
+    .bind(side)
+    .bind(event.decision.quantity)
+    .bind(event.decision.entry_price)
+    .bind(event.decision.leverage)
+    .bind(hash)
+    .bind(event.decision.smart_copy_compatible)
+    .bind(&event.schema_version)
+    .bind(false)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn submit_market_order(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    event: &StrategyDecisionEvent,
+) -> Result<String, Box<dyn Error>> {
+    let side = action_to_side(&event.decision.action).ok_or("unsupported action for order")?;
+
+    let body = json!({
+        "category": "linear",
+        "symbol": event.decision.symbol,
+        "side": side,
+        "orderType": "Market",
+        "qty": format!("{}", event.decision.quantity),
+        "orderLinkId": event.event_id,
+    });
+
+    let body_str = serde_json::to_string(&body)?;
+    let ts = now_ms();
+    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, body_str);
+    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
+
+    let url = format!("{}/v5/order/create", cfg.bybit_base_url());
+    let res = http
+        .post(url)
+        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
+        .header("X-BAPI-SIGN", sign)
+        .header("X-BAPI-SIGN-TYPE", "2")
+        .header("X-BAPI-TIMESTAMP", ts)
+        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
+        .header("Content-Type", "application/json")
+        .body(body_str)
+        .send()
+        .await?;
+
+    let status = res.status();
+    let value: Value = res.json().await?;
+
+    if !status.is_success() {
+        return Err(format!("bybit http={} body={}", status, value).into());
+    }
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let order_id = value
+        .get("result")
+        .and_then(|r| r.get("orderId"))
+        .and_then(Value::as_str)
+        .ok_or("missing result.orderId")?
+        .to_string();
+
+    Ok(order_id)
+}
+
+async fn handle_decision_event(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    event: StrategyDecisionEvent,
+) -> Result<(), Box<dyn Error>> {
+    event
+        .validate()
+        .map_err(|e| format!("invalid event contract: {e}"))?;
+
+    if already_processed(state, &event.event_id).await? {
+        println!("Skipping duplicate decision event_id={}", event.event_id);
+        return Ok(());
+    }
+
+    if event.decision.action == "HOLD" {
+        mark_processed(state, &event.event_id, &event, "ignored_hold", None, None).await?;
+        return Ok(());
+    }
+
+    if action_to_side(&event.decision.action).is_none() {
+        let err = format!("unsupported action {}", event.decision.action);
+        mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+        return Ok(());
+    }
+
+    if !cfg.live_orders_enabled {
+        println!(
+            "Live orders disabled; dry-run for event_id={} action={} symbol={}",
+            event.event_id, event.decision.action, event.decision.symbol
+        );
+        mark_processed(state, &event.event_id, &event, "dry_run", None, None).await?;
+        return Ok(());
+    }
+
+    if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
+        let err = "missing BYBIT_API_KEY/BYBIT_API_SECRET".to_string();
+        mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+        return Ok(());
+    }
+
+    match submit_market_order(http, cfg, &event).await {
+        Ok(order_id) => {
+            println!(
+                "Submitted Bybit order event_id={} order_id={} symbol={} action={}",
+                event.event_id, order_id, event.decision.symbol, event.decision.action
+            );
+
+            if let Err(e) = persist_trade(state, &event, &order_id).await {
+                eprintln!(
+                    "Failed to persist trade for event_id={} order_id={} err={}",
+                    event.event_id, order_id, e
+                );
+            }
+
+            mark_processed(
+                state,
+                &event.event_id,
+                &event,
+                "submitted",
+                Some(&order_id),
+                None,
+            )
+            .await?;
+        }
+        Err(e) => {
+            let err = e.to_string();
+            eprintln!(
+                "Failed to submit Bybit order event_id={} action={} symbol={} err={}",
+                event.event_id, event.decision.action, event.decision.symbol, err
+            );
+            mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Starting viper-executor");
+
+    let cfg = ExecutorConfig::from_env();
+    println!(
+        "Executor mode env={} live_orders_enabled={} base_url={}",
+        cfg.bybit_env,
+        cfg.live_orders_enabled,
+        cfg.bybit_base_url()
+    );
+
+    let db_pool = match PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&cfg.db_url)
+        .await
+    {
+        Ok(pool) => {
+            println!("Executor database connection: enabled");
+            Some(pool)
+        }
+        Err(err) => {
+            eprintln!(
+                "Executor database connection unavailable (running with in-memory idempotency only): {}",
+                err
+            );
+            None
+        }
+    };
+
+    let state = ExecutorState {
+        db_pool,
+        processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+    };
 
     let listener = TcpListener::bind("0.0.0.0:8083").await?;
     println!("Health check server running on :8083");
@@ -64,17 +453,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://vipertrade-redis:6379".to_string());
-    println!("Connecting to Redis at {}", redis_url);
-
-    let client = redis::Client::open(redis_url)?;
+    println!("Connecting to Redis at {}", cfg.redis_url);
+    let redis_client = redis::Client::open(cfg.redis_url.clone())?;
+    let mut ack_conn = redis_client.get_multiplexed_async_connection().await?;
     #[allow(deprecated)]
-    let mut pubsub = client.get_async_connection().await?.into_pubsub();
+    let mut pubsub = redis_client.get_async_connection().await?.into_pubsub();
     pubsub.subscribe("viper:decisions").await?;
     println!("Subscribed to viper:decisions");
 
     let mut messages = pubsub.on_message();
+    let http = reqwest::Client::new();
 
     loop {
         tokio::select! {
@@ -91,18 +479,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let payload: String = msg.get_payload()?;
 
                 if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
-                    if let Err(err) = event.validate() {
-                        eprintln!(
-                            "Executor rejected invalid decision event contract event_id={} err={}",
-                            event.event_id, err
-                        );
-                        continue;
+                    if let Err(e) = handle_decision_event(&state, &http, &cfg, event.clone()).await {
+                        eprintln!("Executor failed handling event_id={} err={}", event.event_id, e);
                     }
 
-                    println!(
-                        "Executor received decision event {} from {} action={} symbol={}",
-                        event.event_id, event.source_event_id, event.decision.action, event.decision.symbol
-                    );
+                    let _ = ack_conn.publish::<_, _, ()>("viper:executor_events", payload).await;
                     continue;
                 }
 
@@ -112,8 +493,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
-                    println!(
-                        "Executor received legacy decision action={} symbol={}",
+                    eprintln!(
+                        "Executor received legacy decision without event envelope; ignored action={} symbol={}",
                         decision.action, decision.symbol
                     );
                     continue;
@@ -127,4 +508,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _ = shutdown_tx.send(true);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_action_to_side() {
+        assert_eq!(action_to_side("ENTER_LONG"), Some("Buy"));
+        assert_eq!(action_to_side("ENTER_SHORT"), Some("Sell"));
+        assert_eq!(action_to_side("HOLD"), None);
+    }
+
+    #[test]
+    fn signs_payload() {
+        let sig = bybit_sign("secret", "payload").expect("must sign");
+        assert!(!sig.is_empty());
+        assert_eq!(sig.len(), 64);
+    }
 }

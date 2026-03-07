@@ -1,4 +1,4 @@
-# ViperTrade v0.8.1
+# 🐍 ViperTrade
 
 Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 
