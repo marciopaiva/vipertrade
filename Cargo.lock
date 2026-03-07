@@ -2661,8 +2661,7 @@ checksum = "d2599bd6c20c4a5e61a9d7969e000961d480db362fef9f06c2231fbbe6bbcd54"
 [[package]]
 name = "tupa-lexer"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2b442d5d016a7c21a1772a0be6ff7241387264e818314e91d8f9a28352655ba"
+source = "git+https://github.com/marciopaiva/tupalang.git?rev=23b65b6a621a7d260eb794fe6494f381985efcdc#23b65b6a621a7d260eb794fe6494f381985efcdc"
 dependencies = [
  "nom",
  "serde",
@@ -2673,8 +2672,7 @@ dependencies = [
 [[package]]
 name = "tupa-parser"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "743c815062a0432082860b018abeb4ec12b3f8256dc5ccb206b17b0e71cbb864"
+source = "git+https://github.com/marciopaiva/tupalang.git?rev=23b65b6a621a7d260eb794fe6494f381985efcdc#23b65b6a621a7d260eb794fe6494f381985efcdc"
 dependencies = [
  "serde",
  "thiserror 1.0.69",

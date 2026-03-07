@@ -7,7 +7,7 @@ WORKDIR /usr/src/app
 ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config libssl-dev python3 python3-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace manifest
 COPY Cargo.toml Cargo.lock ./
@@ -26,7 +26,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y ca-certificates libssl3 curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3.11 && rm -rf /var/lib/apt/lists/*
 
 # Install Tupã CLI
 ARG TUPA_VERSION=v0.8.0

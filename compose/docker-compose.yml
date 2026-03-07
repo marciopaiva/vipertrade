@@ -98,7 +98,7 @@ services:
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       PROFILE_CONFIG: /app/config/system/profiles.yaml
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: ${PYO3_USE_ABI3_FORWARD_COMPATIBILITY:-1}
-      TUPA_PIPELINE_PATH: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_smart_copy.tp}
+      TUPA_PIPELINE_PATH: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_runtime_minimal.tp}
       TUPA_AUDIT_PATH: /app/logs/audit
       REDIS_URL: redis://localhost:6379
       TUPA_SEED: ${TUPA_SEED:-42}
