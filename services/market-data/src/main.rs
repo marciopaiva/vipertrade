@@ -1,9 +1,9 @@
-use tokio::net::TcpListener;
-use tokio::io::AsyncWriteExt;
-use std::error::Error;
 use redis::AsyncCommands;
 use serde::Serialize;
+use std::error::Error;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 
 #[derive(Debug, Serialize)]
 struct MarketSignal {
@@ -39,9 +39,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Redis connection
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
     println!("Connecting to Redis at {}", redis_url);
-    
+
     let client = redis::Client::open(redis_url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
@@ -55,7 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Simple random walk
             let change = (rand::random::<f64>() - 0.5) * 100.0;
             price += change;
-            
+
             let signal = MarketSignal {
                 symbol: symbol.to_string(),
                 current_price: price,
