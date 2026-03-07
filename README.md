@@ -12,7 +12,7 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 
 ### Pre-requisitos
 - WSL Fedora
-- Podman + podman-compose
+- Podman + podman-compose (via scripts/compose.sh)
 - Git
 
 ### Setup rapido
@@ -26,7 +26,7 @@ cp compose/.env.example compose/.env
 
 ### Subir ambiente
 ```bash
-podman-compose -f compose/docker-compose.yml up -d
+./scripts/compose.sh up -d
 ```
 
 ### Validar saude
@@ -36,14 +36,14 @@ podman-compose -f compose/docker-compose.yml up -d
 
 ### Logs uteis
 ```bash
-podman logs -f vipertrade-strategy
-podman logs -f vipertrade-market-data
-podman logs -f vipertrade-api
+./scripts/compose.sh logs -f strategy
+./scripts/compose.sh logs -f market-data
+./scripts/compose.sh logs -f api
 ```
 
 ### Parar ambiente
 ```bash
-podman-compose -f compose/docker-compose.yml down
+./scripts/compose.sh down
 ```
 
 ## CI
