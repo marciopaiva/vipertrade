@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "fixture-enter-short-1",
+  "source_event_id": "fixture-source-2",
+  "timestamp": "2026-03-07T00:00:00Z",
+  "decision": {
+    "action": "ENTER_SHORT",
+    "symbol": "DOGEUSDT",
+    "quantity": 10.0,
+    "leverage": 2.0,
+    "entry_price": 1.0,
+    "stop_loss": 1.02,
+    "take_profit": 0.96,
+    "reason": "fixture",
+    "smart_copy_compatible": true
+  }
+}

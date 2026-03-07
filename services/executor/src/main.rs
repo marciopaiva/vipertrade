@@ -141,10 +141,14 @@ fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
 
 fn action_to_side(action: &str) -> Option<&'static str> {
     match action {
-        "ENTER_LONG" => Some("Buy"),
-        "ENTER_SHORT" => Some("Sell"),
+        "ENTER_LONG" | "CLOSE_SHORT" => Some("Buy"),
+        "ENTER_SHORT" | "CLOSE_LONG" => Some("Sell"),
         _ => None,
     }
+}
+
+fn is_close_action(action: &str) -> bool {
+    matches!(action, "CLOSE_LONG" | "CLOSE_SHORT")
 }
 
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
@@ -382,6 +386,8 @@ async fn submit_market_order(
 ) -> Result<String, Box<dyn Error>> {
     let side = action_to_side(&event.decision.action).ok_or("unsupported action for order")?;
 
+    let close_action = is_close_action(&event.decision.action);
+
     let body = json!({
         "category": "linear",
         "symbol": event.decision.symbol,
@@ -389,6 +395,8 @@ async fn submit_market_order(
         "orderType": "Market",
         "qty": format!("{}", event.decision.quantity),
         "orderLinkId": event.event_id,
+        "reduceOnly": close_action,
+        "closeOnTrigger": close_action,
     });
 
     let body_str = serde_json::to_string(&body)?;
@@ -500,18 +508,23 @@ async fn handle_decision_event(
                 event.event_id, order_id, event.decision.symbol, event.decision.action
             );
 
-            if let Err(e) = persist_trade(state, &event, &order_id).await {
+            let mut status = "submitted";
+
+            if is_close_action(&event.decision.action) {
+                status = "submitted_close";
+            } else if let Err(e) = persist_trade(state, &event, &order_id).await {
                 eprintln!(
                     "Failed to persist trade for event_id={} order_id={} err={}",
                     event.event_id, order_id, e
                 );
+                status = "submitted_no_persist";
             }
 
             mark_processed(
                 state,
                 &event.event_id,
                 &event,
-                "submitted",
+                status,
                 Some(&order_id),
                 None,
             )
@@ -676,7 +689,17 @@ mod tests {
     fn maps_action_to_side() {
         assert_eq!(action_to_side("ENTER_LONG"), Some("Buy"));
         assert_eq!(action_to_side("ENTER_SHORT"), Some("Sell"));
+        assert_eq!(action_to_side("CLOSE_LONG"), Some("Sell"));
+        assert_eq!(action_to_side("CLOSE_SHORT"), Some("Buy"));
         assert_eq!(action_to_side("HOLD"), None);
+    }
+
+    #[test]
+    fn detects_close_actions() {
+        assert!(is_close_action("CLOSE_LONG"));
+        assert!(is_close_action("CLOSE_SHORT"));
+        assert!(!is_close_action("ENTER_LONG"));
+        assert!(!is_close_action("HOLD"));
     }
 
     #[test]

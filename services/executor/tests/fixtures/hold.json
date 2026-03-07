@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "fixture-hold-1",
+  "source_event_id": "fixture-source-3",
+  "timestamp": "2026-03-07T00:00:00Z",
+  "decision": {
+    "action": "HOLD",
+    "symbol": "DOGEUSDT",
+    "quantity": 0.0,
+    "leverage": 0.0,
+    "entry_price": 0.0,
+    "stop_loss": 0.0,
+    "take_profit": 0.0,
+    "reason": "fixture",
+    "smart_copy_compatible": false
+  }
+}
