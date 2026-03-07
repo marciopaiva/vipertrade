@@ -527,6 +527,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(decision) => {
                         let decision_event =
                             StrategyDecisionEvent::new(signal_event.event_id.clone(), decision);
+
+                        if let Err(err) = decision_event.validate() {
+                            eprintln!(
+                                "Invalid strategy decision event contract for {}: {}",
+                                signal_event.signal.symbol, err
+                            );
+                            continue;
+                        }
+
                         let decision_json = serde_json::to_string(&decision_event)?;
                         publish_conn
                             .publish::<_, _, ()>("viper:decisions", decision_json)
@@ -536,14 +545,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             decision_event.event_id, signal_event.signal.symbol
                         );
                     }
-                    Err(_) => {
-                        let decision_json = serde_json::to_string(&decision_value)?;
-                        publish_conn
-                            .publish::<_, _, ()>("viper:decisions", decision_json)
-                            .await?;
-                        println!(
-                            "Published decision (raw) for {}",
-                            signal_event.signal.symbol
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to parse strategy decision for {}: {}",
+                            signal_event.signal.symbol, e
                         );
                     }
                 }

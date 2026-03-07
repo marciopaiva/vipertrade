@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 pub const SCHEMA_VERSION: &str = "1.0";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarketSignal {
     pub symbol: String,
     pub current_price: f64,
@@ -15,7 +15,7 @@ pub struct MarketSignal {
     pub spread_pct: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarketSignalEvent {
     pub schema_version: String,
     pub event_id: String,
@@ -32,9 +32,25 @@ impl MarketSignalEvent {
             signal,
         }
     }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported market signal schema_version '{}' expected '{}'",
+                self.schema_version, SCHEMA_VERSION
+            ));
+        }
+        if self.event_id.trim().is_empty() {
+            return Err("market signal event_id is empty".to_string());
+        }
+        if self.signal.symbol.trim().is_empty() {
+            return Err("market signal symbol is empty".to_string());
+        }
+        Ok(())
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StrategyDecision {
     pub action: String,
     pub symbol: String,
@@ -47,7 +63,25 @@ pub struct StrategyDecision {
     pub smart_copy_compatible: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl StrategyDecision {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.action.trim().is_empty() {
+            return Err("strategy decision action is empty".to_string());
+        }
+        if self.symbol.trim().is_empty() {
+            return Err("strategy decision symbol is empty".to_string());
+        }
+        if !(self.quantity.is_finite() && self.quantity >= 0.0) {
+            return Err("strategy decision quantity must be finite and >= 0".to_string());
+        }
+        if !(self.leverage.is_finite() && self.leverage >= 0.0) {
+            return Err("strategy decision leverage must be finite and >= 0".to_string());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StrategyDecisionEvent {
     pub schema_version: String,
     pub event_id: String,
@@ -65,5 +99,81 @@ impl StrategyDecisionEvent {
             timestamp: Utc::now().to_rfc3339(),
             decision,
         }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported strategy decision schema_version '{}' expected '{}'",
+                self.schema_version, SCHEMA_VERSION
+            ));
+        }
+        if self.event_id.trim().is_empty() {
+            return Err("strategy decision event_id is empty".to_string());
+        }
+        if self.source_event_id.trim().is_empty() {
+            return Err("strategy decision source_event_id is empty".to_string());
+        }
+        self.decision.validate()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_signal() -> MarketSignal {
+        MarketSignal {
+            symbol: "DOGEUSDT".to_string(),
+            current_price: 0.17,
+            atr_14: 0.01,
+            volume_24h: 100_000_000,
+            funding_rate: 0.001,
+            trend_score: 0.7,
+            spread_pct: 0.0005,
+        }
+    }
+
+    fn sample_decision() -> StrategyDecision {
+        StrategyDecision {
+            action: "ENTER_LONG".to_string(),
+            symbol: "DOGEUSDT".to_string(),
+            quantity: 100.0,
+            leverage: 2.0,
+            entry_price: 0.17,
+            stop_loss: 0.165,
+            take_profit: 0.18,
+            reason: "trend_up".to_string(),
+            smart_copy_compatible: true,
+        }
+    }
+
+    #[test]
+    fn market_signal_event_round_trip_and_validate() {
+        let event = MarketSignalEvent::new(sample_signal());
+        event.validate().expect("event must validate");
+
+        let json = serde_json::to_string(&event).expect("serialize");
+        let decoded: MarketSignalEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.schema_version, SCHEMA_VERSION);
+        decoded.validate().expect("decoded event must validate");
+    }
+
+    #[test]
+    fn strategy_decision_event_round_trip_and_validate() {
+        let event = StrategyDecisionEvent::new("src-evt-1".to_string(), sample_decision());
+        event.validate().expect("event must validate");
+
+        let json = serde_json::to_string(&event).expect("serialize");
+        let decoded: StrategyDecisionEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.schema_version, SCHEMA_VERSION);
+        decoded.validate().expect("decoded event must validate");
+    }
+
+    #[test]
+    fn invalid_schema_version_is_rejected() {
+        let mut event = StrategyDecisionEvent::new("src-evt-1".to_string(), sample_decision());
+        event.schema_version = "2.0".to_string();
+        assert!(event.validate().is_err());
     }
 }

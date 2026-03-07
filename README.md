@@ -97,19 +97,29 @@ Workflow: `.github/workflows/ci.yml`
 
 ## Documentacao
 
-- Especificacao modular: `docs/spec/README.md`
-- Especificacao legado: `VIPERTRADE_SPEC.md`
-- Arquitetura: `docs/ARCHITECTURE_V2.md`
-- Plano fase 1: `docs/PHASE1_PLAN.md`
+- Spec modular index: `docs/spec/README.md`
+- Spec modules:
+  - `docs/spec/01-overview.md`
+  - `docs/spec/02-architecture.md`
+  - `docs/spec/03-risk-and-profiles.md`
+  - `docs/spec/04-bybit-integration.md`
+  - `docs/spec/05-runtime-and-operations.md`
+  - `docs/spec/06-validation-and-checklists.md`
+- Operations runbook: `docs/operations/RUNBOOK.md`
+- Event contract schema: `docs/contracts/strategy-decision-event-v1.schema.json`
+- Legacy spec: `VIPERTRADE_SPEC.md`
+- Architecture: `docs/ARCHITECTURE_V2.md`
+- Phase plans: `docs/PHASE1_PLAN.md`, `docs/PHASE2_RISK_RECON_PLAN.md`
+
+## Quality Gates
+
+- Full local validation report:
+  - `./scripts/validate-workspace.sh`
+- Strict local CI parity:
+  - `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 
 ## Status atual (RC sem tag)
 
 - Infra e servicos sobem com Podman Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
-
-## Checklist de release
-
-- Operacao e rollback: docs/RELEASE_CHECKLIST.md
-- Validacao local estrita de docs:
-  - CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
