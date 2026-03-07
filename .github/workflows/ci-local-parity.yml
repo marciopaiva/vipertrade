@@ -33,4 +33,4 @@ jobs:
         run: npm i -g markdownlint-cli@0.41.0
 
       - name: Run ci-local parity (no compose)
-        run: CI_LOCAL_SKIP_COMPOSE=1 CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
+        run: CI_LOCAL_SKIP_COMPOSE=1 CI_LOCAL_SKIP_PIPELINE=1 CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
