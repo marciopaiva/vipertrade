@@ -1,0 +1,219 @@
+// config/strategies/viper_smart_copy.tp
+// ViperTrade v0.8.0-rc - Smart Copy Pipeline com Trailing Stop Dinâmico
+// Compatível com Tupã v0.8.0-rc (hybrid backend, native constraints)
+
+// ═══════════════════════════════════════════════════════════
+// IMPORTS NATIVOS DO TUPÃ
+// ═══════════════════════════════════════════════════════════
+
+// @use tupa::constraints::{CircuitBreaker, RiskLimit, DrawdownLimit};
+// @use tupa::audit::{log_decision, AuditLevel};
+// @use tupa::effects::{IO, State};
+
+// ═══════════════════════════════════════════════════════════
+// TYPE DEFINITIONS
+// ═══════════════════════════════════════════════════════════
+
+type MarketSignal {
+    symbol: string,
+    current_price: f64,
+    atr_14: f64,
+    volume_24h: i64,
+    funding_rate: f64,
+    trend_score: f64,      // -1.0 a +1.0
+    spread_pct: f64,
+}
+
+type SmartCopyConfig {
+    profile: string,       // "CONSERVATIVE", "MEDIUM", "AGGRESSIVE"
+    risk_per_trade_pct: f64,
+    stop_loss_pct: f64,
+    take_profit_pct: f64,
+    max_leverage: f64,
+    min_position_usdt: f64,
+    max_position_usdt: f64,
+    max_position_change_pct: f64,
+}
+
+type TrailingConfig {
+    activate_after_profit_pct: f64,
+    initial_trail_pct: f64,
+    ratchet_levels: [RatchetLevel],
+    move_to_break_even_at: f64,
+}
+
+type RatchetLevel {
+    at_profit_pct: f64,
+    trail_pct: f64,
+}
+
+type TradeDecision {
+    action: string,        // "ENTER_LONG", "ENTER_SHORT", "HOLD"
+    symbol: string,
+    quantity: f64,
+    leverage: f64,
+    entry_price: f64,
+    stop_loss: f64,
+    take_profit: f64,
+    reason: string,
+    smart_copy_compatible: bool,
+    trailing_config: TrailingConfig,
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXTERNAL FUNCTIONS (Implementadas em Rust)
+// ═══════════════════════════════════════════════════════════
+
+// Risk Management
+extern fn viper::calculate_smart_copy_size(signal: MarketSignal, config: SmartCopyConfig, last_position_size: f64) -> f64;
+extern fn viper::check_smart_copy_constraints(size: f64, config: SmartCopyConfig) -> bool;
+extern fn viper::validate_entry_conditions(signal: MarketSignal, config: SmartCopyConfig) -> bool;
+
+// Trailing Stop Dinâmico
+extern fn viper::calculate_dynamic_trail(current_profit_pct: f64, config: TrailingConfig) -> f64;
+extern fn viper::get_trailing_config(profile: string, symbol: string) -> TrailingConfig;
+
+// Risk Checks
+extern fn viper::check_daily_loss(current_loss: f64, max_daily_loss_pct: f64) -> bool;
+extern fn viper::check_consecutive_losses(count: i64, max_count: i64) -> bool;
+extern fn viper::validate_funding_rate(funding: f64, side: string, max_rate: f64) -> bool;
+extern fn viper::check_liquidation_distance(entry: f64, leverage: f64, side: string, min_distance: f64) -> bool;
+
+// ═══════════════════════════════════════════════════════════
+// PIPELINE PRINCIPAL
+// ═══════════════════════════════════════════════════════════
+
+@constraints(
+    circuit_breaker = { max_consecutive_failures: 3, timeout_seconds: 300 },
+    risk_limit = { max_drawdown_pct: 0.10, daily_loss_pct: 0.05 },
+    audit_level = "detailed"
+)
+
+pipeline ViperSmartCopy @deterministic(seed=42) {
+    input: MarketSignal,
+    
+    // ← Constraints nativas do Tupã v0.8.0-rc (no header)
+    // Removido do corpo do pipeline
+    
+    steps: [
+        // 1. Verificar perda diária acumulada
+        step("check_daily_loss") {
+            viper::check_daily_loss(current_daily_loss, config.max_daily_loss_pct)
+        },
+        
+        // 2. Verificar losses consecutivos (circuit breaker)
+        step("check_consecutive_losses") {
+            viper::check_consecutive_losses(consecutive_losses, 3)
+        },
+        
+        // 3. Validar condições de entrada (spread, volume, funding)
+        step("validate_entry") {
+            viper::validate_entry_conditions(input, config)
+        },
+        
+        // 4. Validar funding rate para direção do trade
+        step("check_funding") {
+            let side = if input.trend_score > 0 { "Long" } else { "Short" };
+            viper::validate_funding_rate(input.funding_rate, side, 0.015)
+        },
+        
+        // 5. Calcular tamanho da posição (ATR-adjusted + Smart Copy constraints)
+        step("calc_smart_size") {
+            viper::calculate_smart_copy_size(input, config, last_position_size)
+        },
+        
+        // 6. Validar constraints Smart Copy ($5-$30 range)
+        step("validate_size") {
+            viper::check_smart_copy_constraints(calc_smart_size, config)
+        },
+        
+        // 7. Obter configuração de Trailing Stop Dinâmico
+        step("get_trailing_config") {
+            viper::get_trailing_config(config.profile, input.symbol)
+        },
+        
+        // 8. Decisão final de trade
+        step("decision") {
+            if check_daily_loss && 
+               check_consecutive_losses && 
+               validate_entry && 
+               check_funding && 
+               validate_size && 
+               calc_smart_size >= config.min_position_usdt {
+                
+                let side = if input.trend_score > 0 { "Long" } else { "Short" };
+                let entry = input.current_price;
+                let sl = if side == "Long" {
+                    entry * (1 - config.stop_loss_pct)
+                } else {
+                    entry * (1 + config.stop_loss_pct)
+                };
+                let tp = if side == "Long" {
+                    entry * (1 + config.take_profit_pct)
+                } else {
+                    entry * (1 - config.take_profit_pct)
+                };
+                
+                {
+                    action: if side == "Long" { "ENTER_LONG" } else { "ENTER_SHORT" },
+                    symbol: input.symbol,
+                    quantity: calc_smart_size,
+                    leverage: config.max_leverage,
+                    entry_price: entry,
+                    stop_loss: sl,
+                    take_profit: tp,
+                    reason: "smart_copy_optimized",
+                    smart_copy_compatible: true,
+                    trailing_config: get_trailing_config
+                }
+            } else {
+                {
+                    action: "HOLD",
+                    symbol: input.symbol,
+                    quantity: 0,
+                    leverage: 0,
+                    entry_price: 0,
+                    stop_loss: 0,
+                    take_profit: 0,
+                    reason: "risk_constraints_not_met",
+                    smart_copy_compatible: false,
+                    trailing_config: get_trailing_config
+                }
+            }
+        },
+        
+        // 9. Audit logging nativo (Tupã v0.8.0-rc feature)
+        step("audit") {
+            log_decision(decision, level: AuditLevel::Detailed)
+        }
+    ],
+    
+    // ← Validação nativa com @validate (Tupã v0.8.0-rc syntax)
+    @validate {
+        // Garantir que stop loss sempre existe se ENTER
+        assert(decision.action == "HOLD" || decision.stop_loss > 0);
+        
+        // Garantir que risk/reward >= 2:1
+        let risk = (decision.entry_price - decision.stop_loss).abs();
+        let reward = (decision.take_profit - decision.entry_price).abs();
+        assert(decision.action == "HOLD" || (reward / risk) >= 2.0);
+        
+        // Garantir que posição está dentro dos limits Smart Copy
+        let position_value = decision.quantity * decision.entry_price;
+        assert(decision.action == "HOLD" || 
+               (position_value >= config.min_position_usdt && 
+                position_value <= config.max_position_usdt));
+        
+        // Garantir que trailing config foi carregado
+        assert(decision.trailing_config.activate_after_profit_pct > 0);
+    },
+    
+    output: {
+        decision: decision,
+        execution_hash: hash(decision),  // ← Nativo do Tupã
+        timestamp: now(),
+        pipeline_version: "0.8.0-rc",
+        smart_copy_mode: true,
+        constraints_satisfied: true  // ← Set by Tupã runtime
+    }
+}
