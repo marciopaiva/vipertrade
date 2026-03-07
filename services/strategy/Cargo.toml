@@ -11,6 +11,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 redis = { workspace = true, features = ["tokio-comp"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 futures-util = "0.3"
 tupa-parser = { workspace = true }
 tupa-codegen = { workspace = true }
