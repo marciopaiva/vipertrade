@@ -110,6 +110,7 @@ Workflow: `.github/workflows/ci.yml`
 - Legacy spec: `VIPERTRADE_SPEC.md`
 - Architecture: `docs/ARCHITECTURE_V2.md`
 - Phase plans: `docs/PHASE1_PLAN.md`, `docs/PHASE2_RISK_RECON_PLAN.md`
+- Global roadmap: `docs/PROJECT_PHASES.md`
 
 ## Quality Gates
 
