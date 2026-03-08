@@ -19,7 +19,7 @@ Define a deterministic run interface and evidence artifact format for Phase 4.
 - `window_start` (UTC ISO-8601)
 - `window_end` (UTC ISO-8601)
 - `seed` (integer)
-- `profile` (`LOW|MEDIUM|HIGH`)
+- `profile` (`CONSERVATIVE|MEDIUM|AGGRESSIVE`)
 
 ## Determinism Rules
 
@@ -55,13 +55,14 @@ Define a deterministic run interface and evidence artifact format for Phase 4.
   },
   "checks": {
     "backtest_health_http": 200,
-    "service_available": true
+    "service_available": true,
+    "metrics_collected": true
   },
   "metrics": {
-    "total_trades": null,
-    "win_rate": null,
-    "total_pnl": null,
-    "max_drawdown": null
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "total_pnl": 0.0,
+    "max_drawdown": 0.0
   },
   "status": "baseline_collected"
 }
@@ -69,5 +70,5 @@ Define a deterministic run interface and evidence artifact format for Phase 4.
 
 ## Notes
 
-- Current service capability is baseline-only (health + runtime checks).
-- Real performance metrics fields remain `null` until backtest engine output is wired.
+- Metrics are collected from persisted DB data within the selected run window.
+- If DB metrics cannot be collected, run status must be `baseline_partial`.

@@ -59,14 +59,27 @@ else
   echo -e "${GREEN}OK: Redis subscribers market_data=${MD_SUB} decisions=${DEC_SUB}${NC}"
 fi
 
+DB_COUNTS_OK=true
 DB_COUNTS=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c "SELECT
-  (SELECT COUNT(*) FROM positions WHERE status = 'open')::bigint,
+  (SELECT COUNT(*) FROM trades WHERE status = 'open')::bigint,
   (SELECT COUNT(*) FROM trades WHERE status = 'closed')::bigint,
-  (SELECT COUNT(*) FROM reconciliation_snapshots)::bigint;" 2>/dev/null || echo '0|0|0')
+  (SELECT COUNT(*) FROM position_snapshots)::bigint;" 2>/tmp/viper_phase4_paper_db.log) || DB_COUNTS_OK=false
 
-OPEN_POSITIONS=$(echo "$DB_COUNTS" | awk -F'|' '{print $1}')
-CLOSED_TRADES=$(echo "$DB_COUNTS" | awk -F'|' '{print $2}')
-RECON_SNAPSHOTS=$(echo "$DB_COUNTS" | awk -F'|' '{print $3}')
+if [[ "$DB_COUNTS_OK" == "true" ]]; then
+  OPEN_POSITIONS=$(echo "$DB_COUNTS" | awk -F'|' '{print $1}')
+  CLOSED_TRADES=$(echo "$DB_COUNTS" | awk -F'|' '{print $2}')
+  RECON_SNAPSHOTS=$(echo "$DB_COUNTS" | awk -F'|' '{print $3}')
+  DB_COUNTS_VALID=true
+  echo -e "${GREEN}OK: DB counts query passed${NC}"
+else
+  OPEN_POSITIONS=-1
+  CLOSED_TRADES=-1
+  RECON_SNAPSHOTS=-1
+  DB_COUNTS_VALID=false
+  echo -e "${RED}ERROR: DB counts query failed${NC}"
+  tail -n 60 /tmp/viper_phase4_paper_db.log 2>/dev/null || true
+  ISSUES=$((ISSUES + 1))
+fi
 
 STATUS="passed"
 if [[ $ISSUES -gt 0 ]]; then
@@ -81,7 +94,8 @@ cat > "$JSON_FILE" <<JSON
   "checks": {
     "health_check": $HEALTH_OK,
     "api_performance_consistency": $PERF_OK,
-    "redis_subscribers_ok": $REDIS_OK
+    "redis_subscribers_ok": $REDIS_OK,
+    "db_counts_valid": $DB_COUNTS_VALID
   },
   "redis": {
     "market_data_subscribers": $MD_SUB,

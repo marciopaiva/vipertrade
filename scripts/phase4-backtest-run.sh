@@ -20,7 +20,7 @@ Usage:
     --window-start <UTC ISO-8601> \
     --window-end   <UTC ISO-8601> \
     [--seed <int>] \
-    [--profile LOW|MEDIUM|HIGH]
+    [--profile CONSERVATIVE|MEDIUM|AGGRESSIVE]
 USAGE
 }
 
@@ -66,9 +66,11 @@ if ! [[ "$SEED" =~ ^[0-9]+$ ]]; then
 fi
 
 case "$PROFILE" in
-  LOW|MEDIUM|HIGH) ;;
+  LOW) PROFILE="CONSERVATIVE" ;;
+  HIGH) PROFILE="AGGRESSIVE" ;;
+  CONSERVATIVE|MEDIUM|AGGRESSIVE) ;;
   *)
-    echo "ERROR: --profile must be LOW, MEDIUM, or HIGH" >&2
+    echo "ERROR: --profile must be CONSERVATIVE, MEDIUM, or AGGRESSIVE" >&2
     exit 2
     ;;
 esac
@@ -119,6 +121,33 @@ if [[ "$SERVICE_AVAILABLE" != "true" ]]; then
   STATUS="baseline_partial"
 fi
 
+METRICS_OK=false
+if podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c \
+  "SELECT
+     COUNT(*)::bigint,
+     COALESCE(ROUND((COUNT(*) FILTER (WHERE COALESCE(pnl,0) > 0)::numeric / NULLIF(COUNT(*),0))::numeric, 6), 0),
+     COALESCE(ROUND(SUM(COALESCE(pnl,0))::numeric, 6), 0),
+     COALESCE(ROUND(MAX(COALESCE(max_drawdown,0))::numeric, 6), 0)
+   FROM trades t
+   LEFT JOIN daily_metrics dm ON dm.date BETWEEN ('${WINDOW_START}'::timestamptz)::date AND ('${WINDOW_END}'::timestamptz)::date
+   WHERE t.status='closed'
+     AND t.closed_at IS NOT NULL
+     AND t.closed_at >= '${WINDOW_START}'::timestamptz
+     AND t.closed_at < '${WINDOW_END}'::timestamptz;" >/tmp/viper_phase4_backtest_metrics.out 2>/tmp/viper_phase4_backtest_metrics.err; then
+  METRICS_RAW="$(cat /tmp/viper_phase4_backtest_metrics.out)"
+  TOTAL_TRADES="$(echo "$METRICS_RAW" | awk -F'|' '{print $1}')"
+  WIN_RATE="$(echo "$METRICS_RAW" | awk -F'|' '{print $2}')"
+  TOTAL_PNL="$(echo "$METRICS_RAW" | awk -F'|' '{print $3}')"
+  MAX_DRAWDOWN="$(echo "$METRICS_RAW" | awk -F'|' '{print $4}')"
+  METRICS_OK=true
+else
+  TOTAL_TRADES=null
+  WIN_RATE=null
+  TOTAL_PNL=null
+  MAX_DRAWDOWN=null
+  STATUS="baseline_partial"
+fi
+
 cat > "$JSON_FILE" <<JSON
 {
   "schema_version": "v1",
@@ -138,13 +167,14 @@ cat > "$JSON_FILE" <<JSON
   },
   "checks": {
     "backtest_health_http": $BACKTEST_HTTP,
-    "service_available": $SERVICE_AVAILABLE
+    "service_available": $SERVICE_AVAILABLE,
+    "metrics_collected": $METRICS_OK
   },
   "metrics": {
-    "total_trades": null,
-    "win_rate": null,
-    "total_pnl": null,
-    "max_drawdown": null
+    "total_trades": $TOTAL_TRADES,
+    "win_rate": $WIN_RATE,
+    "total_pnl": $TOTAL_PNL,
+    "max_drawdown": $MAX_DRAWDOWN
   },
   "status": "$STATUS"
 }
@@ -164,6 +194,11 @@ cat > "$MD_FILE" <<MD
 - profile: ${PROFILE}
 - backtest_health_http: ${BACKTEST_HTTP}
 - service_available: ${SERVICE_AVAILABLE}
+- metrics_collected: ${METRICS_OK}
+- total_trades: ${TOTAL_TRADES}
+- win_rate: ${WIN_RATE}
+- total_pnl: ${TOTAL_PNL}
+- max_drawdown: ${MAX_DRAWDOWN}
 - status: ${STATUS}
 
 ## Artifacts
@@ -172,7 +207,7 @@ cat > "$MD_FILE" <<MD
 
 ## Notes
 
-- Metrics are placeholders until engine output is wired into this run contract.
+- Metrics are collected from persisted DB data for the selected backtest window.
 MD
 
 echo -e "${GREEN}SUCCESS: Phase 4 deterministic run artifact generated${NC}"

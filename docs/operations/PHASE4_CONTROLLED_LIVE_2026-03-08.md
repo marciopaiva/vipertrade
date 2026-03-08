@@ -11,6 +11,7 @@
 - api_performance_consistency: true
 - drawdown_gate: true
 - alert_storm_gate: true
+- activity_gate: true
 - rollback_tested: true
 - rollback_ok: true
 
@@ -18,8 +19,9 @@
 
 - max_drawdown_30d: 0.0
 - critical_events_24h: 0
+- closed_trades_24h: 1
 - operator_controls_enabled: true
 
 ## Artifact
 
-- docs/operations/artifacts/live/controlled_live_20260308T202419Z.json
+- docs/operations/artifacts/live/controlled_live_20260308T210724Z.json

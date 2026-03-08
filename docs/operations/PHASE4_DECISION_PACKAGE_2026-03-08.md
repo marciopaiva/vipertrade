@@ -13,16 +13,27 @@
 - `docs/operations/PHASE4_PAPER_REGRESSION_2026-03-08.md`
 - `docs/operations/PHASE4_TESTNET_MICRO_2026-03-08.md`
 - `docs/operations/PHASE4_CONTROLLED_LIVE_2026-03-08.md`
-- `docs/operations/artifacts/backtest/backtest_20260308T191536Z_seed42.json`
-- `docs/operations/artifacts/paper/paper_regression_20260308T193830Z.json`
-- `docs/operations/artifacts/testnet/testnet_micro_20260308T194536Z.json`
-- `docs/operations/artifacts/live/controlled_live_20260308T202419Z.json`
+- `docs/operations/artifacts/backtest/backtest_20260308T205157Z_seed42.json`
+- `docs/operations/artifacts/paper/paper_regression_20260308T205207Z.json`
+- `docs/operations/artifacts/testnet/testnet_micro_20260308T205334Z.json`
+- `docs/operations/artifacts/live/controlled_live_20260308T210724Z.json`
 
 ## Decision
 
-- Current decision: GO (promotion gate criteria satisfied for controlled live readiness).
+- Current decision: GO.
 
-## Notes
+## Decision Record
 
-- Operator controls are enabled.
-- Rollback path (kill-switch enable/disable) was validated in the latest controlled live gate run.
+Date (UTC): 2026-03-08T21:07:24Z
+Stage: Phase 4 promotion gate (paper -> testnet micro -> controlled live)
+Decision: GO
+Approver: pending
+Evidence Links:
+- `docs/operations/artifacts/testnet/testnet_micro_20260308T205334Z.json`
+- `docs/operations/artifacts/live/controlled_live_20260308T210724Z.json`
+Notes:
+- Controlled live gate passed with activity evidence (`closed_trades_24h=1`) and rollback validated.
+
+## Required Actions To Promote
+
+- None. Promotion criteria satisfied in the latest evidence set.

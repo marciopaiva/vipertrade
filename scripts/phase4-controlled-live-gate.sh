@@ -14,6 +14,7 @@ CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 WINDOW_HOURS="${WINDOW_HOURS:-24}"
 MAX_DRAWDOWN_PCT="${MAX_DRAWDOWN_PCT:-10}"
 MAX_CRITICAL_EVENTS="${MAX_CRITICAL_EVENTS:-3}"
+MIN_CLOSED_TRADES="${MIN_CLOSED_TRADES:-1}"
 
 ARTIFACT_DIR="$ROOT_DIR/docs/operations/artifacts/live"
 JSON_FILE="$ARTIFACT_DIR/controlled_live_${TS_UTC}.json"
@@ -95,6 +96,18 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
+CLOSED_TRADES_WINDOW=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
+  "SELECT COUNT(*)::bigint FROM trades WHERE status='closed' AND closed_at >= NOW() - INTERVAL '${WINDOW_HOURS} hours';" 2>/dev/null || echo -1)
+
+if [[ "$CLOSED_TRADES_WINDOW" =~ ^[0-9]+$ ]] && (( CLOSED_TRADES_WINDOW >= MIN_CLOSED_TRADES )); then
+  ACTIVITY_OK=true
+  echo -e "${GREEN}OK: closed trades in ${WINDOW_HOURS}h=${CLOSED_TRADES_WINDOW} (min=${MIN_CLOSED_TRADES})${NC}"
+else
+  ACTIVITY_OK=false
+  echo -e "${RED}ERROR: insufficient live activity in ${WINDOW_HOURS}h closed_trades=${CLOSED_TRADES_WINDOW} (min=${MIN_CLOSED_TRADES})${NC}"
+  ISSUES=$((ISSUES + 1))
+fi
+
 OP_CONTROLS=$(python3 - <<'PY' "$STATUS_JSON"
 import json,sys
 try:
@@ -137,19 +150,22 @@ cat > "$JSON_FILE" <<JSON
   "window_hours": $WINDOW_HOURS,
   "limits": {
     "max_drawdown_pct": $MAX_DRAWDOWN_PCT,
-    "max_critical_events": $MAX_CRITICAL_EVENTS
+    "max_critical_events": $MAX_CRITICAL_EVENTS,
+    "min_closed_trades": $MIN_CLOSED_TRADES
   },
   "checks": {
     "health_check": $HEALTH_OK,
     "api_performance_consistency": $PERF_OK,
     "drawdown_gate": $DRAWDOWN_OK,
     "alert_storm_gate": $ALERT_STORM_OK,
+    "activity_gate": $ACTIVITY_OK,
     "rollback_tested": $ROLLBACK_TESTED,
     "rollback_ok": $ROLLBACK_OK
   },
   "signals": {
     "max_drawdown_30d": $MAX_DRAWDOWN_30D,
     "critical_events_window": $CRITICAL_EVENTS,
+    "closed_trades_window": $CLOSED_TRADES_WINDOW,
     "operator_controls_enabled": $OP_CONTROLS
   },
   "issues": $ISSUES
@@ -170,6 +186,7 @@ cat > "$MD_FILE" <<MD
 - api_performance_consistency: ${PERF_OK}
 - drawdown_gate: ${DRAWDOWN_OK}
 - alert_storm_gate: ${ALERT_STORM_OK}
+- activity_gate: ${ACTIVITY_OK}
 - rollback_tested: ${ROLLBACK_TESTED}
 - rollback_ok: ${ROLLBACK_OK}
 
@@ -177,6 +194,7 @@ cat > "$MD_FILE" <<MD
 
 - max_drawdown_30d: ${MAX_DRAWDOWN_30D}
 - critical_events_${WINDOW_HOURS}h: ${CRITICAL_EVENTS}
+- closed_trades_${WINDOW_HOURS}h: ${CLOSED_TRADES_WINDOW}
 - operator_controls_enabled: ${OP_CONTROLS}
 
 ## Artifact
