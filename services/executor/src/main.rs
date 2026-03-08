@@ -1104,6 +1104,14 @@ async fn local_open_qty(pool: &PgPool, symbol: &str, side: &str) -> Result<f64, 
     Ok(qty.unwrap_or(0.0))
 }
 
+fn reconciliation_event_meta(fix_applied: bool) -> (&'static str, &'static str) {
+    if fix_applied {
+        ("executor_reconciliation_fix_applied", "info")
+    } else {
+        ("executor_reconciliation_detected", "warning")
+    }
+}
+
 async fn record_reconciliation_event(
     pool: &PgPool,
     symbol: &str,
@@ -1111,21 +1119,24 @@ async fn record_reconciliation_event(
     local_qty: f64,
     bybit_qty: f64,
     diff: f64,
+    fix_applied: bool,
 ) -> Result<(), sqlx::Error> {
+    let (event_type, severity) = reconciliation_event_meta(fix_applied);
     let data = json!({
         "symbol": symbol,
         "side": side,
         "local_qty": local_qty,
         "bybit_qty": bybit_qty,
         "diff": diff,
+        "fix_applied": fix_applied,
     });
 
     sqlx::query(
         "INSERT INTO system_events (event_type, severity, category, data, symbol)
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind("executor_reconciliation")
-    .bind("warning")
+    .bind(event_type)
+    .bind(severity)
     .bind("reconciliation")
     .bind(data)
     .bind(symbol)
@@ -1242,6 +1253,7 @@ async fn run_reconciliation_tick(
                                     before,
                                     bybit_qty,
                                     (before - bybit_qty).abs(),
+                                    true,
                                 )
                                 .await;
                                 println!(
@@ -1258,7 +1270,7 @@ async fn run_reconciliation_tick(
                         }
                     } else {
                         let _ = record_reconciliation_event(
-                            pool, &symbol, side, local_qty, bybit_qty, diff,
+                            pool, &symbol, side, local_qty, bybit_qty, diff, false,
                         )
                         .await;
                         eprintln!(
@@ -1268,7 +1280,7 @@ async fn run_reconciliation_tick(
                     }
                 } else {
                     let _ = record_reconciliation_event(
-                        pool, &symbol, side, local_qty, bybit_qty, diff,
+                        pool, &symbol, side, local_qty, bybit_qty, diff, false,
                     )
                     .await;
                 }
@@ -1930,6 +1942,18 @@ mod tests {
             .execute(&pool)
             .await
             .expect("cleanup fill");
+    }
+
+    #[test]
+    fn maps_reconciliation_event_meta() {
+        assert_eq!(
+            reconciliation_event_meta(false),
+            ("executor_reconciliation_detected", "warning")
+        );
+        assert_eq!(
+            reconciliation_event_meta(true),
+            ("executor_reconciliation_fix_applied", "info")
+        );
     }
 
     #[test]

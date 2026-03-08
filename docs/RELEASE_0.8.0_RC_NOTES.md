@@ -16,6 +16,7 @@ Date: 2026-03-08
 - Added optional `EXECUTOR_RECONCILE_FIX` mode for controlled local correction when local > Bybit.
 - Fixed close-path DB constraint issue (`trades.quantity > 0`) by avoiding `quantity=0` writes on closed rows.
 - Added CI job `Executor DB Integration` using ephemeral PostgreSQL and schema apply.
+- Added explicit reconciliation telemetry split: `executor_reconciliation_detected` vs `executor_reconciliation_fix_applied`.
 
 ## Operational Evidence
 
@@ -34,7 +35,7 @@ Date: 2026-03-08
 
 - Keep `EXECUTOR_ENABLE_LIVE_ORDERS=false` by default; enable only for controlled windows.
 - Continue monitoring reconciliation events for false positives under volatile conditions.
-- Optional: add an explicit event type for "reconciliation fix applied" to separate detect vs apply telemetry.
+- Reconciliation telemetry now distinguishes detect vs fix-applied; monitor both event streams during rollout windows.
 
 ## Rollback Assets
 
