@@ -9,6 +9,17 @@ Deliver an operator-grade API surface for Lead Trader operations, with explicit 
 - `VIPERTRADE_SPEC.md` sections 13 and 20.
 - Phase 2 completed with reconciliation controls and operational evidence.
 
+## Current Progress
+
+- Item 1 delivered (initial API capability map implementation):
+  - `GET /api/v1/health`
+  - `GET /api/v1/status`
+  - `GET /api/v1/positions`
+  - `GET /api/v1/trades`
+  - `GET /api/v1/performance`
+  - `POST /api/v1/control/kill-switch`
+- Kill-switch control is deny-by-default when `OPERATOR_API_TOKEN` is not configured.
+
 ## Workstreams
 
 ## 1) API Capability Map
