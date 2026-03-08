@@ -21,16 +21,16 @@ Close monitor-driven risk controls and reconciliation with clear operational evi
   - `warning` -> `DISCORD_WEBHOOK_WARNING`
   - `error` and `critical` -> `DISCORD_WEBHOOK_CRITICAL`
   - `info` -> no alert (noise control)
+- Bybit source-of-truth pull in monitor:
+  - authenticated GET `/v5/position/list` per symbol
+  - notional from live position data, with snapshot fallback if API is unavailable
 
 ## Remaining Gaps to close Phase 2
 
-1. Bybit source-of-truth integration in monitor:
-   - fetch current position directly from Bybit API (not only latest stored snapshot)
-   - compare against local open exposure per symbol in each reconciliation cycle
-2. Alert policy hardening:
+1. Alert policy hardening:
    - add deduplication/cooldown window for repeated symbol alerts
    - document escalation path and operator action matrix per severity
-3. Operational evidence bundle:
+2. Operational evidence bundle:
    - SQL queries + log snippets proving drift detect/resolve behavior
    - runbook section for reconciliation incident handling
 

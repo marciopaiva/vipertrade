@@ -1,13 +1,16 @@
+use hmac::{Hmac, Mac};
 use redis::AsyncCommands;
-use serde_json::json;
+use serde_json::{json, Value};
+use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::error::Error;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
+type HmacSha256 = Hmac<Sha256>;
 const RECON_SYMBOLS: [&str; 4] = ["DOGEUSDT", "XRPUSDT", "TRXUSDT", "XLMUSDT"];
 
 #[derive(Debug, Clone)]
@@ -19,6 +22,10 @@ struct MonitorConfig {
     discord_webhook_critical: Option<String>,
     discord_webhook_warning: Option<String>,
     discord_webhook_info: Option<String>,
+    bybit_env: String,
+    bybit_api_key: String,
+    bybit_api_secret: String,
+    bybit_recv_window: String,
 }
 
 impl MonitorConfig {
@@ -44,6 +51,12 @@ impl MonitorConfig {
         let discord_webhook_warning = read_non_empty_env("DISCORD_WEBHOOK_WARNING");
         let discord_webhook_info = read_non_empty_env("DISCORD_WEBHOOK_INFO");
 
+        let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+        let bybit_api_key = std::env::var("BYBIT_API_KEY").unwrap_or_default();
+        let bybit_api_secret = std::env::var("BYBIT_API_SECRET").unwrap_or_default();
+        let bybit_recv_window =
+            std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
+
         Self {
             health_check_interval_sec,
             reconciliation_interval_sec,
@@ -52,6 +65,22 @@ impl MonitorConfig {
             discord_webhook_critical,
             discord_webhook_warning,
             discord_webhook_info,
+            bybit_env,
+            bybit_api_key,
+            bybit_api_secret,
+            bybit_recv_window,
+        }
+    }
+
+    fn has_bybit_credentials(&self) -> bool {
+        !self.bybit_api_key.is_empty() && !self.bybit_api_secret.is_empty()
+    }
+
+    fn bybit_base_url(&self) -> &'static str {
+        if self.bybit_env.eq_ignore_ascii_case("mainnet") {
+            "https://api.bybit.com"
+        } else {
+            "https://api-testnet.bybit.com"
         }
     }
 }
@@ -90,6 +119,20 @@ fn read_interval_sec(sec_var: &str, min_var: &str, default_sec: u64) -> u64 {
     }
 
     default_sec
+}
+
+fn now_ms() -> String {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    ms.to_string()
+}
+
+fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
+    mac.update(payload.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 fn resolve_database_url() -> Option<String> {
@@ -132,6 +175,93 @@ fn classify_severity(drift_notional_usdt: f64, threshold: f64) -> &'static str {
     }
 }
 
+fn parse_f64_str(value: Option<&Value>) -> Option<f64> {
+    value
+        .and_then(Value::as_str)
+        .and_then(|v| v.parse::<f64>().ok())
+}
+
+fn parse_position_notional_usdt(value: &Value, symbol: &str) -> Result<f64, Box<dyn Error>> {
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let target = symbol.to_uppercase();
+    let list = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .ok_or("bybit result.list missing")?;
+
+    let mut total = 0.0;
+    for pos in list {
+        let pos_symbol = pos
+            .get("symbol")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_uppercase();
+        if pos_symbol != target {
+            continue;
+        }
+
+        let notional = parse_f64_str(pos.get("positionValue"))
+            .map(f64::abs)
+            .or_else(|| {
+                let size = parse_f64_str(pos.get("size"))?;
+                let mark = parse_f64_str(pos.get("markPrice"))
+                    .or_else(|| parse_f64_str(pos.get("avgPrice")))?;
+                Some((size * mark).abs())
+            })
+            .unwrap_or(0.0);
+
+        total += notional;
+    }
+
+    Ok(total)
+}
+
+async fn bybit_private_get(
+    http: &reqwest::Client,
+    cfg: &MonitorConfig,
+    path: &str,
+    query: &str,
+) -> Result<Value, Box<dyn Error>> {
+    let ts = now_ms();
+    let sign_payload = format!(
+        "{}{}{}{}",
+        ts, cfg.bybit_api_key, cfg.bybit_recv_window, query
+    );
+    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
+
+    let mut url = format!("{}{}", cfg.bybit_base_url(), path);
+    if !query.is_empty() {
+        url = format!("{}?{}", url, query);
+    }
+
+    let res = http
+        .get(url)
+        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
+        .header("X-BAPI-SIGN", sign)
+        .header("X-BAPI-SIGN-TYPE", "2")
+        .header("X-BAPI-TIMESTAMP", ts)
+        .header("X-BAPI-RECV-WINDOW", &cfg.bybit_recv_window)
+        .send()
+        .await?;
+
+    let status = res.status();
+    let value: Value = res.json().await?;
+    if !status.is_success() {
+        return Err(format!("bybit private http={} body={}", status, value).into());
+    }
+
+    Ok(value)
+}
+
 async fn fetch_local_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64, sqlx::Error> {
     sqlx::query_scalar::<_, f64>(
         "SELECT COALESCE(SUM(quantity * entry_price), 0)::double precision \
@@ -142,7 +272,7 @@ async fn fetch_local_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64, s
     .await
 }
 
-async fn fetch_bybit_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64, sqlx::Error> {
+async fn fetch_snapshot_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64, sqlx::Error> {
     let latest = sqlx::query_scalar::<_, Option<f64>>(
         "SELECT (bybit_data->>'notional_usdt')::double precision \
          FROM position_snapshots \
@@ -155,6 +285,37 @@ async fn fetch_bybit_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64, s
     .await?;
 
     Ok(latest.unwrap_or(0.0))
+}
+
+async fn fetch_live_bybit_notional_usdt(
+    http: &reqwest::Client,
+    cfg: &MonitorConfig,
+    symbol: &str,
+) -> Result<f64, Box<dyn Error>> {
+    let query = format!("category=linear&symbol={}", symbol.to_uppercase());
+    let value = bybit_private_get(http, cfg, "/v5/position/list", &query).await?;
+    parse_position_notional_usdt(&value, symbol)
+}
+
+async fn resolve_bybit_notional_usdt(
+    http: &reqwest::Client,
+    pool: &PgPool,
+    cfg: &MonitorConfig,
+    symbol: &str,
+) -> Result<f64, Box<dyn Error>> {
+    if cfg.has_bybit_credentials() {
+        match fetch_live_bybit_notional_usdt(http, cfg, symbol).await {
+            Ok(v) => return Ok(v),
+            Err(err) => {
+                eprintln!(
+                    "reconciliation: bybit live query failed for {}: {} (fallback snapshot)",
+                    symbol, err
+                );
+            }
+        }
+    }
+
+    Ok(fetch_snapshot_notional_usdt(pool, symbol).await?)
 }
 
 async fn persist_recon_result(pool: &PgPool, result: &ReconResult) -> Result<(), sqlx::Error> {
@@ -284,7 +445,7 @@ async fn publish_discord_alert(cfg: &MonitorConfig, result: &ReconResult) {
     }
 }
 
-async fn run_reconciliation_cycle(pool: &PgPool, cfg: &MonitorConfig) {
+async fn run_reconciliation_cycle(http: &reqwest::Client, pool: &PgPool, cfg: &MonitorConfig) {
     for symbol in RECON_SYMBOLS {
         let local_notional_usdt = match fetch_local_notional_usdt(pool, symbol).await {
             Ok(v) => v,
@@ -294,11 +455,11 @@ async fn run_reconciliation_cycle(pool: &PgPool, cfg: &MonitorConfig) {
             }
         };
 
-        let bybit_notional_usdt = match fetch_bybit_notional_usdt(pool, symbol).await {
+        let bybit_notional_usdt = match resolve_bybit_notional_usdt(http, pool, cfg, symbol).await {
             Ok(v) => v,
             Err(err) => {
                 eprintln!(
-                    "reconciliation: bybit snapshot query failed for {}: {}",
+                    "reconciliation: failed to resolve bybit notional for {}: {}",
                     symbol, err
                 );
                 continue;
@@ -369,10 +530,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = MonitorConfig::from_env();
     println!(
-        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT",
+        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT bybit_env={}",
         cfg.health_check_interval_sec,
         cfg.reconciliation_interval_sec,
-        cfg.max_position_drift_notional_usdt
+        cfg.max_position_drift_notional_usdt,
+        cfg.bybit_env
     );
 
     let pool = if let Some(database_url) = resolve_database_url() {
@@ -422,6 +584,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     if let Some(pool) = pool {
+        let http = reqwest::Client::new();
         let mut recon_task_shutdown = shutdown_rx.clone();
         let recon_interval = cfg.reconciliation_interval_sec;
         let cfg_for_recon = cfg.clone();
@@ -433,7 +596,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         break;
                     }
                     _ = ticker.tick() => {
-                        run_reconciliation_cycle(&pool, &cfg_for_recon).await;
+                        run_reconciliation_cycle(&http, &pool, &cfg_for_recon).await;
                     }
                 }
             }
@@ -463,7 +626,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_severity, compute_drift, read_interval_sec};
+    use super::{
+        classify_severity, compute_drift, parse_position_notional_usdt, read_interval_sec,
+    };
+    use serde_json::json;
 
     #[test]
     fn compute_drift_uses_absolute_delta() {
@@ -490,5 +656,36 @@ mod tests {
         std::env::set_var(MIN_VAR, "2");
         assert_eq!(read_interval_sec(SEC_VAR, MIN_VAR, 60), 120);
         std::env::remove_var(MIN_VAR);
+    }
+
+    #[test]
+    fn parse_position_notional_uses_position_value() {
+        let payload = json!({
+            "retCode": 0,
+            "result": {
+                "list": [
+                    {"symbol": "DOGEUSDT", "positionValue": "12.5", "size": "100", "markPrice": "0.12"},
+                    {"symbol": "DOGEUSDT", "positionValue": "7.5", "size": "50", "markPrice": "0.15"}
+                ]
+            }
+        });
+
+        let v = parse_position_notional_usdt(&payload, "DOGEUSDT").expect("parse must work");
+        assert!((v - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_position_notional_falls_back_to_size_x_mark() {
+        let payload = json!({
+            "retCode": 0,
+            "result": {
+                "list": [
+                    {"symbol": "XRPUSDT", "size": "10", "markPrice": "2.1"}
+                ]
+            }
+        });
+
+        let v = parse_position_notional_usdt(&payload, "XRPUSDT").expect("parse must work");
+        assert!((v - 21.0).abs() < f64::EPSILON);
     }
 }
