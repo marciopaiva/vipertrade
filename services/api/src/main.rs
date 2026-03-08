@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -101,6 +101,8 @@ struct TradesResponse {
 
 #[derive(Serialize)]
 struct PerformanceWindow {
+    window_start_utc: DateTime<Utc>,
+    window_end_utc: DateTime<Utc>,
     total_trades: i64,
     winning_trades: i64,
     win_rate: f64,
@@ -158,6 +160,10 @@ fn read_non_empty_env(name: &str) -> Option<String> {
 fn clamp_limit(limit: Option<u32>) -> i64 {
     let raw = limit.unwrap_or(50);
     raw.clamp(1, 200) as i64
+}
+
+fn round6(v: f64) -> f64 {
+    (v * 1_000_000.0).round() / 1_000_000.0
 }
 
 fn json_ok<T: Serialize>(payload: &T) -> warp::reply::WithStatus<WarpJson> {
@@ -475,7 +481,18 @@ async fn trades_handler(query: TradesQuery, state: Arc<AppState>) -> impl Reply 
     }
 }
 
-async fn fetch_window(pool: &PgPool, hours: i32) -> Result<PerformanceWindow, sqlx::Error> {
+async fn fetch_reference_now(pool: &PgPool) -> Result<DateTime<Utc>, sqlx::Error> {
+    let now = sqlx::query_scalar::<_, DateTime<Utc>>("SELECT date_trunc('second', NOW())")
+        .fetch_one(pool)
+        .await?;
+    Ok(now)
+}
+
+async fn fetch_window_between(
+    pool: &PgPool,
+    window_start_utc: DateTime<Utc>,
+    window_end_utc: DateTime<Utc>,
+) -> Result<PerformanceWindow, sqlx::Error> {
     let row = sqlx::query_as::<_, (i64, i64, f64)>(
         "SELECT
              COUNT(*)::bigint,
@@ -484,9 +501,11 @@ async fn fetch_window(pool: &PgPool, hours: i32) -> Result<PerformanceWindow, sq
          FROM trades
          WHERE status = 'closed'
            AND closed_at IS NOT NULL
-           AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')",
+           AND closed_at >= $1
+           AND closed_at < $2",
     )
-    .bind(hours)
+    .bind(window_start_utc)
+    .bind(window_end_utc)
     .fetch_one(pool)
     .await?;
 
@@ -498,10 +517,12 @@ async fn fetch_window(pool: &PgPool, hours: i32) -> Result<PerformanceWindow, sq
     };
 
     Ok(PerformanceWindow {
+        window_start_utc,
+        window_end_utc,
         total_trades,
         winning_trades,
-        win_rate,
-        total_pnl,
+        win_rate: round6(win_rate),
+        total_pnl: round6(total_pnl),
     })
 }
 
@@ -514,7 +535,24 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
         );
     };
 
-    let last_24h = match fetch_window(pool, 24).await {
+    let window_end_utc = match fetch_reference_now(pool).await {
+        Ok(v) => v,
+        Err(err) => {
+            return json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "query_failed",
+                format!("failed to fetch reference time: {}", err),
+            )
+        }
+    };
+
+    let last_24h = match fetch_window_between(
+        pool,
+        window_end_utc - ChronoDuration::hours(24),
+        window_end_utc,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             return json_err(
@@ -525,7 +563,13 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
         }
     };
 
-    let last_7d = match fetch_window(pool, 24 * 7).await {
+    let last_7d = match fetch_window_between(
+        pool,
+        window_end_utc - ChronoDuration::days(7),
+        window_end_utc,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             return json_err(
@@ -536,7 +580,13 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
         }
     };
 
-    let last_30d = match fetch_window(pool, 24 * 30).await {
+    let last_30d = match fetch_window_between(
+        pool,
+        window_end_utc - ChronoDuration::days(30),
+        window_end_utc,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             return json_err(
@@ -547,16 +597,23 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
         }
     };
 
+    let end_date: NaiveDate = window_end_utc.date_naive();
+    let start_date: NaiveDate = end_date - ChronoDuration::days(30);
+
     let max_drawdown_30d = sqlx::query_scalar::<_, Option<f64>>(
         "SELECT MAX(max_drawdown)::double precision
          FROM daily_metrics
-         WHERE date >= CURRENT_DATE - INTERVAL '30 days'",
+         WHERE date >= $1
+           AND date <= $2",
     )
+    .bind(start_date)
+    .bind(end_date)
     .fetch_optional(pool)
     .await
     .ok()
     .flatten()
-    .flatten();
+    .flatten()
+    .map(round6);
 
     let payload = PerformanceResponse {
         last_24h,
@@ -768,5 +825,11 @@ mod tests {
         assert_eq!(clamp_limit(Some(0)), 1);
         assert_eq!(clamp_limit(Some(10)), 10);
         assert_eq!(clamp_limit(Some(500)), 200);
+    }
+
+    #[test]
+    fn round6_keeps_six_decimals() {
+        assert_eq!(super::round6(1.23456789), 1.234568);
+        assert_eq!(super::round6(1.0), 1.0);
     }
 }

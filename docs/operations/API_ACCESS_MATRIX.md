@@ -43,3 +43,13 @@ curl -s -X POST http://localhost:8080/api/v1/control/kill-switch \
   -H "x-operator-id: local-ops" \
   -d '{"enabled":true,"reason":"ops_test"}' | jq
 ```
+
+## Metrics Consistency Check
+
+Use the deterministic consistency check script:
+
+```bash
+./scripts/check-api-metrics-consistency.sh
+```
+
+It compares `/api/v1/performance` aggregates against direct PostgreSQL queries using the exact window bounds returned by the API.

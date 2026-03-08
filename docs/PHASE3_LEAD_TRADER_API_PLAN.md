@@ -22,6 +22,10 @@ Deliver an operator-grade API surface for Lead Trader operations, with explicit 
 - Item 2 delivered (operator auth and access split):
   - middleware-based token auth on control routes
   - public vs operator route separation documented in `docs/operations/API_ACCESS_MATRIX.md`
+- Item 3 delivered (metrics consistency layer):
+  - deterministic windows with shared reference timestamp in `/api/v1/performance`
+  - 6-decimal normalization for `win_rate` and `total_pnl`
+  - consistency check script: `scripts/check-api-metrics-consistency.sh`
 
 ## Workstreams
 
