@@ -5,7 +5,8 @@ Derived from `VIPERTRADE_SPEC.md` (blocos 0-15), with formal phase gating for ex
 ## Current Snapshot
 
 - Phase 1: Completed (2026-03-08)
-- Phase 2: In progress (next execution focus)
+- Phase 2: Completed (2026-03-08)
+- Phase 3: In progress (current execution focus)
 
 ## Phase 1 - Foundation and Runtime Hardening (Completed)
 
@@ -26,7 +27,7 @@ Done evidence:
 - CI and CI Local Parity green on closure commit.
 - Controlled testnet smoke validated and cleaned.
 
-## Phase 2 - Risk, Reconciliation, and Monitor Maturity
+## Phase 2 - Risk, Reconciliation, and Monitor Maturity (Completed)
 
 Scope:
 
@@ -44,13 +45,13 @@ Primary deliverables:
 - Distinct event streams for detection, fix-attempt, fix-result.
 - Alert policy matrix (warning/error/critical) wired to Discord.
 
-Exit criteria:
+Done evidence:
 
-- Reconciliation loop produces deterministic outputs per interval.
-- Drift violations generate actionable alerts with low noise.
-- Runbook includes operator playbook for each alert class.
+- Reconciliation events and snapshots persisted in controlled validation window.
+- Alert cooldown and operator playbook documented.
+- Validation report: `docs/operations/PHASE2_VALIDATION_2026-03-08.md`.
 
-## Phase 3 - Lead Trader Operations and API Surface
+## Phase 3 - Lead Trader Operations and API Surface (In progress)
 
 Scope:
 
