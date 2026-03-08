@@ -20,6 +20,8 @@ Date: 2026-03-08
 
 ## Operational Evidence
 
+- Final closure smoke (post-telemetry split) passed on 2026-03-08.
+- Evidence: `submitted` + `submitted_close`, `bybit_fills` persistence, and duplicate idempotency count = 0.
 - Live testnet cycle completed for `DOGEUSDT` (ENTER + CLOSE).
 - Executor logs confirmed order submission and close reconciliation after fix.
 - `bybit_fills` recorded fills during live validation.
@@ -28,7 +30,7 @@ Date: 2026-03-08
 
 ## CI Status
 
-- `CI` (main push) succeeded for commit `0925e50`.
+- `CI` and `CI Local Parity` succeeded for commit `96df8a5`.
 - Earlier `CI Local Parity` failure was markdown lint (`README.md` extra blank line); fixed in this follow-up.
 
 ## Technical Debt / Follow-ups
