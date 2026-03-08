@@ -9,7 +9,7 @@ Derived from `VIPERTRADE_SPEC.md` (blocos 0-15), with formal phase gating for ex
 - Phase 3: Completed (2026-03-08)
 - Phase 4: Completed (2026-03-08)
 - Phase 5: Completed (2026-03-08)
-- Phase 6: In progress (current execution focus)
+- Phase 6: Completed (2026-03-08)
 
 ## Phase 1 - Foundation and Runtime Hardening (Completed)
 
@@ -166,6 +166,7 @@ Current progress:
 - No-mainnet policy documented: `docs/operations/PHASE6_NO_MAINNET_POLICY.md`.
 - Testnet micro gate added: `scripts/phase6-testnet-micro-gate.sh`.
 - Testnet micro evidence: `docs/operations/PHASE6_TESTNET_MICRO_2026-03-08.md`.
+- Decision package closed: `docs/operations/PHASE6_DECISION_PACKAGE_2026-03-08.md`.
 
 Exit criteria:
 
