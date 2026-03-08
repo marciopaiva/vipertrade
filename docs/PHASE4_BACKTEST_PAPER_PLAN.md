@@ -64,3 +64,7 @@ Deliverables:
 
 - Item 1 started: baseline validation script introduced (`scripts/phase4-validate.sh`).
 - Initial baseline evidence generated in `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+- Backtest run contract documented in `docs/operations/PHASE4_BACKTEST_CONTRACT.md`.
+- Deterministic run script added: `scripts/phase4-backtest-run.sh`.
+- Initial run evidence generated in `docs/operations/PHASE4_BACKTEST_RUN_2026-03-08.md`.
+- JSON artifacts generated in `docs/operations/artifacts/backtest/`.
