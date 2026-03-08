@@ -1,0 +1,25 @@
+{
+  "schema_version": "v1",
+  "created_at_utc": "2026-03-08T22:08:53Z",
+  "status": "passed",
+  "decision": "GO_TESTNET_READY",
+  "window": {
+    "log_window": "60m",
+    "db_window_minutes": 60
+  },
+  "checks": {
+    "health_check": true,
+    "api_performance_consistency": true,
+    "testnet_mode_ok": true,
+    "safe_live_disabled_ok": true,
+    "rollback_tested": true,
+    "rollback_ok": true,
+    "reconciliation_gate": true,
+    "close_path_errors": true
+  },
+  "signals": {
+    "critical_reconciliation_events": 0,
+    "executor_close_error_count": 0
+  },
+  "issues": 0
+}

@@ -163,10 +163,13 @@ Current progress:
 - Phase 6 baseline gate added: `scripts/phase6-validate.sh`.
 - Initial baseline evidence: `docs/operations/PHASE6_BASELINE_2026-03-08.md`.
 - Promotion criteria documented: `docs/operations/PHASE6_PROMOTION_GATE.md`.
+- No-mainnet policy documented: `docs/operations/PHASE6_NO_MAINNET_POLICY.md`.
+- Testnet micro gate added: `scripts/phase6-testnet-micro-gate.sh`.
+- Testnet micro evidence: `docs/operations/PHASE6_TESTNET_MICRO_2026-03-08.md`.
 
 Exit criteria:
 
-- Mainnet micro window completes without critical incidents.
+- Testnet/simulation micro window completes without critical incidents.
 - Rollback procedure is tested and time-bounded.
 - Project declared production-ready for incremental scaling.
 

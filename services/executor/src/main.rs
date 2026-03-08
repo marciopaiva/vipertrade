@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use hmac::{Hmac, Mac};
+use reqwest::header::CONTENT_TYPE;
 use redis::AsyncCommands;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -389,6 +390,59 @@ fn decision_hash(event: &StrategyDecisionEvent) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn body_preview(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "<empty>".to_string();
+    }
+    let max = 280usize;
+    if trimmed.len() <= max {
+        trimmed.to_string()
+    } else {
+        format!("{}...", &trimmed[..max])
+    }
+}
+
+async fn parse_bybit_json_response(
+    res: reqwest::Response,
+    context: &str,
+) -> Result<Value, Box<dyn Error>> {
+    let status = res.status();
+    let content_type = res
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("<none>")
+        .to_string();
+    let body = res.text().await?;
+    let preview = body_preview(&body);
+
+    if body.trim().is_empty() {
+        return Err(format!(
+            "{} empty body http={} content_type={}",
+            context, status, content_type
+        )
+        .into());
+    }
+
+    let value: Value = serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "{} invalid json http={} content_type={} err={} body_preview={}",
+            context, status, content_type, e, preview
+        )
+    })?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "{} http={} content_type={} body={}",
+            context, status, content_type, value
+        )
+        .into());
+    }
+
+    Ok(value)
+}
+
 async fn bybit_public_get(
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
@@ -396,12 +450,7 @@ async fn bybit_public_get(
 ) -> Result<Value, Box<dyn Error>> {
     let url = format!("{}{}", cfg.bybit_base_url(), path);
     let res = http.get(url).send().await?;
-    let status = res.status();
-    let value: Value = res.json().await?;
-    if !status.is_success() {
-        return Err(format!("bybit public http={} body={}", status, value).into());
-    }
-    Ok(value)
+    parse_bybit_json_response(res, "bybit public").await
 }
 
 async fn bybit_private_get(
@@ -429,12 +478,7 @@ async fn bybit_private_get(
         .send()
         .await?;
 
-    let status = res.status();
-    let value: Value = res.json().await?;
-    if !status.is_success() {
-        return Err(format!("bybit private http={} body={}", status, value).into());
-    }
-    Ok(value)
+    parse_bybit_json_response(res, "bybit private").await
 }
 
 async fn run_bybit_sanity_checks(
@@ -466,26 +510,60 @@ async fn run_bybit_sanity_checks(
         return Ok(());
     }
 
-    let query = format!("accountType={}", cfg.bybit_account_type);
-    let wallet_value = bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query)
-        .await
-        .map_err(|e| format!("wallet-balance failed: {}", e))?;
+    let mut candidates = vec![cfg.bybit_account_type.to_uppercase()];
+    for fallback in ["UNIFIED", "CONTRACT", "SPOT"] {
+        if !candidates.iter().any(|v| v == fallback) {
+            candidates.push(fallback.to_string());
+        }
+    }
 
-    let wallet_ret = wallet_value
-        .get("retCode")
-        .and_then(Value::as_i64)
-        .unwrap_or(-1);
-    if wallet_ret != 0 {
-        return Err(format!(
-            "wallet-balance retCode={} body={}",
-            wallet_ret, wallet_value
+    let mut wallet_errors: Vec<String> = Vec::new();
+    let mut wallet_ok_account_type: Option<String> = None;
+
+    for account_type in candidates {
+        let query = format!("accountType={account_type}");
+        let wallet_value = match bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query).await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                wallet_errors.push(format!("accountType={account_type} request_error={e}"));
+                continue;
+            }
+        };
+
+        let wallet_ret = wallet_value
+            .get("retCode")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        if wallet_ret == 0 {
+            wallet_ok_account_type = Some(account_type.clone());
+            break;
+        }
+
+        wallet_errors.push(format!(
+            "accountType={} retCode={} body={}",
+            account_type, wallet_ret, wallet_value
         ));
     }
 
-    println!(
-        "Bybit sanity check: wallet-balance OK (accountType={})",
-        cfg.bybit_account_type
-    );
+    if let Some(ok_account_type) = wallet_ok_account_type {
+        if ok_account_type != cfg.bybit_account_type.to_uppercase() {
+            eprintln!(
+                "Bybit sanity check: wallet-balance OK with fallback accountType={} (configured={})",
+                ok_account_type, cfg.bybit_account_type
+            );
+        } else {
+            println!(
+                "Bybit sanity check: wallet-balance OK (accountType={})",
+                cfg.bybit_account_type
+            );
+        }
+    } else {
+        return Err(format!(
+            "wallet-balance failed for all accountType candidates: {}",
+            wallet_errors.join(" | ")
+        ));
+    }
 
     Ok(())
 }

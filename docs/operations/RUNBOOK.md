@@ -268,3 +268,15 @@ Optional rollback SLO tuning:
 ```bash
 MAX_ROLLBACK_SEC=20 ./scripts/phase6-validate.sh
 ```
+
+## 15) Phase 6 Testnet Micro Gate (No-Mainnet Policy)
+
+Run the operational gate without mainnet order submission:
+
+```bash
+./scripts/phase6-testnet-micro-gate.sh
+```
+
+Policy reference:
+
+- `docs/operations/PHASE6_NO_MAINNET_POLICY.md`
