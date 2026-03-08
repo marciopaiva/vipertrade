@@ -22,6 +22,15 @@ MD_FILE="$ROOT_DIR/docs/operations/PHASE4_CONTROLLED_LIVE_${DATE_UTC}.md"
 mkdir -p "$ARTIFACT_DIR"
 cd "$ROOT_DIR"
 
+# Fallback to compose/.env when the token is not exported in shell env.
+if [[ -z "${OPERATOR_API_TOKEN:-}" && -f compose/.env ]]; then
+  TOKEN_FROM_ENV_FILE="$(awk -F= '/^OPERATOR_API_TOKEN=/{print $2}' compose/.env | tail -n 1)"
+  if [[ -n "${TOKEN_FROM_ENV_FILE:-}" ]]; then
+    OPERATOR_API_TOKEN="$TOKEN_FROM_ENV_FILE"
+    export OPERATOR_API_TOKEN
+  fi
+fi
+
 echo -e "${GREEN}ViperTrade - Phase 4 Controlled Live Gate${NC}"
 echo "================================================"
 

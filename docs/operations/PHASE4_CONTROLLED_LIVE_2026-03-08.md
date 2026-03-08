@@ -2,8 +2,8 @@
 
 ## Decision
 
-- decision: HOLD
-- issues: 1
+- decision: GO
+- issues: 0
 
 ## Checks
 
@@ -11,15 +11,15 @@
 - api_performance_consistency: true
 - drawdown_gate: true
 - alert_storm_gate: true
-- rollback_tested: false
-- rollback_ok: false
+- rollback_tested: true
+- rollback_ok: true
 
 ## Signals
 
 - max_drawdown_30d: 0.0
 - critical_events_24h: 0
-- operator_controls_enabled: false
+- operator_controls_enabled: true
 
 ## Artifact
 
-- docs/operations/artifacts/live/controlled_live_20260308T201430Z.json
+- docs/operations/artifacts/live/controlled_live_20260308T202419Z.json
