@@ -184,3 +184,59 @@ SQL
 
 - Follow [RECONCILIATION_EVIDENCE](./RECONCILIATION_EVIDENCE.md)
 - Attach logs + SQL outputs to release/incident notes.
+
+## 12) API Kill-Switch Playbook
+
+Pre-requisites:
+
+- `OPERATOR_API_TOKEN` configured in `compose/.env`
+- API service running and healthy
+
+Quick status:
+
+```bash
+./scripts/kill-switch-control.sh status
+```
+
+Enable kill-switch (halt mode):
+
+```bash
+OPERATOR_API_TOKEN="${OPERATOR_API_TOKEN}" \
+REASON="incident_reconciliation" \
+./scripts/kill-switch-control.sh enable
+```
+
+Disable kill-switch (resume):
+
+```bash
+OPERATOR_API_TOKEN="${OPERATOR_API_TOKEN}" \
+REASON="incident_resolved" \
+./scripts/kill-switch-control.sh disable
+```
+
+Manual API smoke (optional):
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/control/kill-switch \
+  -H "content-type: application/json" \
+  -H "x-operator-token: ${OPERATOR_API_TOKEN}" \
+  -H "x-operator-id: local-ops" \
+  -d '{"enabled":true,"reason":"ops_test"}' | jq
+```
+
+Rollback verification checklist:
+
+- API returns `kill_switch.enabled=false` after disable
+- Latest `system_events` row with `event_type=api_kill_switch_set` has expected actor/reason
+- `risk_status` in `/api/v1/status` transitions according to kill-switch state
+
+SQL verification query:
+
+```bash
+podman exec -i vipertrade-postgres psql -U viper -d vipertrade -At -F '|' -c \
+"SELECT event_type,severity,data->>'enabled',data->>'reason',data->>'actor',to_char(timestamp,'YYYY-MM-DD HH24:MI:SS')
+ FROM system_events
+ WHERE event_type='api_kill_switch_set'
+ ORDER BY timestamp DESC
+ LIMIT 5;"
+```
