@@ -5,16 +5,17 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::{watch, Mutex};
 use viper_domain::{StrategyDecision, StrategyDecisionEvent};
 
 type HmacSha256 = Hmac<Sha256>;
+const CONSTRAINTS_CACHE_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone)]
 struct ExecutorConfig {
@@ -33,6 +34,7 @@ struct ExecutorConfig {
 struct ExecutorState {
     db_pool: Option<PgPool>,
     processed_in_memory: Arc<Mutex<HashSet<String>>>,
+    constraints_cache: Arc<Mutex<HashMap<String, (Instant, BybitSymbolConstraints)>>>,
 }
 
 impl ExecutorConfig {
@@ -186,6 +188,12 @@ struct BybitSymbolConstraints {
     min_notional: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OrderExecutionMeta {
+    avg_price: Option<f64>,
+    fee: Option<f64>,
+}
+
 fn realized_pnl(
     side: &str,
     entry_price: f64,
@@ -320,6 +328,29 @@ async fn fetch_symbol_constraints(
         qty_step,
         min_notional,
     })
+}
+
+async fn get_symbol_constraints(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> Result<BybitSymbolConstraints, Box<dyn Error>> {
+    let key = symbol.to_uppercase();
+
+    {
+        let cache = state.constraints_cache.lock().await;
+        if let Some((cached_at, constraints)) = cache.get(&key) {
+            if cached_at.elapsed() < Duration::from_secs(CONSTRAINTS_CACHE_TTL_SECS) {
+                return Ok(*constraints);
+            }
+        }
+    }
+
+    let fetched = fetch_symbol_constraints(http, cfg, symbol).await?;
+    let mut cache = state.constraints_cache.lock().await;
+    cache.insert(key, (Instant::now(), fetched));
+    Ok(fetched)
 }
 
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
@@ -503,6 +534,8 @@ async fn persist_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
     bybit_order_id: &str,
+    entry_price: f64,
+    fees: f64,
 ) -> Result<(), sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(());
@@ -524,13 +557,14 @@ async fn persist_trade(
             side,
             quantity,
             entry_price,
+            fees,
             leverage,
             status,
             decision_hash,
             smart_copy_compatible,
             pipeline_version,
             paper_trade
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,$10,$11)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12)
         ON CONFLICT (order_link_id) DO NOTHING",
     )
     .bind(&event.event_id)
@@ -538,7 +572,8 @@ async fn persist_trade(
     .bind(&event.decision.symbol)
     .bind(side)
     .bind(event.decision.quantity)
-    .bind(event.decision.entry_price)
+    .bind(entry_price)
+    .bind(fees)
     .bind(event.decision.leverage)
     .bind(hash)
     .bind(event.decision.smart_copy_compatible)
@@ -554,6 +589,7 @@ async fn close_open_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
     close_price: f64,
+    close_fee: f64,
 ) -> Result<CloseReconcileResult, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(CloseReconcileResult::NoLocalOpen);
@@ -604,13 +640,15 @@ async fn close_open_trade(
             "UPDATE trades
              SET quantity = quantity - $2,
                  pnl = COALESCE(pnl, 0) + $3,
-                 exit_price = $4,
+                 fees = COALESCE(fees, 0) + $4,
+                 exit_price = $5,
                  updated_at = NOW()
              WHERE trade_id::text = $1",
         )
         .bind(&trade_id)
         .bind(close_qty)
         .bind(pnl_delta)
+        .bind(close_fee)
         .bind(close_price)
         .execute(pool)
         .await?;
@@ -629,16 +667,18 @@ async fn close_open_trade(
              closed_at = NOW(),
              quantity = 0,
              pnl = COALESCE(pnl, 0) + $2,
+             fees = COALESCE(fees, 0) + $3,
              pnl_pct = CASE
-                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2) / (entry_price * quantity)) * 100)
+                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2 - COALESCE(fees, 0) - $3) / (entry_price * quantity)) * 100)
                  ELSE NULL
              END,
-             exit_price = $3,
+             exit_price = $4,
              updated_at = NOW()
          WHERE trade_id::text = $1",
     )
     .bind(&trade_id)
     .bind(pnl_delta)
+    .bind(close_fee)
     .bind(close_price)
     .execute(pool)
     .await?;
@@ -659,6 +699,7 @@ async fn close_open_trade(
 }
 
 async fn submit_market_order(
+    state: &ExecutorState,
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
     event: &StrategyDecisionEvent,
@@ -666,7 +707,14 @@ async fn submit_market_order(
     let side = action_to_side(&event.decision.action).ok_or("unsupported action for order")?;
 
     let close_action = is_close_action(&event.decision.action);
-    let constraints = fetch_symbol_constraints(http, cfg, &event.decision.symbol).await?;
+    let constraints = get_symbol_constraints(state, http, cfg, &event.decision.symbol)
+        .await
+        .map_err(|e| {
+            format!(
+                "symbol constraints unavailable for {} (live-safe block): {}",
+                event.decision.symbol, e
+            )
+        })?;
     let normalized_qty = normalize_order_quantity(event.decision.quantity, constraints)
         .map_err(|e| format!("quantity validation failed: {e}"))?;
 
@@ -781,6 +829,70 @@ async fn fetch_order_execution_price(
     Ok(maybe_avg)
 }
 
+async fn fetch_order_execution_fee(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    order_id: &str,
+) -> Result<Option<f64>, Box<dyn Error>> {
+    let query = format!(
+        "category=linear&symbol={}&orderId={}",
+        symbol.to_uppercase(),
+        order_id
+    );
+
+    let value = bybit_private_get(http, cfg, "/v5/execution/list", &query).await?;
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let total_fee = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .map(|fills| {
+            fills
+                .iter()
+                .filter_map(|fill| fill.get("execFee"))
+                .filter_map(Value::as_str)
+                .filter_map(|x| x.parse::<f64>().ok())
+                .fold(0.0, |acc, v| acc + v)
+        })
+        .unwrap_or(0.0);
+
+    if total_fee.abs() < 1e-12 {
+        Ok(None)
+    } else {
+        Ok(Some(total_fee))
+    }
+}
+
+async fn fetch_order_execution_meta(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    order_id: &str,
+) -> Result<OrderExecutionMeta, Box<dyn Error>> {
+    let avg_price = fetch_order_execution_price(http, cfg, symbol, order_id).await?;
+    let fee = match fetch_order_execution_fee(http, cfg, symbol, order_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "Failed to fetch Bybit order fee symbol={} order_id={} err={}",
+                symbol, order_id, e
+            );
+            None
+        }
+    };
+
+    Ok(OrderExecutionMeta { avg_price, fee })
+}
+
 async fn handle_decision_event(
     state: &ExecutorState,
     http: &reqwest::Client,
@@ -839,7 +951,7 @@ async fn handle_decision_event(
         return Ok(());
     }
 
-    match submit_market_order(http, cfg, &event).await {
+    match submit_market_order(state, http, cfg, &event).await {
         Ok(order_id) => {
             println!(
                 "Submitted Bybit order event_id={} order_id={} symbol={} action={}",
@@ -848,33 +960,34 @@ async fn handle_decision_event(
 
             let mut status = "submitted";
 
-            if is_close_action(&event.decision.action) {
-                let execution_price = match fetch_order_execution_price(
-                    http,
-                    cfg,
-                    &event.decision.symbol,
-                    &order_id,
-                )
-                .await
-                {
-                    Ok(Some(price)) => price,
-                    Ok(None) => {
-                        eprintln!(
-                            "Bybit avgPrice missing for event_id={} order_id={}, fallback to decision price={}",
-                            event.event_id, order_id, event.decision.entry_price
-                        );
-                        event.decision.entry_price
+            let execution_meta = match fetch_order_execution_meta(
+                http,
+                cfg,
+                &event.decision.symbol,
+                &order_id,
+            )
+            .await
+            {
+                Ok(meta) => meta,
+                Err(e) => {
+                    eprintln!(
+                        "Failed to fetch execution metadata event_id={} order_id={} err={}, fallback decision price={}",
+                        event.event_id, order_id, e, event.decision.entry_price
+                    );
+                    OrderExecutionMeta {
+                        avg_price: None,
+                        fee: None,
                     }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to fetch Bybit execution price event_id={} order_id={} err={}, fallback decision price={}",
-                            event.event_id, order_id, e, event.decision.entry_price
-                        );
-                        event.decision.entry_price
-                    }
-                };
+                }
+            };
 
-                match close_open_trade(state, &event, execution_price).await {
+            if is_close_action(&event.decision.action) {
+                let execution_price = execution_meta
+                    .avg_price
+                    .unwrap_or(event.decision.entry_price);
+                let close_fee = execution_meta.fee.unwrap_or(0.0);
+
+                match close_open_trade(state, &event, execution_price, close_fee).await {
                     Ok(CloseReconcileResult::Closed {
                         trade_id,
                         realized_pnl,
@@ -936,12 +1049,21 @@ async fn handle_decision_event(
                         status = "submitted_close_no_persist";
                     }
                 }
-            } else if let Err(e) = persist_trade(state, &event, &order_id).await {
-                eprintln!(
-                    "Failed to persist trade for event_id={} order_id={} err={}",
-                    event.event_id, order_id, e
-                );
-                status = "submitted_no_persist";
+            } else {
+                let entry_price = execution_meta
+                    .avg_price
+                    .unwrap_or(event.decision.entry_price);
+                let entry_fee = execution_meta.fee.unwrap_or(0.0);
+
+                if let Err(e) =
+                    persist_trade(state, &event, &order_id, entry_price, entry_fee).await
+                {
+                    eprintln!(
+                        "Failed to persist trade for event_id={} order_id={} err={}",
+                        event.event_id, order_id, e
+                    );
+                    status = "submitted_no_persist";
+                }
             }
 
             mark_processed(
@@ -1016,6 +1138,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let state = ExecutorState {
         db_pool,
         processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+        constraints_cache: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let listener = TcpListener::bind("0.0.0.0:8083").await?;
@@ -1175,6 +1298,13 @@ mod tests {
     }
 
     #[test]
+    fn formats_qty_with_step_precision() {
+        assert_eq!(format_order_qty(100.0, 1.0), "100");
+        assert_eq!(format_order_qty(12.34, 0.01), "12.34");
+        assert_eq!(format_order_qty(12.30, 0.01), "12.3");
+    }
+
+    #[test]
     fn validates_min_notional_for_enter_and_skips_close() {
         let c = BybitSymbolConstraints {
             min_order_qty: 1.0,
@@ -1229,6 +1359,7 @@ mod tests {
         let state = ExecutorState {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let partial: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
@@ -1250,7 +1381,7 @@ mod tests {
         }))
         .expect("partial event");
 
-        let res = close_open_trade(&state, &partial, 1.1)
+        let res = close_open_trade(&state, &partial, 1.1, 0.0)
             .await
             .expect("partial close should work");
         assert!(matches!(res, CloseReconcileResult::Partial { .. }));
@@ -1284,7 +1415,7 @@ mod tests {
         }))
         .expect("full event");
 
-        let res = close_open_trade(&state, &full, 1.2)
+        let res = close_open_trade(&state, &full, 1.2, 0.0)
             .await
             .expect("full close should work");
         assert!(matches!(res, CloseReconcileResult::Closed { .. }));
