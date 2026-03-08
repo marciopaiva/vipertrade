@@ -2,7 +2,7 @@
 
 ## Objective
 
-Validate operational readiness for a controlled mainnet micro rollout with tested rollback and disaster-recovery routines.
+Validate operational readiness for production controls using testnet/simulation evidence only, with tested rollback and disaster-recovery routines.
 
 ## Baseline Inputs
 
@@ -12,7 +12,7 @@ Validate operational readiness for a controlled mainnet micro rollout with teste
 
 ## Workstreams
 
-## 1) Mainnet Micro Readiness Gates
+## 1) Testnet/Simulation Readiness Gates
 
 Scope:
 
@@ -50,3 +50,4 @@ Deliverables:
 - Readiness gate passes with `issues=0`.
 - Rollback path is tested and within target time budget.
 - DR backup drill evidence is available and reproducible.
+- Testnet micro gate passes under explicit no-mainnet policy.

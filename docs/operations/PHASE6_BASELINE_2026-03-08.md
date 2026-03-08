@@ -14,8 +14,8 @@
 - rollback_elapsed_sec: 0
 - dr_backup_ok: true
 - dr_backup_bytes: 27568
-- dr_backup_sha256: 5906670c280d165789a664d6d1191ff9413a48fd387d405051bc493ed7bae40b
+- dr_backup_sha256: 9c32ece93dff3ac831407b9b630e5cb625a810fec1c0d05de89a862565cf3daf
 
 ## Artifact
 
-- docs/operations/artifacts/phase6/phase6_baseline_20260308T215641Z.json
+- docs/operations/artifacts/phase6/phase6_baseline_20260308T220602Z.json
