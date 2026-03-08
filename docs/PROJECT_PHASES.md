@@ -7,7 +7,8 @@ Derived from `VIPERTRADE_SPEC.md` (blocos 0-15), with formal phase gating for ex
 - Phase 1: Completed (2026-03-08)
 - Phase 2: Completed (2026-03-08)
 - Phase 3: Completed (2026-03-08)
-- Phase 4: In progress (current execution focus)
+- Phase 4: Completed (2026-03-08)
+- Phase 5: In progress (current execution focus)
 
 ## Phase 1 - Foundation and Runtime Hardening (Completed)
 
@@ -129,8 +130,10 @@ Primary deliverables:
 
 Current progress:
 
-- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
-- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+- Phase 5 plan documented: `docs/PHASE5_SMARTCOPY_TRAILING_PLAN.md`.
+- Phase 5 baseline gate added: `scripts/phase5-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE5_BASELINE_2026-03-08.md`.
+- Promotion criteria documented: `docs/operations/PHASE5_PROMOTION_GATE.md`.
 
 Exit criteria:
 
@@ -155,8 +158,7 @@ Primary deliverables:
 
 Current progress:
 
-- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
-- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+- Awaiting Phase 5 completion.
 
 Exit criteria:
 

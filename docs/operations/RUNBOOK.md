@@ -240,3 +240,17 @@ podman exec -i vipertrade-postgres psql -U viper -d vipertrade -At -F '|' -c \
  ORDER BY timestamp DESC
  LIMIT 5;"
 ```
+
+## 13) Phase 5 Baseline (Smart Copy + Trailing)
+
+Run the phase gate and generate baseline evidence:
+
+```bash
+./scripts/phase5-validate.sh
+```
+
+Optional tuning knobs:
+
+```bash
+WINDOW_HOURS=48 SMART_COPY_MIN_IN_BAND_RATIO=0.97 ./scripts/phase5-validate.sh
+```
