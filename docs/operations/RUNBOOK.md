@@ -101,3 +101,40 @@ EXECUTOR_ENABLE_LIVE_ORDERS=false
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
 ```
+
+
+## 9) DB Rollback (fills/idempotency patch)
+
+If needed, rollback only the latest executor DB patch:
+
+```bash
+podman exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+DROP INDEX IF EXISTS uq_system_events_executor_source_event;
+DROP TABLE IF EXISTS bybit_fills;
+SQL
+```
+
+Then restart executor in safe mode:
+
+```bash
+# compose/.env
+EXECUTOR_ENABLE_LIVE_ORDERS=false
+EXECUTOR_RECONCILE_FIX=false
+
+./scripts/compose.sh up -d --no-deps executor
+```
+
+## 10) Go/No-Go Checklist (live testnet)
+
+Go:
+
+- `health-check.sh` without database errors
+- executor logs show `Submitted Bybit order` and no `submitted_close_no_persist`
+- `bybit_fills` has rows for the smoke cycle
+- no duplicate `source_event_id` in `executor_event_processed`
+
+No-Go:
+
+- Bybit errors like `110017`/`110094` in smoke cycle
+- any DB constraint error during close reconciliation
+- reconciliation diff persists after controlled `EXECUTOR_RECONCILE_FIX=true` window

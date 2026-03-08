@@ -123,3 +123,29 @@ Workflow: `.github/workflows/ci.yml`
 - Infra e servicos sobem com Podman Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
+
+
+## Release Ops (0.8.0-rc)
+
+Live testnet controls (executor):
+
+- `EXECUTOR_ENABLE_LIVE_ORDERS=false` by default
+- `EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT` for gradual rollout
+- `EXECUTOR_RECONCILE_FIX=false` by default (detect/log)
+
+Quick SQL checks after smoke cycle:
+
+```bash
+podman exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+SELECT COUNT(*) AS fills_total FROM bybit_fills;
+SELECT COUNT(*) AS duplicate_source_ids
+FROM (
+  SELECT data->>'source_event_id' sid, COUNT(*) c
+  FROM system_events
+  WHERE event_type='executor_event_processed'
+    AND COALESCE(data->>'source_event_id','') <> ''
+  GROUP BY data->>'source_event_id'
+  HAVING COUNT(*) > 1
+) t;
+SQL
+```

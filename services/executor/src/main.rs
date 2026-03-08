@@ -747,7 +747,6 @@ async fn close_open_trade(
          SET status = 'closed',
              close_reason = 'manual',
              closed_at = NOW(),
-             quantity = 0,
              pnl = COALESCE(pnl, 0) + $2,
              fees = COALESCE(fees, 0) + $3,
              pnl_pct = CASE
@@ -1168,7 +1167,6 @@ async fn apply_reconciliation_reduce_local(
                  SET status='closed',
                      close_reason='error',
                      closed_at=NOW(),
-                     quantity=0,
                      updated_at=NOW()
                  WHERE trade_id::text=$1",
             )
@@ -1851,7 +1849,7 @@ mod tests {
         .expect("query full");
         assert_eq!(status_after_full, "closed");
         assert!(closed_at_is_set);
-        assert!(qty_after_full.abs() < 1e-9);
+        assert!((qty_after_full - 6.0).abs() < 1e-9);
 
         sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
             .bind(&trade_key)
