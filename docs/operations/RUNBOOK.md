@@ -254,3 +254,17 @@ Optional tuning knobs:
 ```bash
 WINDOW_HOURS=48 SMART_COPY_MIN_IN_BAND_RATIO=0.97 ./scripts/phase5-validate.sh
 ```
+
+## 14) Phase 6 Baseline (Mainnet Readiness)
+
+Run readiness baseline and generate evidence:
+
+```bash
+./scripts/phase6-validate.sh
+```
+
+Optional rollback SLO tuning:
+
+```bash
+MAX_ROLLBACK_SEC=20 ./scripts/phase6-validate.sh
+```

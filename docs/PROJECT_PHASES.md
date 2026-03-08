@@ -159,7 +159,10 @@ Primary deliverables:
 
 Current progress:
 
-- Phase 5 gates completed; Phase 6 kickoff ready.
+- Phase 6 plan documented: `docs/PHASE6_MAINNET_READINESS_PLAN.md`.
+- Phase 6 baseline gate added: `scripts/phase6-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE6_BASELINE_2026-03-08.md`.
+- Promotion criteria documented: `docs/operations/PHASE6_PROMOTION_GATE.md`.
 
 Exit criteria:
 
