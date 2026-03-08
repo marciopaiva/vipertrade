@@ -1860,6 +1860,80 @@ mod tests {
             .expect("cleanup");
     }
 
+    #[tokio::test]
+    async fn db_persist_bybit_fills_is_idempotent() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let key = format!("it-fill-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": key,
+            "source_event_id": format!("{}-src", key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "ENTER_LONG",
+                "symbol": "DOGEUSDT",
+                "quantity": 10.0,
+                "leverage": 2.0,
+                "entry_price": 0.2,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("event parse");
+
+        let fill = BybitFill {
+            execution_id: format!("{}-exec", event.event_id),
+            order_id: format!("{}-order", event.event_id),
+            side: Some("Buy".to_string()),
+            exec_qty: 10.0,
+            exec_price: Some(0.2),
+            exec_fee: 0.01,
+            fee_currency: Some("USDT".to_string()),
+            is_maker: Some(false),
+            exec_time_ms: Some(1_700_000_000_000),
+            raw_data: serde_json::json!({"k":"v"}),
+        };
+
+        persist_bybit_fills(&state, &event, "order-fallback", &[fill.clone()])
+            .await
+            .expect("insert fill");
+        persist_bybit_fills(&state, &event, "order-fallback", &[fill])
+            .await
+            .expect("insert fill idempotent");
+
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM bybit_fills WHERE bybit_execution_id = $1")
+                .bind(format!("{}-exec", event.event_id))
+                .fetch_one(&pool)
+                .await
+                .expect("query fill count");
+
+        assert_eq!(count, 1);
+
+        sqlx::query("DELETE FROM bybit_fills WHERE bybit_execution_id = $1")
+            .bind(format!("{}-exec", event.event_id))
+            .execute(&pool)
+            .await
+            .expect("cleanup fill");
+    }
+
     #[test]
     fn signs_payload() {
         let sig = bybit_sign("secret", "payload").expect("must sign");

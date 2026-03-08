@@ -41,4 +41,14 @@ else
   echo -e "${YELLOW}WARN: Web endpoint unreachable${NC}"
 fi
 
+echo "Checking Web container health..."
+WEB_HEALTH=$(podman inspect -f "{{.State.Health.Status}}" vipertrade-web 2>/dev/null || echo "unknown")
+if [[ "$WEB_HEALTH" == "healthy" ]]; then
+  echo -e "${GREEN}OK: Web container healthy${NC}"
+elif [[ "$WEB_HEALTH" == "unknown" ]]; then
+  echo -e "${YELLOW}WARN: Web container health status unavailable${NC}"
+else
+  echo -e "${YELLOW}WARN: Web container status is $WEB_HEALTH (endpoint may still be reachable)${NC}"
+fi
+
 echo -e "${GREEN}Health check complete${NC}"

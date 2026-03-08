@@ -75,10 +75,16 @@ Default is safe dry-run (`EXECUTOR_ENABLE_LIVE_ORDERS=false`).
 EXECUTOR_ENABLE_LIVE_ORDERS=true
 EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT
 BYBIT_ACCOUNT_TYPE=UNIFIED
+EXECUTOR_RECONCILE_FIX=false
 
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
 ```
+
+Reconciliation behavior:
+
+- `EXECUTOR_RECONCILE_FIX=false` (default): detect/log only.
+- `EXECUTOR_RECONCILE_FIX=true`: applies conservative local reductions when local qty > Bybit qty.
 
 Smoke publish for ENTER order path:
 
