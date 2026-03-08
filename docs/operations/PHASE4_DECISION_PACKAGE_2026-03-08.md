@@ -5,7 +5,7 @@
 - Backtest Reproducibility: evidence available
 - Paper Regression Gate: PASS
 - Testnet Micro Gate: PASS
-- Controlled Live Gate: HOLD
+- Controlled Live Gate: PASS
 
 ## Evidence Index
 
@@ -16,18 +16,13 @@
 - `docs/operations/artifacts/backtest/backtest_20260308T191536Z_seed42.json`
 - `docs/operations/artifacts/paper/paper_regression_20260308T193830Z.json`
 - `docs/operations/artifacts/testnet/testnet_micro_20260308T194536Z.json`
-- `docs/operations/artifacts/live/controlled_live_20260308T201430Z.json`
-
-## Blocking Condition
-
-- Controlled live rollback validation was skipped because `operator_controls_enabled=false` and `OPERATOR_API_TOKEN` was not available for toggle test.
+- `docs/operations/artifacts/live/controlled_live_20260308T202419Z.json`
 
 ## Decision
 
-- Current decision: HOLD (do not promote to controlled live yet).
+- Current decision: GO (promotion gate criteria satisfied for controlled live readiness).
 
-## Required Action to Move from HOLD to GO
+## Notes
 
-1. Enable operator controls and configure `OPERATOR_API_TOKEN`.
-2. Re-run `./scripts/phase4-controlled-live-gate.sh`.
-3. Confirm decision `GO` with rollback path test passing.
+- Operator controls are enabled.
+- Rollback path (kill-switch enable/disable) was validated in the latest controlled live gate run.
