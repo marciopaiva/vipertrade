@@ -296,10 +296,10 @@ async fn fetch_snapshot_notional_usdt(pool: &PgPool, symbol: &str) -> Result<f64
          LIMIT 1",
     )
     .bind(symbol)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
 
-    Ok(latest.unwrap_or(0.0))
+    Ok(latest.flatten().unwrap_or(0.0))
 }
 
 async fn fetch_live_bybit_notional_usdt(

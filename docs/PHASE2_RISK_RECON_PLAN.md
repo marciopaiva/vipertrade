@@ -29,11 +29,12 @@ Close monitor-driven risk controls and reconciliation with clear operational evi
 - Operational evidence and playbook:
   - [docs/operations/RECONCILIATION_EVIDENCE.md](./operations/RECONCILIATION_EVIDENCE.md)
   - runbook section `11) Reconciliation Incident Playbook`
+  - validation window report [docs/operations/PHASE2_VALIDATION_2026-03-08.md](./operations/PHASE2_VALIDATION_2026-03-08.md)
 
 ## Remaining Gaps to close Phase 2
 
-1. Execute a controlled validation window and attach evidence bundle to the phase closure note.
-2. Confirm alert noise level in live-like volatility and tune `ALERT_COOLDOWN_SEC` if needed.
+- No technical gaps open in this phase.
+- Pending only product/owner sign-off for phase closure.
 
 ## Exit Criteria (Phase 2)
 
