@@ -71,3 +71,5 @@ Deliverables:
 - Paper regression runner added: `scripts/phase4-paper-regression.sh`.
 - Initial paper regression evidence generated in `docs/operations/PHASE4_PAPER_REGRESSION_2026-03-08.md`.
 - Promotion criteria documented in `docs/operations/PHASE4_PROMOTION_GATE.md`.
+- Testnet micro gate runner added: `scripts/phase4-testnet-micro-gate.sh`.
+- Initial testnet micro evidence generated in `docs/operations/PHASE4_TESTNET_MICRO_2026-03-08.md`.
