@@ -109,7 +109,7 @@ Workflow: `.github/workflows/ci.yml`
 - Event contract schema: `docs/contracts/strategy-decision-event-v1.schema.json`
 - Legacy spec: `VIPERTRADE_SPEC.md`
 - Architecture: `docs/ARCHITECTURE_V2.md`
-- Phase plans: `docs/PHASE1_PLAN.md`, `docs/PHASE2_RISK_RECON_PLAN.md`
+- Phase plans: `docs/PHASE1_PLAN.md`, `docs/PHASE2_RISK_RECON_PLAN.md`, `docs/PHASE3_LEAD_TRADER_API_PLAN.md`
 - Global roadmap: `docs/PROJECT_PHASES.md`
 
 ## Quality Gates
