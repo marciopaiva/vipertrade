@@ -11,8 +11,8 @@
 - redis_decision_subscribers: 1
 - db_open_positions: 0
 - db_closed_trades: 0
-- db_reconciliation_snapshots: 0
+- db_reconciliation_snapshots: 312
 
 ## Artifact
 
-- docs/operations/artifacts/paper/paper_regression_20260308T193830Z.json
+- docs/operations/artifacts/paper/paper_regression_20260308T205207Z.json

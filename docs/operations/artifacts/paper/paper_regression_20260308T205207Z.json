@@ -1,0 +1,21 @@
+{
+  "schema_version": "v1",
+  "created_at_utc": "2026-03-08T20:52:07Z",
+  "status": "passed",
+  "checks": {
+    "health_check": true,
+    "api_performance_consistency": true,
+    "redis_subscribers_ok": true,
+    "db_counts_valid": true
+  },
+  "redis": {
+    "market_data_subscribers": 1,
+    "decision_subscribers": 1
+  },
+  "db": {
+    "open_positions": 0,
+    "closed_trades": 0,
+    "reconciliation_snapshots": 312
+  },
+  "issues": 0
+}

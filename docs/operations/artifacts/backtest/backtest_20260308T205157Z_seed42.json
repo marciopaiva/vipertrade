@@ -1,0 +1,29 @@
+{
+  "schema_version": "v1",
+  "run_id": "36d1c573d320ec50",
+  "created_at_utc": "2026-03-08T20:51:57Z",
+  "git_sha": "b8887f2",
+  "window": {
+    "start_utc": "2026-02-01T00:00:00Z",
+    "end_utc": "2026-03-01T00:00:00Z"
+  },
+  "seed": 42,
+  "profile": "MEDIUM",
+  "input_hashes": {
+    "pipeline_tp": "5205fc5f7525812184d51046fcd683135ad2e9dcac58bc2964078076131fd4d2",
+    "pairs_yaml": "4891fb1ed11dac52d340b42039260ec5f1d8d99d675a2feeeac127f821bdb821",
+    "profiles_yaml": "e2433ade72426401bb3ed34a536ee17fcf762be8a2861be41a82caabae958642"
+  },
+  "checks": {
+    "backtest_health_http": 200,
+    "service_available": true,
+    "metrics_collected": true
+  },
+  "metrics": {
+    "total_trades": 0,
+    "win_rate": 0,
+    "total_pnl": 0,
+    "max_drawdown": 0
+  },
+  "status": "baseline_collected"
+}
