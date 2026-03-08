@@ -149,7 +149,37 @@ CREATE INDEX idx_events_symbol ON system_events(symbol);
 CREATE INDEX idx_events_category ON system_events(category);
 CREATE INDEX idx_events_critical ON system_events(severity, timestamp) WHERE severity IN ('error', 'critical');
 
--- ═══════════════════════════════════════════════════════════
+-- Strong idempotency for executor processed events
+CREATE UNIQUE INDEX uq_system_events_executor_source_event
+    ON system_events (event_type, (data->>'source_event_id'))
+    WHERE event_type = 'executor_event_processed'
+      AND COALESCE(data->>'source_event_id', '') <> '';
+
+-- ==========================================================
+-- TABLE 3.1: bybit_fills (detailed fills for audit/reconcile)
+-- ==========================================================
+
+CREATE TABLE bybit_fills (
+    fill_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bybit_execution_id TEXT NOT NULL UNIQUE,
+    bybit_order_id TEXT NOT NULL,
+    order_link_id TEXT,
+    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'TRXUSDT', 'XLMUSDT')),
+    side TEXT,
+    exec_qty NUMERIC NOT NULL CHECK (exec_qty > 0),
+    exec_price NUMERIC,
+    exec_fee NUMERIC NOT NULL DEFAULT 0,
+    fee_currency TEXT,
+    is_maker BOOLEAN,
+    exec_time TIMESTAMPTZ,
+    raw_data JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_bybit_fills_order_id ON bybit_fills(bybit_order_id);
+CREATE INDEX idx_bybit_fills_symbol ON bybit_fills(symbol);
+CREATE INDEX idx_bybit_fills_exec_time ON bybit_fills(exec_time);
+
 -- TABLE 4: daily_metrics (Agregados diários para dashboard)
 -- ═══════════════════════════════════════════════════════════
 
@@ -357,3 +387,5 @@ COMMENT ON TABLE daily_metrics IS 'Métricas agregadas diárias para dashboard e
 COMMENT ON TABLE tupa_audit_logs IS 'Logs estruturados do Tupã Engine para auditoria forense e reproducibilidade';
 COMMENT ON TABLE profile_history IS 'Histórico de mudanças de perfil de risco para análise de performance';
 COMMENT ON TABLE circuit_breaker_events IS 'Registro de ativações de circuit breakers para análise de risco';
+
+COMMENT ON TABLE bybit_fills IS 'Detailed fills received from Bybit for audit and reconciliation';
