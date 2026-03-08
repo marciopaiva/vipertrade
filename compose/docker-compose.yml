@@ -313,7 +313,7 @@ services:
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3

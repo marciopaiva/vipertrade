@@ -124,7 +124,6 @@ Workflow: `.github/workflows/ci.yml`
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
 
-
 ## Release Ops (0.8.0-rc)
 
 Live testnet controls (executor):

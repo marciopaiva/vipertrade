@@ -26,6 +26,9 @@
 
 ## Rollback Plan
 
+- DB rollback migration available:
+  - `database/migrations/20260308_002_executor_fills_idempotency_down.sql`
+
 - Stop current stack:
   - `./scripts/compose.sh down`
   - `./scripts/compose-host.sh down`
