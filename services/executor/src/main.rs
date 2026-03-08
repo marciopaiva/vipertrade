@@ -192,6 +192,7 @@ struct BybitSymbolConstraints {
 struct OrderExecutionMeta {
     avg_price: Option<f64>,
     fee: Option<f64>,
+    executed_qty: Option<f64>,
 }
 
 fn realized_pnl(
@@ -351,6 +352,14 @@ async fn get_symbol_constraints(
     let mut cache = state.constraints_cache.lock().await;
     cache.insert(key, (Instant::now(), fetched));
     Ok(fetched)
+}
+
+fn idempotency_key(event: &StrategyDecisionEvent) -> &str {
+    if event.source_event_id.trim().is_empty() {
+        &event.event_id
+    } else {
+        &event.source_event_id
+    }
 }
 
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
@@ -534,6 +543,7 @@ async fn persist_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
     bybit_order_id: &str,
+    entry_qty: f64,
     entry_price: f64,
     fees: f64,
 ) -> Result<(), sqlx::Error> {
@@ -571,7 +581,7 @@ async fn persist_trade(
     .bind(bybit_order_id)
     .bind(&event.decision.symbol)
     .bind(side)
-    .bind(event.decision.quantity)
+    .bind(entry_qty)
     .bind(entry_price)
     .bind(fees)
     .bind(event.decision.leverage)
@@ -588,6 +598,7 @@ async fn persist_trade(
 async fn close_open_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
+    close_qty: f64,
     close_price: f64,
     close_fee: f64,
 ) -> Result<CloseReconcileResult, sqlx::Error> {
@@ -620,7 +631,6 @@ async fn close_open_trade(
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
-    let close_qty = event.decision.quantity;
     let eps = 1e-9_f64;
     let effective_close_qty = if close_qty > open_qty {
         open_qty
@@ -829,12 +839,12 @@ async fn fetch_order_execution_price(
     Ok(maybe_avg)
 }
 
-async fn fetch_order_execution_fee(
+async fn fetch_order_execution_fill_stats(
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
     symbol: &str,
     order_id: &str,
-) -> Result<Option<f64>, Box<dyn Error>> {
+) -> Result<(Option<f64>, Option<f64>), Box<dyn Error>> {
     let query = format!(
         "category=linear&symbol={}&orderId={}",
         symbol.to_uppercase(),
@@ -851,25 +861,39 @@ async fn fetch_order_execution_fee(
         return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
     }
 
-    let total_fee = value
+    let (total_fee, total_qty) = value
         .get("result")
         .and_then(|r| r.get("list"))
         .and_then(Value::as_array)
         .map(|fills| {
-            fills
-                .iter()
-                .filter_map(|fill| fill.get("execFee"))
-                .filter_map(Value::as_str)
-                .filter_map(|x| x.parse::<f64>().ok())
-                .fold(0.0, |acc, v| acc + v)
+            fills.iter().fold((0.0, 0.0), |(fee_acc, qty_acc), fill| {
+                let fee = fill
+                    .get("execFee")
+                    .and_then(Value::as_str)
+                    .and_then(|x| x.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let qty = fill
+                    .get("execQty")
+                    .and_then(Value::as_str)
+                    .and_then(|x| x.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                (fee_acc + fee, qty_acc + qty)
+            })
         })
-        .unwrap_or(0.0);
+        .unwrap_or((0.0, 0.0));
 
-    if total_fee.abs() < 1e-12 {
-        Ok(None)
+    let fee = if total_fee.abs() < 1e-12 {
+        None
     } else {
-        Ok(Some(total_fee))
-    }
+        Some(total_fee)
+    };
+    let qty = if total_qty.abs() < 1e-12 {
+        None
+    } else {
+        Some(total_qty)
+    };
+
+    Ok((fee, qty))
 }
 
 async fn fetch_order_execution_meta(
@@ -879,18 +903,146 @@ async fn fetch_order_execution_meta(
     order_id: &str,
 ) -> Result<OrderExecutionMeta, Box<dyn Error>> {
     let avg_price = fetch_order_execution_price(http, cfg, symbol, order_id).await?;
-    let fee = match fetch_order_execution_fee(http, cfg, symbol, order_id).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!(
-                "Failed to fetch Bybit order fee symbol={} order_id={} err={}",
-                symbol, order_id, e
-            );
-            None
-        }
+    let (fee, executed_qty) =
+        match fetch_order_execution_fill_stats(http, cfg, symbol, order_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "Failed to fetch Bybit fill stats symbol={} order_id={} err={}",
+                    symbol, order_id, e
+                );
+                (None, None)
+            }
+        };
+
+    Ok(OrderExecutionMeta {
+        avg_price,
+        fee,
+        executed_qty,
+    })
+}
+
+async fn fetch_bybit_position_qty(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    side: &str,
+) -> Result<f64, Box<dyn Error>> {
+    let query = format!("category=linear&symbol={}", symbol.to_uppercase());
+    let value = bybit_private_get(http, cfg, "/v5/position/list", &query).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let bybit_side = if side == "Long" { "Buy" } else { "Sell" };
+    let qty = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter(|pos| pos.get("side").and_then(Value::as_str) == Some(bybit_side))
+                .filter_map(|pos| pos.get("size"))
+                .filter_map(Value::as_str)
+                .filter_map(|x| x.parse::<f64>().ok())
+                .fold(0.0, |acc, v| acc + v)
+        })
+        .unwrap_or(0.0);
+
+    Ok(qty)
+}
+
+async fn local_open_qty(pool: &PgPool, symbol: &str, side: &str) -> Result<f64, sqlx::Error> {
+    let qty: Option<f64> = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(quantity)::double precision, 0)
+         FROM trades
+         WHERE symbol = $1 AND side = $2 AND status = 'open'",
+    )
+    .bind(symbol)
+    .bind(side)
+    .fetch_one(pool)
+    .await?;
+    Ok(qty.unwrap_or(0.0))
+}
+
+async fn record_reconciliation_event(
+    pool: &PgPool,
+    symbol: &str,
+    side: &str,
+    local_qty: f64,
+    bybit_qty: f64,
+    diff: f64,
+) -> Result<(), sqlx::Error> {
+    let data = json!({
+        "symbol": symbol,
+        "side": side,
+        "local_qty": local_qty,
+        "bybit_qty": bybit_qty,
+        "diff": diff,
+    });
+
+    sqlx::query(
+        "INSERT INTO system_events (event_type, severity, category, data, symbol)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind("executor_reconciliation")
+    .bind("warning")
+    .bind("reconciliation")
+    .bind(data)
+    .bind(symbol)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn run_reconciliation_tick(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+) -> Result<(), Box<dyn Error>> {
+    if !cfg.live_orders_enabled {
+        return Ok(());
+    }
+    let Some(pool) = &state.db_pool else {
+        return Ok(());
     };
 
-    Ok(OrderExecutionMeta { avg_price, fee })
+    let symbols: Vec<String> = if cfg.live_symbol_allowlist.is_empty() {
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT symbol FROM trades WHERE status = 'open' ORDER BY symbol",
+        )
+        .fetch_all(pool)
+        .await?
+    } else {
+        cfg.live_symbol_allowlist.iter().cloned().collect()
+    };
+
+    for symbol in symbols {
+        for side in ["Long", "Short"] {
+            let local_qty = local_open_qty(pool, &symbol, side).await?;
+            let bybit_qty = fetch_bybit_position_qty(http, cfg, &symbol, side).await?;
+            let diff = (local_qty - bybit_qty).abs();
+
+            if diff > 1e-6 {
+                eprintln!(
+                    "Reconciliation diff symbol={} side={} local_qty={} bybit_qty={} diff={}",
+                    symbol, side, local_qty, bybit_qty, diff
+                );
+                let _ =
+                    record_reconciliation_event(pool, &symbol, side, local_qty, bybit_qty, diff)
+                        .await;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn handle_decision_event(
@@ -903,19 +1055,24 @@ async fn handle_decision_event(
         .validate()
         .map_err(|e| format!("invalid event contract: {e}"))?;
 
-    if already_processed(state, &event.event_id).await? {
-        println!("Skipping duplicate decision event_id={}", event.event_id);
+    let idem_key = idempotency_key(&event).to_string();
+
+    if already_processed(state, &idem_key).await? {
+        println!(
+            "Skipping duplicate decision event_id={} source_event_id={}",
+            event.event_id, idem_key
+        );
         return Ok(());
     }
 
     if event.decision.action == "HOLD" {
-        mark_processed(state, &event.event_id, &event, "ignored_hold", None, None).await?;
+        mark_processed(state, &idem_key, &event, "ignored_hold", None, None).await?;
         return Ok(());
     }
 
     if action_to_side(&event.decision.action).is_none() {
         let err = format!("unsupported action {}", event.decision.action);
-        mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+        mark_processed(state, &idem_key, &event, "error", None, Some(&err)).await?;
         return Ok(());
     }
 
@@ -926,7 +1083,7 @@ async fn handle_decision_event(
         );
         mark_processed(
             state,
-            &event.event_id,
+            &idem_key,
             &event,
             "blocked_symbol_allowlist",
             None,
@@ -947,7 +1104,7 @@ async fn handle_decision_event(
 
     if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
         let err = "missing BYBIT_API_KEY/BYBIT_API_SECRET".to_string();
-        mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+        mark_processed(state, &idem_key, &event, "error", None, Some(&err)).await?;
         return Ok(());
     }
 
@@ -977,6 +1134,7 @@ async fn handle_decision_event(
                     OrderExecutionMeta {
                         avg_price: None,
                         fee: None,
+                        executed_qty: None,
                     }
                 }
             };
@@ -986,8 +1144,11 @@ async fn handle_decision_event(
                     .avg_price
                     .unwrap_or(event.decision.entry_price);
                 let close_fee = execution_meta.fee.unwrap_or(0.0);
+                let close_qty = execution_meta
+                    .executed_qty
+                    .unwrap_or(event.decision.quantity);
 
-                match close_open_trade(state, &event, execution_price, close_fee).await {
+                match close_open_trade(state, &event, close_qty, execution_price, close_fee).await {
                     Ok(CloseReconcileResult::Closed {
                         trade_id,
                         realized_pnl,
@@ -1050,13 +1211,16 @@ async fn handle_decision_event(
                     }
                 }
             } else {
+                let entry_qty = execution_meta
+                    .executed_qty
+                    .unwrap_or(event.decision.quantity);
                 let entry_price = execution_meta
                     .avg_price
                     .unwrap_or(event.decision.entry_price);
                 let entry_fee = execution_meta.fee.unwrap_or(0.0);
 
                 if let Err(e) =
-                    persist_trade(state, &event, &order_id, entry_price, entry_fee).await
+                    persist_trade(state, &event, &order_id, entry_qty, entry_price, entry_fee).await
                 {
                     eprintln!(
                         "Failed to persist trade for event_id={} order_id={} err={}",
@@ -1066,15 +1230,7 @@ async fn handle_decision_event(
                 }
             }
 
-            mark_processed(
-                state,
-                &event.event_id,
-                &event,
-                status,
-                Some(&order_id),
-                None,
-            )
-            .await?;
+            mark_processed(state, &idem_key, &event, status, Some(&order_id), None).await?;
         }
         Err(e) => {
             let err = e.to_string();
@@ -1082,7 +1238,7 @@ async fn handle_decision_event(
                 "Failed to submit Bybit order event_id={} action={} symbol={} err={}",
                 event.event_id, event.decision.action, event.decision.symbol, err
             );
-            mark_processed(state, &event.event_id, &event, "error", None, Some(&err)).await?;
+            mark_processed(state, &idem_key, &event, "error", None, Some(&err)).await?;
         }
     }
 
@@ -1146,6 +1302,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
+
+    let state_for_reconcile = state.clone();
+    let cfg_for_reconcile = cfg.clone();
+    let http_for_reconcile = http.clone();
+    let mut reconcile_shutdown_rx = shutdown_rx.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = reconcile_shutdown_rx.changed() => {
+                    break;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    if let Err(e) = run_reconciliation_tick(&state_for_reconcile, &http_for_reconcile, &cfg_for_reconcile).await {
+                        eprintln!("Reconciliation tick failed: {}", e);
+                    }
+                }
+            }
+        }
+    });
     tokio::spawn(async move {
         shutdown_signal().await;
         let _ = shutdown_signal_tx.send(true);
@@ -1381,7 +1556,7 @@ mod tests {
         }))
         .expect("partial event");
 
-        let res = close_open_trade(&state, &partial, 1.1, 0.0)
+        let res = close_open_trade(&state, &partial, 4.0, 1.1, 0.0)
             .await
             .expect("partial close should work");
         assert!(matches!(res, CloseReconcileResult::Partial { .. }));
@@ -1415,7 +1590,7 @@ mod tests {
         }))
         .expect("full event");
 
-        let res = close_open_trade(&state, &full, 1.2, 0.0)
+        let res = close_open_trade(&state, &full, 6.0, 1.2, 0.0)
             .await
             .expect("full close should work");
         assert!(matches!(res, CloseReconcileResult::Closed { .. }));
