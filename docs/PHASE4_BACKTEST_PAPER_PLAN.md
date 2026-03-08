@@ -73,3 +73,6 @@ Deliverables:
 - Promotion criteria documented in `docs/operations/PHASE4_PROMOTION_GATE.md`.
 - Testnet micro gate runner added: `scripts/phase4-testnet-micro-gate.sh`.
 - Initial testnet micro evidence generated in `docs/operations/PHASE4_TESTNET_MICRO_2026-03-08.md`.
+- Controlled live gate runner added: `scripts/phase4-controlled-live-gate.sh`.
+- Initial controlled live gate evidence generated in `docs/operations/PHASE4_CONTROLLED_LIVE_2026-03-08.md`.
+- Decision package generated in `docs/operations/PHASE4_DECISION_PACKAGE_2026-03-08.md` (current decision: HOLD).
