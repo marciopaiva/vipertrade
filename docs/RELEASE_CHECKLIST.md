@@ -42,12 +42,21 @@
 
 ## Release Evidence
 
-Final Phase 1 closure evidence (2026-03-08):
+Final release evidence checkpoints (2026-03-08):
+
+Phase 1 closure evidence:
 
 - Controlled testnet smoke passed (`DOGEUSDT` ENTER/CLOSE) with executor statuses `submitted` + `submitted_close`.
 - Fill persistence verified in `bybit_fills` during smoke window.
 - Idempotency check passed (`duplicate source_event_id = 0`).
 - Manual smoke data cleanup executed after validation.
+
+Phase 3 closure evidence:
+
+- Validation report published: `docs/operations/PHASE3_VALIDATION_2026-03-08.md`.
+- `/api/v1` operational read endpoints validated in runtime and CI.
+- Performance parity check script passing against DB aggregates.
+- Kill-switch API validated with deny-by-default (`403`) and positive operator flow (`enable`/`disable`) with DB audit evidence.
 
 - Capture command outputs for:
   - `./scripts/ci-local.sh`
