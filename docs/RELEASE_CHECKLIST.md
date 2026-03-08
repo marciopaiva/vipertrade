@@ -42,6 +42,13 @@
 
 ## Release Evidence
 
+Final Phase 1 closure evidence (2026-03-08):
+
+- Controlled testnet smoke passed (`DOGEUSDT` ENTER/CLOSE) with executor statuses `submitted` + `submitted_close`.
+- Fill persistence verified in `bybit_fills` during smoke window.
+- Idempotency check passed (`duplicate source_event_id = 0`).
+- Manual smoke data cleanup executed after validation.
+
 - Capture command outputs for:
   - `./scripts/ci-local.sh`
   - `./scripts/validate-runtime.sh bridge`

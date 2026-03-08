@@ -55,3 +55,23 @@ Build a reliable execution backbone for WSL Fedora + Podman with deterministic T
 - Strategy service running deterministic plan in-process.
 - End-to-end decision path stable in local Podman stack.
 - Audit fields recorded for each decision.
+
+## Completion Status
+
+Status: Completed on 2026-03-08.
+
+### Exit Criteria Check
+
+- Strategy service running deterministic plan in-process: Completed.
+- End-to-end decision path stable in local Podman stack: Completed.
+- Audit fields recorded for each decision: Completed.
+
+### Final Evidence (2026-03-08)
+
+- Baseline health: all core services healthy (`postgres`, `redis`, `market-data`, `strategy`, `executor`, `api`, `web`).
+- Controlled testnet smoke (DOGEUSDT): `ENTER_LONG` + `CLOSE_LONG` successful.
+- Executor statuses: `submitted` and `submitted_close` recorded with Bybit order ids.
+- Fill persistence: `bybit_fills` populated during smoke run.
+- Idempotency: duplicate `source_event_id` count remained 0.
+- Post-validation hygiene: manual test data cleaned from `trades`, `system_events`, and `bybit_fills`.
+- Safety reset: `EXECUTOR_ENABLE_LIVE_ORDERS=false` and `EXECUTOR_RECONCILE_FIX=false` restored.
