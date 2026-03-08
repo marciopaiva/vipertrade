@@ -68,3 +68,6 @@ Deliverables:
 - Deterministic run script added: `scripts/phase4-backtest-run.sh`.
 - Initial run evidence generated in `docs/operations/PHASE4_BACKTEST_RUN_2026-03-08.md`.
 - JSON artifacts generated in `docs/operations/artifacts/backtest/`.
+- Paper regression runner added: `scripts/phase4-paper-regression.sh`.
+- Initial paper regression evidence generated in `docs/operations/PHASE4_PAPER_REGRESSION_2026-03-08.md`.
+- Promotion criteria documented in `docs/operations/PHASE4_PROMOTION_GATE.md`.
