@@ -165,15 +165,34 @@ enum CloseReconcileResult {
     Partial {
         trade_id: String,
         remaining_qty: f64,
+        realized_pnl: f64,
     },
     Closed {
         trade_id: String,
+        realized_pnl: f64,
     },
     CloseQtyExceedsOpen {
         trade_id: String,
         open_qty: f64,
         close_qty: f64,
+        realized_pnl: f64,
     },
+}
+
+fn realized_pnl(
+    side: &str,
+    entry_price: f64,
+    exit_price: f64,
+    quantity: f64,
+    leverage: f64,
+) -> f64 {
+    let signed_delta = if side == "Long" {
+        exit_price - entry_price
+    } else {
+        entry_price - exit_price
+    };
+
+    signed_delta * quantity * leverage
 }
 
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
@@ -416,8 +435,11 @@ async fn close_open_trade(
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
-    let open_trade: Option<(String, f64)> = sqlx::query_as(
-        "SELECT trade_id::text, quantity::double precision
+    let open_trade: Option<(String, f64, f64, f64)> = sqlx::query_as(
+        "SELECT trade_id::text,
+                quantity::double precision,
+                entry_price::double precision,
+                leverage::double precision
          FROM trades
          WHERE symbol = $1
            AND side = $2
@@ -430,28 +452,46 @@ async fn close_open_trade(
     .fetch_optional(pool)
     .await?;
 
-    let Some((trade_id, open_qty)) = open_trade else {
+    let Some((trade_id, open_qty, entry_price, leverage)) = open_trade else {
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
     let close_qty = event.decision.quantity;
+    let close_price = event.decision.entry_price;
     let eps = 1e-9_f64;
+    let effective_close_qty = if close_qty > open_qty {
+        open_qty
+    } else {
+        close_qty
+    };
+    let pnl_delta = realized_pnl(
+        side,
+        entry_price,
+        close_price,
+        effective_close_qty,
+        leverage,
+    );
 
     if close_qty + eps < open_qty {
         sqlx::query(
             "UPDATE trades
              SET quantity = quantity - $2,
+                 pnl = COALESCE(pnl, 0) + $3,
+                 exit_price = $4,
                  updated_at = NOW()
              WHERE trade_id::text = $1",
         )
         .bind(&trade_id)
         .bind(close_qty)
+        .bind(pnl_delta)
+        .bind(close_price)
         .execute(pool)
         .await?;
 
         return Ok(CloseReconcileResult::Partial {
             trade_id,
             remaining_qty: open_qty - close_qty,
+            realized_pnl: pnl_delta,
         });
     }
 
@@ -460,10 +500,18 @@ async fn close_open_trade(
          SET status = 'closed',
              close_reason = 'manual',
              closed_at = NOW(),
+             pnl = COALESCE(pnl, 0) + $2,
+             pnl_pct = CASE
+                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2) / (entry_price * quantity)) * 100)
+                 ELSE NULL
+             END,
+             exit_price = $3,
              updated_at = NOW()
          WHERE trade_id::text = $1",
     )
     .bind(&trade_id)
+    .bind(pnl_delta)
+    .bind(close_price)
     .execute(pool)
     .await?;
 
@@ -472,10 +520,14 @@ async fn close_open_trade(
             trade_id,
             open_qty,
             close_qty,
+            realized_pnl: pnl_delta,
         });
     }
 
-    Ok(CloseReconcileResult::Closed { trade_id })
+    Ok(CloseReconcileResult::Closed {
+        trade_id,
+        realized_pnl: pnl_delta,
+    })
 }
 
 async fn submit_market_order(
@@ -611,20 +663,32 @@ async fn handle_decision_event(
 
             if is_close_action(&event.decision.action) {
                 match close_open_trade(state, &event).await {
-                    Ok(CloseReconcileResult::Closed { trade_id }) => {
+                    Ok(CloseReconcileResult::Closed {
+                        trade_id,
+                        realized_pnl,
+                    }) => {
                         println!(
-                            "Reconciled local close event_id={} trade_id={} symbol={} action={}",
-                            event.event_id, trade_id, event.decision.symbol, event.decision.action
+                            "Reconciled local close event_id={} trade_id={} symbol={} action={} realized_pnl={}",
+                            event.event_id,
+                            trade_id,
+                            event.decision.symbol,
+                            event.decision.action,
+                            realized_pnl
                         );
                         status = "submitted_close";
                     }
                     Ok(CloseReconcileResult::Partial {
                         trade_id,
                         remaining_qty,
+                        realized_pnl,
                     }) => {
                         println!(
-                            "Reconciled partial close event_id={} trade_id={} symbol={} remaining_qty={}",
-                            event.event_id, trade_id, event.decision.symbol, remaining_qty
+                            "Reconciled partial close event_id={} trade_id={} symbol={} remaining_qty={} realized_pnl={}",
+                            event.event_id,
+                            trade_id,
+                            event.decision.symbol,
+                            remaining_qty,
+                            realized_pnl
                         );
                         status = "submitted_close_partial";
                     }
@@ -632,10 +696,16 @@ async fn handle_decision_event(
                         trade_id,
                         open_qty,
                         close_qty,
+                        realized_pnl,
                     }) => {
                         eprintln!(
-                            "Close qty exceeds local open qty event_id={} trade_id={} symbol={} close_qty={} open_qty={}",
-                            event.event_id, trade_id, event.decision.symbol, close_qty, open_qty
+                            "Close qty exceeds local open qty event_id={} trade_id={} symbol={} close_qty={} open_qty={} realized_pnl={}",
+                            event.event_id,
+                            trade_id,
+                            event.decision.symbol,
+                            close_qty,
+                            open_qty,
+                            realized_pnl
                         );
                         status = "submitted_close_qty_exceeds_open";
                     }
@@ -856,9 +926,18 @@ mod tests {
         let result = CloseReconcileResult::Partial {
             trade_id: "t1".to_string(),
             remaining_qty: 2.5,
+            realized_pnl: 1.25,
         };
         let text = format!("{:?}", result);
         assert!(text.contains("Partial"));
+    }
+
+    #[test]
+    fn calculates_realized_pnl() {
+        let long_pnl = realized_pnl("Long", 100.0, 110.0, 2.0, 2.0);
+        let short_pnl = realized_pnl("Short", 100.0, 90.0, 2.0, 2.0);
+        assert_eq!(long_pnl, 40.0);
+        assert_eq!(short_pnl, 40.0);
     }
 
     #[test]
