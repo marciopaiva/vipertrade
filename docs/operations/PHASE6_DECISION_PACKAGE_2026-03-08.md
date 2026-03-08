@@ -22,10 +22,14 @@
 
 ## Current Decision
 
-- Current decision: GO (testnet/simulation readiness).
+- Current decision: GO (phase closed under no-mainnet policy).
 
 ## Notes
 
 - Baseline readiness checks passed with `issues=0`.
 - Testnet micro gate passed with `issues=0`, rollback flow validated, and safe posture confirmed.
 - Mainnet order testing is explicitly out of scope by policy; production controls are validated on testnet/simulation only.
+
+## Closure
+
+- Phase 6 is formally closed for this cycle using testnet/simulation readiness criteria.
