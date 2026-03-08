@@ -26,6 +26,9 @@ Deliver an operator-grade API surface for Lead Trader operations, with explicit 
   - deterministic windows with shared reference timestamp in `/api/v1/performance`
   - 6-decimal normalization for `win_rate` and `total_pnl`
   - consistency check script: `scripts/check-api-metrics-consistency.sh`
+- Item 4 delivered (kill-switch runtime controls):
+  - operational script: `scripts/kill-switch-control.sh`
+  - rollback and verification playbook in `docs/operations/RUNBOOK.md` section `12) API Kill-Switch Playbook`
 
 ## Workstreams
 
