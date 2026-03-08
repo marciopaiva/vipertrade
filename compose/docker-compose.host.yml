@@ -108,7 +108,6 @@ services:
       REDIS_URL: redis://localhost:6379
       TUPA_SEED: ${TUPA_SEED:-42}
       TUPA_BACKEND: ${TUPA_BACKEND:-hybrid}
-      TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       DB_HOST: localhost
@@ -323,6 +322,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB:-vipertrade}
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ${JWT_SECRET:-generate_me}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
+      OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_api=info"
     healthcheck:
