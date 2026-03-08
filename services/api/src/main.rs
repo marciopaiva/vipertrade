@@ -20,15 +20,6 @@ struct AppState {
     operator_api_token: Option<String>,
 }
 
-#[derive(Debug)]
-struct AuthRejection {
-    code: StatusCode,
-    error: &'static str,
-    message: String,
-}
-
-impl warp::reject::Reject for AuthRejection {}
-
 #[derive(Serialize)]
 struct ApiError {
     error: &'static str,
@@ -188,51 +179,8 @@ fn with_state(
     warp::any().map(move || state.clone())
 }
 
-fn with_operator_auth(
-    state: Arc<AppState>,
-) -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
-    warp::header::optional::<String>("x-operator-token")
-        .and(warp::header::optional::<String>("x-operator-id"))
-        .and(with_state(state))
-        .and_then(
-            |token_header: Option<String>,
-             operator_id_header: Option<String>,
-             state: Arc<AppState>| async move {
-                if !state.operator_auth_mode.eq_ignore_ascii_case("token") {
-                    return Err(warp::reject::custom(AuthRejection {
-                        code: StatusCode::FORBIDDEN,
-                        error: "auth_not_configured",
-                        message: "operator auth mode is not configured for token controls"
-                            .to_string(),
-                    }));
-                }
-
-                let Some(configured_token) = &state.operator_api_token else {
-                    return Err(warp::reject::custom(AuthRejection {
-                        code: StatusCode::FORBIDDEN,
-                        error: "auth_not_configured",
-                        message: "operator control auth is not configured".to_string(),
-                    }));
-                };
-
-                if token_header.as_deref() != Some(configured_token.as_str()) {
-                    return Err(warp::reject::custom(AuthRejection {
-                        code: StatusCode::UNAUTHORIZED,
-                        error: "invalid_token",
-                        message: "missing or invalid operator token".to_string(),
-                    }));
-                }
-
-                Ok(operator_id_header.unwrap_or_else(|| "operator".to_string()))
-            },
-        )
-}
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
-    if let Some(auth) = err.find::<AuthRejection>() {
-        return Ok(json_err(auth.code, auth.error, auth.message.clone()));
-    }
-
     if err.is_not_found() {
         return Ok(json_err(
             StatusCode::NOT_FOUND,
@@ -241,10 +189,26 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
         ));
     }
 
+    if err.find::<warp::reject::MethodNotAllowed>().is_some() {
+        return Ok(json_err(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+            "method not allowed",
+        ));
+    }
+
+    if let Some(body_err) = err.find::<warp::filters::body::BodyDeserializeError>() {
+        return Ok(json_err(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("invalid request body: {}", body_err),
+        ));
+    }
+
     Ok(json_err(
         StatusCode::INTERNAL_SERVER_ERROR,
         "internal_error",
-        "unhandled rejection",
+        format!("unhandled rejection: {:?}", err),
     ))
 }
 
@@ -627,9 +591,34 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
 
 async fn kill_switch_handler(
     req: KillSwitchRequest,
-    operator_id: String,
+    token_header: Option<String>,
+    operator_id_header: Option<String>,
     state: Arc<AppState>,
 ) -> impl Reply {
+    if !state.operator_auth_mode.eq_ignore_ascii_case("token") {
+        return json_err(
+            StatusCode::FORBIDDEN,
+            "auth_not_configured",
+            "operator auth mode is not configured for token controls",
+        );
+    }
+
+    let Some(configured_token) = &state.operator_api_token else {
+        return json_err(
+            StatusCode::FORBIDDEN,
+            "auth_not_configured",
+            "operator control auth is not configured",
+        );
+    };
+
+    if token_header.as_deref() != Some(configured_token.as_str()) {
+        return json_err(
+            StatusCode::UNAUTHORIZED,
+            "invalid_token",
+            "missing or invalid operator token",
+        );
+    }
+
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -638,6 +627,7 @@ async fn kill_switch_handler(
         );
     };
 
+    let operator_id = operator_id_header.unwrap_or_else(|| "operator".to_string());
     let reason = req
         .reason
         .clone()
@@ -780,7 +770,8 @@ async fn main() {
         .and(warp::path::end())
         .and(warp::post())
         .and(warp::body::json::<KillSwitchRequest>())
-        .and(with_operator_auth(state.clone()))
+        .and(warp::header::optional::<String>("x-operator-token"))
+        .and(warp::header::optional::<String>("x-operator-id"))
         .and(with_state(state.clone()))
         .then(kill_switch_handler);
 

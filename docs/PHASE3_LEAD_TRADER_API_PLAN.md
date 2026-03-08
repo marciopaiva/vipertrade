@@ -29,6 +29,9 @@ Deliver an operator-grade API surface for Lead Trader operations, with explicit 
 - Item 4 delivered (kill-switch runtime controls):
   - operational script: `scripts/kill-switch-control.sh`
   - rollback and verification playbook in `docs/operations/RUNBOOK.md` section `12) API Kill-Switch Playbook`
+- Item 5 delivered (validation and evidence):
+  - evidence file: `docs/operations/PHASE3_VALIDATION_2026-03-08.md`
+  - validated: public/read endpoints, metrics parity, deny-by-default auth, positive control write + DB audit evidence
 
 ## Workstreams
 
