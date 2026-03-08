@@ -63,4 +63,4 @@ Deliverables:
 ## Current Progress
 
 - Item 1 started: baseline validation script introduced (`scripts/phase4-validate.sh`).
-- Initial baseline evidence generated in `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+- Initial baseline evidence generated in `docs/operations/PHASE4_BASELINE_2026-03-08.md`.n
