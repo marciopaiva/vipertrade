@@ -179,7 +179,6 @@ fn with_state(
     warp::any().map(move || state.clone())
 }
 
-
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     if err.is_not_found() {
         return Ok(json_err(
