@@ -1,20 +1,22 @@
-# 🐍 **VIPERTRADE v0.0.1 - Especificação Técnica Completa**
+# 🐍 **VIPERTRADE v0.8.0 - Especificação Técnica Completa**
 
 > **Lead Trader Bot para Bybit Copy Trading Classic**  
-> *Otimizado para Smart Copy Mode com Trailing Stop Dinâmico*
+> *Otimizado para Smart Copy Mode com Trailing Stop Dinâmico*  
+> *Integrado com Tupã v0.8.0 (crates.io)*
 
-**Versão:** 0.0.1  
-**Última Atualização:** Fevereiro 2026  
+**Versão:** 0.8.0  
+**Última Atualização:** Março 2026  
 **Status:** ✅ 100% Especificado - Pronto para Implementação  
 **Pares de Trading:** DOGEUSDT, XRPUSDT, TRXUSDT, XLMUSDT  
 **Modo de Copy:** Smart Copy (Recomendado)  
-**Trailing Stop:** Dinâmico Progressivo (Ratcheting)
+**Trailing Stop:** Dinâmico Progressivo (Ratcheting)  
+**Tupã Integration:** crates.io v0.8.0 (stable)
 
 ---
 
 ## 📋 **Índice**
 
-```text
+```
 1. Visão Geral do Projeto
 2. Arquitetura do Sistema
 3. Configuração dos 4 Pares de Trading
@@ -26,7 +28,7 @@
 9. Disaster Recovery Procedures
 10. Secrets Management
 11. Discord Notifications
-12. Tupã Language Integration
+12. Tupã Language Integration (crates.io v0.8.0)
 13. Lead Trader Operations
 14. Backtesting Engine
 15. Smart Copy Mode Optimization
@@ -35,6 +37,8 @@
 18. Checklist de Validação
 19. Comandos e Scripts Úteis
 20. API Reference
+21. Versionamento e Compatibilidade Tupã
+22. Tupã crates.io Integration
 ```
 
 ---
@@ -43,23 +47,22 @@
 
 ### **1.1 Objetivo**
 
-ViperTrade é um **Lead Trader Bot** automatizado para a plataforma **Bybit Copy Trading Classic**.
-Ele executa estratégia própria de trading e permite que outros usuários da Bybit copiem suas operações automaticamente via Smart Copy Mode.
+ViperTrade é um **Lead Trader Bot** automatizado para a plataforma **Bybit Copy Trading Classic**. Ele executa estratégia própria de trading e permite que outros usuários da Bybit copiem suas operações automaticamente via Smart Copy Mode.
 
 ### **1.2 Diferenciais Competitivos**
 
 | Diferencial | Descrição | Benefício |
-| ----------- | ----------- | ----------- |
-| **Tupã Engine** | Linguagem de orquestração determinística | Auditabilidade completa, decisões reproduzíveis |
-| **Trailing Stop Dinâmico** | Ajusta progressivamente conforme lucro aumenta | Protege ganhos, deixa winners correrem |
-| **Smart Copy Optimized** | Position sizing previsível e estável | Menos falhas de copy, mais followers |
-| **3 Perfis de Risco** | Conservative / Medium / Aggressive | Adaptável a diferentes condições de mercado |
-| **Risk Management Multi-Camada** | 4 níveis de proteção | Preservação de capital em primeiro lugar |
+|------------|-----------|-----------|
+| **Tupã Engine v0.8.0** | Linguagem de orquestração determinística via crates.io | Auditabilidade completa, builds estáveis, semver |
+| **Trailing Stop Dinâmico** | Ajusta progressivamente conforme lucro aumenta (ratcheting) | Protege ganhos, deixa winners correrem |
+| **Smart Copy Optimized** | Position sizing previsível ($5-$30) e estável | Menos falhas de copy, mais followers |
+| **3 Perfis de Risco** | Conservative / Medium / Aggressive com parâmetros distintos | Adaptável a diferentes condições de mercado |
+| **Risk Management Multi-Camada** | 4 níveis de proteção + circuit breakers nativos | Preservação de capital em primeiro lugar |
 
 ### **1.3 Metas de Performance (Públicas para Followers)**
 
 | Métrica | Target (30d) | Importância |
-| --------- | ------------- | ------------- |
+|---------|-------------|-------------|
 | Win Rate | 50-60% | Alta - atrai followers |
 | Max Drawdown | < 15% | Crítica - retém followers |
 | Profit Factor | > 1.5 | Alta - credibilidade |
@@ -88,9 +91,9 @@ position_sizing:
 
 ### **2.1 Diagrama de Componentes**
 
-```text
+```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    VIPERTRADE v0.0.1                            │
+│                    VIPERTRADE v0.8.0                            │
 │                    (Lead Trader Bot)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
@@ -112,6 +115,7 @@ position_sizing:
 │  │  • position_snapshots (reconciliação)                    │  │
 │  │  • system_events (audit trail)                           │  │
 │  │  • daily_metrics (agregados)                             │  │
+│  │  • tupa_audit_logs (logs estruturados)                   │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                              │                                  │
 │                              ▼                                  │
@@ -136,7 +140,7 @@ position_sizing:
 ### **2.2 Serviços Docker/Podman**
 
 | Serviço | Função | Memória | CPU | Restart |
-| --------- | -------- | --------- | ----- | --------- |
+|---------|--------|---------|-----|---------|
 | postgres | Database | 512MB | 0.5 | unless-stopped |
 | redis | Cache/PubSub | 128MB | 0.25 | unless-stopped |
 | market-data | WebSocket Subscriber | 256MB | 0.5 | unless-stopped |
@@ -148,7 +152,7 @@ position_sizing:
 
 ### **2.3 Fluxo de Decisão de Trading**
 
-```text
+```
 1. Bybit WebSocket → Market Data → Redis Pub/Sub
 2. Redis Pub/Sub → Tupã Strategy Engine → Decision (ENTER_LONG/ENTER_SHORT/HOLD/CLOSE)
 3. Decision → Risk Manager → Validate (daily loss, exposure, circuit breakers)
@@ -156,6 +160,7 @@ position_sizing:
 5. Execution Result → Database + Monitor
 6. Monitor → Trailing Stop (ajusta dinamicamente) + Discord Webhook (se necessário)
 7. Reconciliation → Bybit API vs Local DB (a cada 5min)
+8. Audit → tupa_audit_logs → JSON estruturado para compliance
 ```
 
 ---
@@ -187,53 +192,307 @@ trading_pairs:
     min_24h_volume_usdt: 60000000
 ```
 
-### **3.2 Parâmetros Específicos por Par**
+### **3.2 Parâmetros Específicos por Par (config/trading/pairs.yaml)**
 
 ```yaml
 # config/trading/pairs.yaml
+# ViperTrade v0.8.0 - Trading Pairs Configuration
+# Otimizado para Smart Copy Mode com Trailing Stop Dinâmico
+
+global:
+  smart_copy:
+    enabled: true
+    min_position_usdt: 5
+    max_position_usdt: 30
+    target_position_usdt: 10-20
+    max_position_change_pct: 0.30
+  
+  trailing_stop:
+    enabled: true
+    check_interval_ms: 500
+    max_updates_per_min: 10
+    min_move_threshold_pct: 0.002
+  
+  risk:
+    max_daily_loss_pct: 0.03
+    max_consecutive_losses: 3
+    max_open_positions: 2
+    max_total_exposure_pct: 0.50
+  
+  entry_filters:
+    avoid_hours_utc: ["00:00-02:00", "22:00-23:59"]
+    min_volume_24h_usdt: 30000000
+    max_spread_pct: 0.001
+    max_atr_pct: 0.05
+    max_funding_rate_pct: 0.015
+
 DOGEUSDT:
-  price_precision: 5
-  qty_precision: 0
-  tick_size: 0.00001
-  step_size: 1
+  enabled: true
+  category: "meme_coin"
+  volatility_profile: "high"
+  
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
   risk:
     stop_loss_pct: 0.02
     take_profit_pct: 0.04
-    max_position_usdt: 15
+    max_position_usdt: 15.00
+    atr_period: 14
     atr_multiplier: 0.5
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      MEDIUM:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.015
+          - at_profit_pct: 0.08
+            trail_pct: 0.025
+        move_to_break_even_at: 0.025
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.025
+        initial_trail_pct: 0.012
+        ratchet_levels:
+          - at_profit_pct: 0.05
+            trail_pct: 0.02
+          - at_profit_pct: 0.10
+            trail_pct: 0.035
+        move_to_break_even_at: 0.03
+  
+  liquidity:
+    min_24h_volume_usdt: 50000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: false
+    warning: "High volatility - use Conservative profile"
 
 XRPUSDT:
-  price_precision: 4
-  qty_precision: 1
-  tick_size: 0.0001
-  step_size: 1
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium-high"
+  
+  bybit:
+    price_precision: 4
+    qty_precision: 1
+    tick_size: 0.0001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
   risk:
     stop_loss_pct: 0.018
     take_profit_pct: 0.036
-    max_position_usdt: 20
+    max_position_usdt: 20.00
+    atr_period: 14
     atr_multiplier: 0.6
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.01
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.018
+          - at_profit_pct: 0.08
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 100000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
 
 TRXUSDT:
-  price_precision: 5
-  qty_precision: 0
-  tick_size: 0.00001
-  step_size: 1
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium"
+  
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
   risk:
     stop_loss_pct: 0.015
     take_profit_pct: 0.030
-    max_position_usdt: 20
+    max_position_usdt: 20.00
+    atr_period: 14
     atr_multiplier: 0.7
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.01
+        initial_trail_pct: 0.005
+        ratchet_levels:
+          - at_profit_pct: 0.02
+            trail_pct: 0.008
+          - at_profit_pct: 0.04
+            trail_pct: 0.015
+        move_to_break_even_at: 0.015
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+          - at_profit_pct: 0.10
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 80000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
 
 XLMUSDT:
-  price_precision: 5
-  qty_precision: 0
-  tick_size: 0.00001
-  step_size: 1
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium-high"
+  
+  bybit:
+    price_precision: 5
+    qty_precision: 0
+    tick_size: 0.00001
+    step_size: 1
+    min_order_value_usdt: 5.00
+    max_order_value_usdt: 50.00
+  
   risk:
     stop_loss_pct: 0.018
     take_profit_pct: 0.036
-    max_position_usdt: 20
+    max_position_usdt: 20.00
+    atr_period: 14
     atr_multiplier: 0.6
+  
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.01
+          - at_profit_pct: 0.05
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.015
+        initial_trail_pct: 0.008
+        ratchet_levels:
+          - at_profit_pct: 0.03
+            trail_pct: 0.012
+          - at_profit_pct: 0.06
+            trail_pct: 0.02
+        move_to_break_even_at: 0.02
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.02
+        initial_trail_pct: 0.01
+        ratchet_levels:
+          - at_profit_pct: 0.04
+            trail_pct: 0.018
+          - at_profit_pct: 0.08
+            trail_pct: 0.03
+        move_to_break_even_at: 0.025
+  
+  liquidity:
+    min_24h_volume_usdt: 60000000
+    max_spread_pct: 0.001
+    avoid_during_low_liquidity: true
+  
+  smart_copy:
+    recommended_for_beginners: true
+    warning: null
+
+profiles:
+  CONSERVATIVE:
+    risk_per_trade_pct: 0.75
+    max_leverage: 2
+    max_daily_loss_pct: 0.02
+    max_open_positions: 1
+    max_total_exposure_pct: 0.30
+    trailing_stop_aggressiveness: "high"
+    position_sizing_multiplier: 0.6
+  
+  MEDIUM:
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
+    max_daily_loss_pct: 0.03
+    max_open_positions: 2
+    max_total_exposure_pct: 0.50
+    trailing_stop_aggressiveness: "medium"
+    position_sizing_multiplier: 1.0
+  
+  AGGRESSIVE:
+    risk_per_trade_pct: 2.00
+    max_leverage: 3
+    max_daily_loss_pct: 0.05
+    max_open_positions: 3
+    max_total_exposure_pct: 0.70
+    trailing_stop_aggressiveness: "low"
+    position_sizing_multiplier: 1.4
 ```
 
 ---
@@ -243,7 +502,7 @@ XLMUSDT:
 ### **4.1 Três Perfis de Risco**
 
 | Parâmetro | 🟢 Conservative | 🟡 Medium | 🔴 Aggressive |
-| ----------- | ---------------- | ----------- | --------------- |
+|-----------|----------------|-----------|---------------|
 | **Risk por Trade** | 0.75% | 1.25% | 2.00% |
 | **Stop Loss** | 1.0% | 1.5% | 2.5% |
 | **Take Profit** | 2.0% | 3.0% | 5.0% |
@@ -256,36 +515,43 @@ XLMUSDT:
 | **Consecutive Loss Limit** | 2 | 3 | 5 |
 | **Time Exit (max)** | 60min | 90min | 120min |
 
-### **4.2 Circuit Breakers**
+### **4.2 Circuit Breakers Nativos (Tupã v0.8.0)**
 
 ```yaml
 circuit_breakers:
-  daily_loss_limit:
-    Conservative: 2%
-    Medium: 3%
-    Aggressive: 5%
-    action: "pause_new_entries_until_utc_midnight"
+  # Configurados via @constraints no pipeline Tupã
+  native_constraints:
+    circuit_breaker: { max_consecutive_failures: 3, timeout_seconds: 300 }
+    risk_limit: { max_drawdown_pct: 0.10, daily_loss_pct: 0.05 }
   
-  consecutive_losses:
-    Conservative: 2
-    Medium: 3
-    Aggressive: 5
-    action: "pause_trading_30min"
-  
-  volatility_spike:
-    atr_increase_threshold: 50%
-    action: "reduce_position_sizing_50%"
-  
-  flash_crash:
-    price_drop_5min_threshold: 5%
-    action: "close_all_longs_pause_trading"
-  
-  liquidation_cascade:
-    market_liquidations_1h_usd: 100000000
-    action: "reduce_exposure_50%"
+  # Comportamento por tipo
+  by_type:
+    daily_loss_limit:
+      Conservative: 2%
+      Medium: 3%
+      Aggressive: 5%
+      action: "pause_new_entries_until_utc_midnight"
+    
+    consecutive_losses:
+      Conservative: 2
+      Medium: 3
+      Aggressive: 5
+      action: "pause_trading_30min"
+    
+    volatility_spike:
+      atr_increase_threshold: 50%
+      action: "reduce_position_sizing_50%"
+    
+    flash_crash:
+      price_drop_5min_threshold: 5%
+      action: "close_all_longs_pause_trading"
+    
+    liquidation_cascade:
+      market_liquidations_1h_usd: 100000000
+      action: "reduce_exposure_50%"
 ```
 
-### **4.3 Position Sizing (ATR-Adjusted)**
+### **4.3 Position Sizing (ATR-Adjusted + Smart Copy)**
 
 ```yaml
 position_sizing:
@@ -316,35 +582,88 @@ position_sizing:
 
 ## 5️⃣ **Database Schema**
 
-### **5.1 Tabelas Principais**
+### **5.1 Tabelas Principais (database/schema.sql)**
 
 ```sql
--- Tabela 1: trades (Histórico imutável)
+-- database/schema.sql
+-- ViperTrade Database Schema v0.8.0
+-- Otimizado para Tupã audit logging e Smart Copy tracking
+
+-- ═══════════════════════════════════════════════════════════
+-- EXTENSIONS
+-- ═══════════════════════════════════════════════════════════
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 1: trades (Histórico imutável de operações)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE trades (
     trade_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     bybit_order_id TEXT UNIQUE,
-    symbol TEXT NOT NULL,
+    order_link_id TEXT UNIQUE,
+    
+    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'TRXUSDT', 'XLMUSDT')),
     side TEXT NOT NULL CHECK (side IN ('Long', 'Short')),
-    quantity NUMERIC NOT NULL,
-    entry_price NUMERIC NOT NULL,
+    
+    quantity NUMERIC NOT NULL CHECK (quantity > 0),
+    entry_price NUMERIC NOT NULL CHECK (entry_price > 0),
     exit_price NUMERIC,
-    leverage NUMERIC NOT NULL DEFAULT 2,
+    leverage NUMERIC NOT NULL DEFAULT 2 CHECK (leverage >= 1 AND leverage <= 3),
+    
     pnl NUMERIC,
     pnl_pct NUMERIC,
     fees NUMERIC DEFAULT 0,
     funding_paid NUMERIC DEFAULT 0,
+    slippage_pct NUMERIC DEFAULT 0,
+    
     opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at TIMESTAMPTZ,
-    status TEXT NOT NULL DEFAULT 'open',
-    close_reason TEXT,
-    pipeline_version TEXT,
-    decision_hash TEXT,
+    duration_seconds INTEGER GENERATED ALWAYS AS (
+        EXTRACT(EPOCH FROM (closed_at - opened_at))::INTEGER
+    ) STORED,
+    
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'liquidated', 'cancelled', 'rejected')),
+    close_reason TEXT CHECK (close_reason IN ('take_profit', 'stop_loss', 'trailing_stop', 'time_exit', 'manual', 'liquidation', 'circuit_breaker', 'error')),
+    
+    -- Tupã Engine Audit (CRÍTICO para compliance)
+    pipeline_version TEXT NOT NULL DEFAULT '0.8.0',
+    decision_hash TEXT NOT NULL,
+    execution_hash TEXT,
+    constraints_satisfied BOOLEAN DEFAULT true,
+    
+    -- Smart Copy metadata
+    smart_copy_compatible BOOLEAN DEFAULT true,
+    copy_ratio NUMERIC DEFAULT 1.0,
+    
+    -- Trailing stop tracking
+    trailing_stop_activated BOOLEAN DEFAULT false,
+    trailing_stop_peak_price NUMERIC,
+    trailing_stop_final_distance_pct NUMERIC,
+    
+    trading_profile TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (trading_profile IN ('CONSERVATIVE', 'MEDIUM', 'AGGRESSIVE')),
+    
     paper_trade BOOLEAN DEFAULT FALSE,
+    
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tabela 2: position_snapshots (Reconciliação)
+CREATE INDEX idx_trades_status ON trades(status);
+CREATE INDEX idx_trades_symbol ON trades(symbol);
+CREATE INDEX idx_trades_opened_at ON trades(opened_at);
+CREATE INDEX idx_trades_pnl ON trades(pnl);
+CREATE INDEX idx_trades_decision_hash ON trades(decision_hash);
+CREATE INDEX idx_trades_paper_trade ON trades(paper_trade);
+CREATE INDEX idx_trades_profile ON trades(trading_profile);
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 2: position_snapshots (Para reconciliação Bybit vs Local)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE position_snapshots (
     snapshot_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol TEXT NOT NULL,
@@ -353,24 +672,45 @@ CREATE TABLE position_snapshots (
     divergence NUMERIC,
     divergence_pct NUMERIC,
     reconciled BOOLEAN DEFAULT FALSE,
+    reconciliation_notes TEXT,
     snapshot_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tabela 3: system_events (Audit trail)
+CREATE INDEX idx_snapshots_symbol ON position_snapshots(symbol);
+CREATE INDEX idx_snapshots_reconciled ON position_snapshots(reconciled);
+CREATE INDEX idx_snapshots_created_at ON position_snapshots(created_at);
+CREATE INDEX idx_snapshots_divergence ON position_snapshots(divergence_pct) WHERE divergence_pct > 0.01;
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 3: system_events (Audit trail de todos os eventos)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE system_events (
     event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     event_type TEXT NOT NULL,
-    severity TEXT NOT NULL DEFAULT 'info',
-    category TEXT,
+    severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('debug', 'info', 'warning', 'error', 'critical')),
+    category TEXT CHECK (category IN ('trade', 'risk', 'system', 'notification', 'reconciliation', 'tupa', 'circuit_breaker')),
     data JSONB NOT NULL,
     symbol TEXT,
-    trade_id UUID REFERENCES trades(trade_id),
+    trade_id UUID REFERENCES trades(trade_id) ON DELETE SET NULL,
+    pipeline_version TEXT,
+    decision_hash TEXT,
     timestamp TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tabela 4: daily_metrics (Agregados)
+CREATE INDEX idx_events_type ON system_events(event_type);
+CREATE INDEX idx_events_severity ON system_events(severity);
+CREATE INDEX idx_events_timestamp ON system_events(timestamp);
+CREATE INDEX idx_events_symbol ON system_events(symbol);
+CREATE INDEX idx_events_category ON system_events(category);
+CREATE INDEX idx_events_critical ON system_events(severity, timestamp) WHERE severity IN ('error', 'critical');
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 4: daily_metrics (Agregados diários para dashboard)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE daily_metrics (
     date DATE PRIMARY KEY,
     total_trades INTEGER DEFAULT 0,
@@ -380,36 +720,170 @@ CREATE TABLE daily_metrics (
     total_pnl NUMERIC DEFAULT 0,
     total_pnl_pct NUMERIC DEFAULT 0,
     total_fees NUMERIC DEFAULT 0,
+    total_funding NUMERIC DEFAULT 0,
+    avg_slippage_pct NUMERIC DEFAULT 0,
     max_drawdown NUMERIC DEFAULT 0,
+    max_position_size NUMERIC DEFAULT 0,
+    circuit_breaker_triggers INTEGER DEFAULT 0,
+    consecutive_losses INTEGER DEFAULT 0,
+    pipeline_executions INTEGER DEFAULT 0,
+    avg_execution_latency_ms NUMERIC DEFAULT 0,
+    constraints_violations INTEGER DEFAULT 0,
+    copy_success_rate NUMERIC DEFAULT 1.0,
+    failed_copies INTEGER DEFAULT 0,
     by_pair JSONB DEFAULT '{}',
+    by_profile JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tabela 5: profile_history (Mudanças de perfil)
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 5: tupa_audit_logs (Logs estruturados do Tupã Engine)
+-- ═══════════════════════════════════════════════════════════
+
+CREATE TABLE tupa_audit_logs (
+    log_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    execution_id TEXT NOT NULL,
+    pipeline_name TEXT NOT NULL,
+    pipeline_version TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    decision_hash TEXT NOT NULL,
+    input_data JSONB,
+    output_data JSONB,
+    constraints_results JSONB,
+    execution_time_ms INTEGER,
+    memory_used_kb INTEGER,
+    environment JSONB,
+    executed_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_execution_id ON tupa_audit_logs(execution_id);
+CREATE INDEX idx_audit_pipeline ON tupa_audit_logs(pipeline_name, pipeline_version);
+CREATE INDEX idx_audit_timestamp ON tupa_audit_logs(executed_at);
+CREATE INDEX idx_audit_decision ON tupa_audit_logs(decision_hash);
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 6: profile_history (Tracking de mudanças de perfil)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE profile_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    profile_code TEXT NOT NULL,
+    profile_code TEXT NOT NULL CHECK (profile_code IN ('CONSERVATIVE', 'MEDIUM', 'AGGRESSIVE')),
     changed_at TIMESTAMPTZ DEFAULT NOW(),
     reason TEXT,
     previous_profile TEXT,
-    user_id TEXT
+    user_id TEXT,
+    metadata JSONB
 );
 
--- Tabela 6: schema_migrations (Versionamento)
+CREATE INDEX idx_profile_history_changed_at ON profile_history(changed_at);
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 7: circuit_breaker_events (Histórico de circuit breakers)
+-- ═══════════════════════════════════════════════════════════
+
+CREATE TABLE circuit_breaker_events (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    breaker_type TEXT NOT NULL CHECK (breaker_type IN ('daily_loss', 'consecutive_losses', 'volatility_spike', 'flash_crash', 'liquidation_cascade')),
+    trigger_value NUMERIC NOT NULL,
+    threshold_value NUMERIC NOT NULL,
+    action_taken TEXT NOT NULL,
+    positions_affected INTEGER DEFAULT 0,
+    activated_at TIMESTAMPTZ DEFAULT NOW(),
+    deactivated_at TIMESTAMPTZ,
+    duration_seconds INTEGER GENERATED ALWAYS AS (
+        EXTRACT(EPOCH FROM (deactivated_at - activated_at))::INTEGER
+    ) STORED,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_circuit_breaker_type ON circuit_breaker_events(breaker_type);
+CREATE INDEX idx_circuit_breaker_activated ON circuit_breaker_events(activated_at);
+
+-- ═══════════════════════════════════════════════════════════
+-- TABLE 8: schema_migrations (Versionamento do schema)
+-- ═══════════════════════════════════════════════════════════
+
 CREATE TABLE schema_migrations (
     version TEXT PRIMARY KEY,
-    applied_at TIMESTAMPTZ DEFAULT NOW()
+    applied_at TIMESTAMPTZ DEFAULT NOW(),
+    checksum TEXT NOT NULL,
+    description TEXT
 );
 
--- Índices de performance
-CREATE INDEX idx_trades_status ON trades(status);
-CREATE INDEX idx_trades_symbol ON trades(symbol);
-CREATE INDEX idx_trades_opened_at ON trades(opened_at);
-CREATE INDEX idx_trades_pnl ON trades(pnl);
-CREATE INDEX idx_snapshots_reconciled ON position_snapshots(reconciled);
-CREATE INDEX idx_events_severity ON system_events(severity);
-CREATE INDEX idx_events_timestamp ON system_events(timestamp);
+-- ═══════════════════════════════════════════════════════════
+-- FUNCTIONS & TRIGGERS
+-- ═══════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_trades_updated_at
+    BEFORE UPDATE ON trades
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_daily_metrics_updated_at
+    BEFORE UPDATE ON daily_metrics
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE OR REPLACE FUNCTION calculate_win_rate(start_date DATE, end_date DATE)
+RETURNS NUMERIC AS $$
+DECLARE
+    total INTEGER;
+    wins INTEGER;
+BEGIN
+    SELECT COUNT(*), COUNT(*) FILTER (WHERE pnl > 0)
+    INTO total, wins
+    FROM trades
+    WHERE status = 'closed'
+      AND DATE(opened_at) BETWEEN start_date AND end_date;
+    
+    IF total = 0 THEN RETURN 0; END IF;
+    RETURN (wins::NUMERIC / total::NUMERIC) * 100;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ═══════════════════════════════════════════════════════════
+-- VIEWS PARA CONSULTAS COMUNS
+-- ═══════════════════════════════════════════════════════════
+
+CREATE OR REPLACE VIEW public_performance AS
+SELECT 
+    CURRENT_DATE as date,
+    COUNT(*) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days') as trades_30d,
+    COUNT(*) FILTER (WHERE status = 'closed' AND pnl > 0 AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days') as winning_trades_30d,
+    ROUND(COUNT(*) FILTER (WHERE status = 'closed' AND pnl > 0 AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days')::NUMERIC / 
+          NULLIF(COUNT(*) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days'), 0) * 100, 2) as win_rate_30d,
+    ROUND(SUM(pnl) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days'), 2) as pnl_30d,
+    ROUND(SUM(pnl) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days') / 
+          NULLIF(SUM(ABS(pnl)) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days'), 0), 2) as profit_factor_30d,
+    ROUND(MIN(pnl_pct) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days'), 2) as max_drawdown_30d,
+    ROUND(AVG(duration_seconds) FILTER (WHERE status = 'closed' AND DATE(opened_at) >= CURRENT_DATE - INTERVAL '30 days') / 60, 1) as avg_trade_duration_minutes
+FROM trades
+WHERE paper_trade = false;
+
+CREATE OR REPLACE VIEW pending_reconciliations AS
+SELECT 
+    ps.symbol,
+    ps.snapshot_at,
+    ps.divergence_pct,
+    ps.bybit_data->>'unrealized_pnl' as bybit_pnl,
+    ps.local_calculation->>'unrealized_pnl' as local_pnl,
+    ABS((ps.bybit_data->>'unrealized_pnl')::NUMERIC - (ps.local_calculation->>'unrealized_pnl')::NUMERIC) as pnl_diff
+FROM position_snapshots ps
+WHERE ps.reconciled = false
+  AND ps.divergence_pct > 0.01
+ORDER BY ps.divergence_pct DESC, ps.snapshot_at DESC;
 ```
 
 ---
@@ -465,7 +939,7 @@ bybit_api:
 
 ```yaml
 rate_limiting:
-  library: "governor"  # Rust crate
+  library: "governor"
   strategy: "token_bucket"
   
   service_limits:
@@ -473,7 +947,7 @@ rate_limiting:
       websocket: "no_limit"
       rest_fallback: "100 requests / minute"
     executor:
-      order_create: "10 orders / second"  # 50% do limite
+      order_create: "10 orders / second"
       order_amend: "10 orders / second"
       retry_backoff: "exponential"
     monitor:
@@ -489,8 +963,6 @@ rate_limiting:
 ---
 
 ## 7️⃣ **Error Handling Matrix**
-
-### **7.1 Categorias de Erro**
 
 ```yaml
 error_handling:
@@ -630,8 +1102,6 @@ websocket_reconnection:
 
 ## 9️⃣ **Disaster Recovery Procedures**
 
-### **9.1 Classificação de Incidentes**
-
 ```yaml
 disaster_recovery:
   
@@ -717,101 +1187,77 @@ disaster_recovery:
 
 ## 🔐 **10. Secrets Management**
 
-### **10.1 Estrutura de Arquivos**
-
-```bash
-compose/
-├── .env.example          # ✅ Pode commitar (template)
-├── .env                  # ❌ NUNCA commitar (valores reais)
-└── docker-compose.yml
-
-secrets/
-└── .gitkeep              # ✅ Pode commitar
-
-.gitignore:
-  **/.env
-  **/.env.*
-  !/.env.example
-  secrets/*.key
-```
-
-### **10.2 Permissões de Segurança**
-
-```bash
-# Scripts de segurança
-chmod 600 compose/.env
-chmod 700 secrets/
-chmod +x scripts/*.sh
-
-# Verificação
-./scripts/security-check.sh
-```
-
-### **10.3 Rotação de API Keys**
-
 ```yaml
-api_key_rotation:
-  frequency_days: 90
-  alert_before_days: 7
-  procedure:
-    - "Criar nova API key na Bybit"
-    - "Testar nova key em testnet"
-    - "Atualizar compose/.env"
-    - "Restart serviços"
-    - "Validar por 1 hora"
-    - "Revogar key antiga"
-    - "Documentar rotação"
+secrets_management:
   
-  bybit_api_permissions:
-    - "Order: Enable"
-    - "Position: Enable"
-    - "Account: Read-only"
-    - "Withdraw: DISABLED (CRÍTICO)"
+  storage:
+    method: ".env file with chmod 600"
+    location: "compose/.env"
+    git_protection: "added to .gitignore"
   
-  ip_whitelist:
-    enabled: true
-    add_server_ip: true
-    update_on_ip_change: true
+  permissions:
+    file: 600
+    directory: 700
+    scripts: +x
   
-  two_factor_auth:
-    required: true
-    enabled_on_account: true
-```
-
-### **10.4 Security Audit Checklist**
-
-```bash
-pre_mainnet_checklist:
-  - [ ] API keys com permissões mínimas
-  - [ ] Withdraw permission DESATIVADA
-  - [ ] IP whitelist configurado
-  - [ ] 2FA ativado na conta Bybit
-  - [ ] .env com permissão 600
-  - [ ] .env NÃO está no Git
-  - [ ] Scripts de security-check passam
-  - [ ] Kill switch testado
-  - [ ] Emergency procedures documentados
-  - [ ] Backup de database configurado
-  - [ ] Alertas críticos testados
-  - [ ] Paper trading 21 dias estável
-  - [ ] Backtest aprovado em stress scenarios
-
-code_audit:
-  - [ ] No secrets hardcoded
-  - [ ] All inputs validated
-  - [ ] Error messages don't leak info
-  - [ ] Rate limiting implemented
-  - [ ] SQL injection protected
-  - [ ] XSS protected (web)
-  - [ ] CSRF protected (web)
-  - [ ] Dependencies atualizadas (cargo audit)
+  rotation:
+    api_keys:
+      frequency_days: 90
+      alert_before_days: 7
+      procedure:
+        - "Create new API key on Bybit"
+        - "Test new key on testnet"
+        - "Update compose/.env"
+        - "Restart services"
+        - "Validate for 1 hour"
+        - "Revoke old key"
+        - "Document rotation"
+    
+    bybit_api_permissions:
+      - "Order: Enable"
+      - "Position: Enable"
+      - "Account: Read-only"
+      - "Withdraw: DISABLED (CRITICAL)"
+    
+    ip_whitelist:
+      enabled: true
+      add_server_ip: true
+      update_on_ip_change: true
+    
+    two_factor_auth:
+      required: true
+      enabled_on_account: true
+  
+  security_audit:
+    pre_mainnet_checklist:
+      - "API keys with minimal permissions"
+      - "Withdraw permission DISABLED"
+      - "IP whitelist configured"
+      - "2FA enabled on Bybit account"
+      - ".env with permission 600"
+      - ".env NOT in Git"
+      - "security-check.sh passes"
+      - "Kill switch tested"
+      - "Emergency procedures documented"
+      - "Database backup configured"
+      - "Critical alerts tested"
+      - "Paper trading 21 days stable"
+      - "Backtest approved on stress scenarios"
+    
+    code_audit:
+      - "No secrets hardcoded"
+      - "All inputs validated"
+      - "Error messages don't leak info"
+      - "Rate limiting implemented"
+      - "SQL injection protected"
+      - "XSS protected (web)"
+      - "CSRF protected (web)"
+      - "Dependencies updated (cargo audit)"
 ```
 
 ---
 
 ## 1️⃣1️⃣ **Discord Notifications**
-
-### **11.1 Configuração de Webhooks**
 
 ```yaml
 discord:
@@ -858,11 +1304,7 @@ discord:
     deduplication:
       enabled: true
       window_seconds: 300
-```
 
-### **11.2 Templates de Alertas**
-
-```yaml
 alert_templates:
   
   circuit_breaker:
@@ -924,11 +1366,7 @@ alert_templates:
         value: "{trade_count}"
       - name: "Win Rate"
         value: "{win_rate}"
-```
 
-### **11.3 Alert Recipients Clarification**
-
-```yaml
 alert_recipients:
   
   discord_alerts:
@@ -954,26 +1392,66 @@ alert_recipients:
 
 ---
 
-## 1️⃣2️⃣ **Tupã Language Integration**
+## 1️⃣2️⃣ **Tupã Language Integration (crates.io v0.8.0)**
 
-### **12.1. Pipeline Definition (`viper_smart_copy.tp`)**
+### **12.1 Versioning Strategy**
 
-```tupa
+```yaml
+tupa_integration:
+  
+  version: "0.8.0"
+  source: "crates.io"
+  license: "Apache-2.0/MIT"
+  
+  crates:
+    - name: "tupa-runtime"
+      version: "0.8.0"
+      features: ["trading", "audit", "backtest"]
+      purpose: "Pipeline execution engine"
+    
+    - name: "tupa-codegen"
+      version: "0.8.0"
+      purpose: "ExecutionPlan generation (JSON/LLVM)"
+    
+    - name: "tupa-audit"
+      version: "0.8.0"
+      purpose: "Structured audit logging"
+    
+    - name: "tupa-effects"
+      version: "0.8.0"
+      purpose: "Controlled side effects (IO/Random)"
+    
+    - name: "tupa-parser"
+      version: "0.8.0"
+      purpose: "Source code parsing"
+    
+    - name: "tupa-typecheck"
+      version: "0.8.0"
+      purpose: "Static type checking"
+  
+  compatibility:
+    vipertrade_0.8.0:
+      tupa_min: "0.8.0"
+      tupa_max: "0.8.x"
+      rust_min: "1.75"
+  
+  update_policy:
+    check_crates_io: weekly
+    allow_patch_upgrades: true
+    require_review_for_minor: true
+    pin_exact_version_for_prod: true
+```
+
+### **12.2 Pipeline Tupã para Smart Copy (config/strategies/viper_smart_copy.tp)**
+
+```tupã
 // config/strategies/viper_smart_copy.tp
-// ViperTrade v0.8.0-rc - Smart Copy Pipeline com Trailing Stop Dinâmico
-// Compatível com Tupã v0.8.0-rc (hybrid backend, native constraints)
-
-// ═══════════════════════════════════════════════════════════
-// IMPORTS NATIVOS DO TUPÃ
-// ═══════════════════════════════════════════════════════════
+// ViperTrade v0.8.0 - Smart Copy Pipeline com Trailing Stop Dinâmico
+// Compatível com Tupã v0.8.0 (crates.io, hybrid backend)
 
 @use tupa::constraints::{CircuitBreaker, RiskLimit, DrawdownLimit};
 @use tupa::audit::{log_decision, AuditLevel};
 @use tupa::effects::{IO, State};
-
-// ═══════════════════════════════════════════════════════════
-// TYPE DEFINITIONS
-// ═══════════════════════════════════════════════════════════
 
 type MarketSignal {
     symbol: string,
@@ -981,12 +1459,12 @@ type MarketSignal {
     atr_14: f64,
     volume_24h: i64,
     funding_rate: f64,
-    trend_score: f64,      // -1.0 a +1.0
+    trend_score: f64,
     spread_pct: f64,
 }
 
 type SmartCopyConfig {
-    profile: string,       // "CONSERVATIVE", "MEDIUM", "AGGRESSIVE"
+    profile: string,
     risk_per_trade_pct: f64,
     stop_loss_pct: f64,
     take_profit_pct: f64,
@@ -1009,7 +1487,7 @@ type RatchetLevel {
 }
 
 type TradeDecision {
-    action: string,        // "ENTER_LONG", "ENTER_SHORT", "HOLD"
+    action: string,
     symbol: string,
     quantity: f64,
     leverage: f64,
@@ -1021,28 +1499,15 @@ type TradeDecision {
     trailing_config: TrailingConfig,
 }
 
-// ═══════════════════════════════════════════════════════════
-// EXTERNAL FUNCTIONS (Implementadas em Rust)
-// ═══════════════════════════════════════════════════════════
-
-// Risk Management
 extern fn viper::calculate_smart_copy_size(signal: MarketSignal, config: SmartCopyConfig, last_position_size: f64) -> f64;
 extern fn viper::check_smart_copy_constraints(size: f64, config: SmartCopyConfig) -> bool;
 extern fn viper::validate_entry_conditions(signal: MarketSignal, config: SmartCopyConfig) -> bool;
-
-// Trailing Stop Dinâmico
 extern fn viper::calculate_dynamic_trail(current_profit_pct: f64, config: TrailingConfig) -> f64;
 extern fn viper::get_trailing_config(profile: string, symbol: string) -> TrailingConfig;
-
-// Risk Checks
 extern fn viper::check_daily_loss(current_loss: f64, max_daily_loss_pct: f64) -> bool;
 extern fn viper::check_consecutive_losses(count: i64, max_count: i64) -> bool;
 extern fn viper::validate_funding_rate(funding: f64, side: string, max_rate: f64) -> bool;
 extern fn viper::check_liquidation_distance(entry: f64, leverage: f64, side: string, min_distance: f64) -> bool;
-
-// ═══════════════════════════════════════════════════════════
-// PIPELINE PRINCIPAL
-// ═══════════════════════════════════════════════════════════
 
 @constraints(
     circuit_breaker = { max_consecutive_failures: 3, timeout_seconds: 300 },
@@ -1054,43 +1519,35 @@ pipeline ViperSmartCopy @deterministic(seed=42) {
     input: MarketSignal,
     
     steps: [
-        // 1. Verificar perda diária acumulada
         step("check_daily_loss") {
             viper::check_daily_loss(current_daily_loss, config.max_daily_loss_pct)
         },
         
-        // 2. Verificar losses consecutivos (circuit breaker)
         step("check_consecutive_losses") {
             viper::check_consecutive_losses(consecutive_losses, 3)
         },
         
-        // 3. Validar condições de entrada (spread, volume, funding)
         step("validate_entry") {
             viper::validate_entry_conditions(input, config)
         },
         
-        // 4. Validar funding rate para direção do trade
         step("check_funding") {
             let side = if input.trend_score > 0 { "Long" } else { "Short" };
             viper::validate_funding_rate(input.funding_rate, side, 0.015)
         },
         
-        // 5. Calcular tamanho da posição (ATR-adjusted + Smart Copy constraints)
         step("calc_smart_size") {
             viper::calculate_smart_copy_size(input, config, last_position_size)
         },
         
-        // 6. Validar constraints Smart Copy ($5-$30 range)
         step("validate_size") {
             viper::check_smart_copy_constraints(calc_smart_size, config)
         },
         
-        // 7. Obter configuração de Trailing Stop Dinâmico
         step("get_trailing_config") {
             viper::get_trailing_config(config.profile, input.symbol)
         },
         
-        // 8. Decisão final de trade
         step("decision") {
             if check_daily_loss && 
                check_consecutive_losses && 
@@ -1140,78 +1597,171 @@ pipeline ViperSmartCopy @deterministic(seed=42) {
             }
         },
         
-        // 9. Audit logging nativo (Tupã v0.8.0-rc feature)
         step("audit") {
             log_decision(decision, level: AuditLevel::Detailed)
         }
     ],
     
-    // ← Validação nativa com @validate (Tupã v0.8.0-rc syntax)
     @validate {
-        // Garantir que stop loss sempre existe se ENTER
         assert(decision.action == "HOLD" || decision.stop_loss > 0);
         
-        // Garantir que risk/reward >= 2:1
         let risk = (decision.entry_price - decision.stop_loss).abs();
         let reward = (decision.take_profit - decision.entry_price).abs();
         assert(decision.action == "HOLD" || (reward / risk) >= 2.0);
         
-        // Garantir que posição está dentro dos limits Smart Copy
         let position_value = decision.quantity * decision.entry_price;
         assert(decision.action == "HOLD" || 
                (position_value >= config.min_position_usdt && 
                 position_value <= config.max_position_usdt));
         
-        // Garantir que trailing config foi carregado
         assert(decision.trailing_config.activate_after_profit_pct > 0);
     },
     
     output: {
         decision: decision,
-        execution_hash: hash(decision),  // ← Nativo do Tupã
+        execution_hash: hash(decision),
         timestamp: now(),
-        pipeline_version: "0.8.0-rc",
+        pipeline_version: "0.8.0",
         smart_copy_mode: true,
-        constraints_satisfied: true  // ← Set by Tupã runtime
+        constraints_satisfied: true
     }
 }
 ```
 
-### **12.2. Integration Code (`services/strategy/src/main.rs`)**
-
-We use the standalone `tupa` binary for pipeline execution management,
-communicating via standard I/O (stdin/stdout).
-This ensures compatibility with the latest Tupã Runtime environment
-without complex FFI bindings.
+### **12.3 Integração Rust com Tupã crates.io**
 
 ```rust
-// Cargo.toml
-[dependencies]
-tokio = { version = "1.0", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-```
+// services/strategy/src/tupa_engine.rs
+use tupa_runtime::{Engine, ExecutionPlan, Value, constraints::CircuitBreaker};
+use tupa_audit::{AuditLogger, AuditLevel, AuditEntry};
+use tupa_codegen::{compile_pipeline, generate_plan};
+use serde::{Deserialize, Serialize};
 
-```rust
-// services/strategy/src/main.rs
-use std::process::Command;
-
-// Execute Tupã pipeline via CLI subprocess
-let mut child = Command::new("tupa")
-    .arg("run")
-    .arg("config/strategies/viper_smart_copy.tp")
-    .stdin(std::process::Stdio::piped())
-    .stdout(std::process::Stdio::piped())
-    .spawn()?;
-
-// Write input JSON to stdin
-if let Some(mut stdin) = child.stdin.take() {
-    stdin.write_all(input_json.as_bytes())?;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TupaConfig {
+    pub pipeline_path: String,
+    pub audit_path: String,
+    pub seed: Option<u64>,
+    pub profile: String,
 }
 
-// Read output JSON from stdout
-let output = child.wait_with_output()?;
-let decision: PipelineOutput = serde_json::from_slice(&output.stdout)?;
+pub struct ViperTupaEngine {
+    engine: Engine,
+    plan: ExecutionPlan,
+    circuit_breaker: CircuitBreaker,
+    audit_logger: AuditLogger,
+}
+
+impl ViperTupaEngine {
+    pub fn new(config: TupaConfig) -> Result<Self, TupaError> {
+        // Carregar ExecutionPlan (auto-detect JSON/LLVM backend)
+        let plan = generate_plan(&config.pipeline_path)?;
+        
+        // Inicializar engine com seed para determinismo
+        let engine = Engine::new(config.seed)?;
+        
+        // Circuit breaker nativo configurado via @constraints
+        let circuit_breaker = CircuitBreaker::from_pipeline(&plan)?;
+        
+        // Audit logger nativo
+        let audit_logger = AuditLogger::new(&config.audit_path, AuditLevel::Detailed)?;
+        
+        // Registrar funções externas (Rust)
+        engine.register_function("viper::calculate_smart_copy_size", calculate_smart_copy_size)?;
+        engine.register_function("viper::check_smart_copy_constraints", check_smart_copy_constraints)?;
+        engine.register_function("viper::validate_entry_conditions", validate_entry_conditions)?;
+        engine.register_function("viper::calculate_dynamic_trail", calculate_dynamic_trail)?;
+        engine.register_function("viper::get_trailing_config", get_trailing_config)?;
+        engine.register_function("viper::check_daily_loss", check_daily_loss)?;
+        engine.register_function("viper::check_consecutive_losses", check_consecutive_losses)?;
+        engine.register_function("viper::validate_funding_rate", validate_funding_rate)?;
+        engine.register_function("viper::check_liquidation_distance", check_liquidation_distance)?;
+        
+        Ok(Self { 
+            engine, 
+            plan, 
+            circuit_breaker,
+            audit_logger 
+        })
+    }
+    
+    pub fn execute(&self, signal: MarketSignal, config: SmartCopyConfig) -> Result<TradeDecision, TupaError> {
+        // Verificar circuit breaker antes de executar
+        self.circuit_breaker.check()?;
+        
+        // Converter input para Value Tupã
+        let input = self.signal_to_value(signal, config)?;
+        
+        // Executar pipeline
+        let output = self.engine.execute(&self.plan, input)?;
+        
+        // Converter output para TradeDecision
+        let decision = self.value_to_decision(output)?;
+        
+        // Audit logging nativo
+        self.audit_logger.log(AuditEntry {
+            pipeline: "ViperSmartCopy",
+            version: "0.8.0",
+            action: decision.action.clone(),
+            symbol: decision.symbol.clone(),
+            quantity: decision.quantity,
+            entry_price: decision.entry_price,
+            stop_loss: decision.stop_loss,
+            take_profit: decision.take_profit,
+            smart_copy_compatible: decision.smart_copy_compatible,
+            execution_hash: output.get("execution_hash").unwrap().as_str().unwrap(),
+            constraints_satisfied: output.get("constraints_satisfied").unwrap().as_bool().unwrap(),
+        })?;
+        
+        // Registrar sucesso/falha no circuit breaker
+        if decision.action != "HOLD" {
+            self.circuit_breaker.record_success();
+        }
+        
+        Ok(decision)
+    }
+    
+    pub fn backtest(&self, historical_data: Vec<MarketSignal>, config: SmartCopyConfig) -> Result<BacktestResult, TupaError> {
+        use tupa_runtime::backtest::Backtester;
+        
+        let mut backtester = Backtester::new(&self.engine, &self.plan)?;
+        
+        for signal in historical_data {
+            let input = self.signal_to_value(signal.clone(), config.clone())?;
+            backtester.step(input)?;
+        }
+        
+        Ok(backtester.finalize())
+    }
+    
+    fn signal_to_value(&self, signal: MarketSignal, config: SmartCopyConfig) -> Result<Value, TupaError> {
+        Ok(Value::Object(serde_json::json!({
+            "symbol": signal.symbol,
+            "current_price": signal.current_price,
+            "atr_14": signal.atr_14,
+            "volume_24h": signal.volume_24h,
+            "funding_rate": signal.funding_rate,
+            "trend_score": signal.trend_score,
+            "spread_pct": signal.spread_pct,
+            "config": config,
+        })))
+    }
+    
+    fn value_to_decision(&self, value: Value) -> Result<TradeDecision, TupaError> {
+        let decision: TradeDecision = serde_json::from_value(value.into())?;
+        Ok(decision)
+    }
+}
+
+#[derive(Debug)]
+pub enum TupaError {
+    PipelineNotFound(String),
+    PlanGenerationFailed(String),
+    ExecutionFailed(String),
+    ConstraintViolation(String),
+    SerializationError(String),
+    DatabaseError(String),
+}
 ```
 
 ---
@@ -1328,24 +1878,22 @@ auto_unfollow_prevention:
 follower_order_limits:
   
   bybit_limit:
-    cumulative_order_value_per_pair: 300000  # USDT per follower per pair
+    cumulative_order_value_per_pair: 300000
     calculation: "Sum of (order_cost × leverage) for all open positions"
   
   our_strategy:
     target_follower_profile:
-      typical_investment: 100-1000  # USDT
+      typical_investment: 100-1000
       typical_leverage: 5-10x
-      implied_max_order_cost: 100-200  # USDT per trade
+      implied_max_order_cost: 100-200
     
-    our_max_position_usdt: 200  # Para não excluir followers pequenos
+    our_max_position_usdt: 200
     rationale: "Larger positions still copied by larger followers; smaller positions accessible to all"
 ```
 
 ---
 
 ## 1️⃣4️⃣ **Backtesting Engine**
-
-### **14.1 Arquitetura**
 
 ```yaml
 backtesting:
@@ -1420,8 +1968,6 @@ paper_trading:
 
 ## 1️⃣5️⃣ **Smart Copy Mode Optimization**
 
-### **15.1 Por Que Smart Copy**
-
 ```yaml
 smart_copy_advantages:
   - "Sizing automático baseado em proporção de capital"
@@ -1441,12 +1987,8 @@ smart_copy_mechanics:
     follower_equity: 500
     master_position: 10
     copy_ratio: 1.0
-    follower_position: 50  # 10 × (500/100) × 1.0
-```
+    follower_position: 50
 
-### **15.2 Configurações para Smart Copy**
-
-```yaml
 smart_copy_settings:
   
   position_sizing:
@@ -1486,33 +2028,9 @@ smart_copy_settings:
       reduce_time_if_in_loss: true
 ```
 
-### **15.3 Guia para Followers**
-
-```markdown
-# Como Copiar o ViperTrade
-
-## Configuração Recomendada
-- Copy Mode: Smart Copy
-- Copy Ratio: 1.0 (padrão)
-- PCSL: 20-25%
-- Trailing Stop: 20% (opcional)
-- Max Slippage: 1.5%
-
-## Por Que Smart Copy?
-✅ Sizing Automático
-✅ Leverage Alinhado
-✅ Menos Falhas
-✅ Ideal para Iniciantes
-
-## PCSL Recomendado: 20-25%
-ViperTrade já tem stop loss por trade (1.5-2.5%). PCSL é proteção extra a nível de portfolio.
-```
-
 ---
 
 ## 1️⃣6️⃣ **Dynamic Trailing Stop**
-
-### **16.1 Visão Geral**
 
 ```yaml
 trailing_stop_philosophy: |
@@ -1525,16 +2043,12 @@ advantages_over_fixed:
   - "Smart Copy compatible"
   - "Perfil-customizável"
   - "Break-even protection"
-```
 
-### **16.2 Configuração por Perfil**
-
-```yaml
 trailing_stop_by_profile:
   
   CONSERVATIVE:
-    activate_after_profit_pct: 0.01      # 1% já ativa
-    initial_trail_pct: 0.005             # 0.5% inicial (apertado)
+    activate_after_profit_pct: 0.01
+    initial_trail_pct: 0.005
     ratchet_levels:
       - at_profit_pct: 0.02
         trail_pct: 0.008
@@ -1545,8 +2059,8 @@ trailing_stop_by_profile:
     move_to_break_even_at: 0.015
   
   MEDIUM:
-    activate_after_profit_pct: 0.015     # 1.5% ativa
-    initial_trail_pct: 0.008             # 0.8% inicial
+    activate_after_profit_pct: 0.015
+    initial_trail_pct: 0.008
     ratchet_levels:
       - at_profit_pct: 0.03
         trail_pct: 0.012
@@ -1557,8 +2071,8 @@ trailing_stop_by_profile:
     move_to_break_even_at: 0.02
   
   AGGRESSIVE:
-    activate_after_profit_pct: 0.02      # 2% ativa
-    initial_trail_pct: 0.01              # 1% inicial (espaço)
+    activate_after_profit_pct: 0.02
+    initial_trail_pct: 0.01
     ratchet_levels:
       - at_profit_pct: 0.05
         trail_pct: 0.02
@@ -1567,11 +2081,7 @@ trailing_stop_by_profile:
       - at_profit_pct: 0.15
         trail_pct: 0.05
     move_to_break_even_at: 0.03
-```
 
-### **16.3 Mecânica de Ratcheting**
-
-```yaml
 ratchet_mechanism:
   
   how_it_works: |
@@ -1611,11 +2121,7 @@ ratchet_mechanism:
       total_profit: 6.15%
       protected_from_peak: 3.5%
       improvement_vs_fixed_tp: "+105%"
-```
 
-### **16.4 Implementação Técnica**
-
-```yaml
 implementation:
   
   monitoring:
@@ -1647,6 +2153,12 @@ implementation:
 ## 1️⃣7️⃣ **Blocos de Desenvolvimento**
 
 ```markdown
+## Bloco 0: Preparação (Dia 0)
+- [ ] Criar branch develop/v0.8.0
+- [ ] Atualizar VERSION para 0.8.0
+- [ ] Atualizar VIPERTRADE_SPEC.md com Tupã crates.io integration
+- [ ] Criar COMPATIBILITY.md com guia de migração
+
 ## Bloco 1: Setup do Projeto (Dia 1-2)
 - [ ] Criar estrutura de diretórios
 - [ ] Inicializar Git repository
@@ -1657,106 +2169,100 @@ implementation:
 - [ ] Criar scripts/security-check.sh
 - [ ] Testar init-secrets.sh
 
-## Bloco 2: Docker Compose (Dia 2-3)
-- [ ] Criar compose/docker-compose.yml
-- [ ] Configurar serviço postgres
-- [ ] Configurar serviço redis
-- [ ] Configurar rede vipertrade-net
-- [ ] Configurar volumes persistentes
-- [ ] Adicionar health checks
-- [ ] Testar podman-compose up
+## Bloco 2: Configuração do Ambiente (Dia 2-3)
+- [ ] Atualizar compose/.env.example com Tupã v0.8.0 vars
+- [ ] Atualizar scripts/init-secrets.sh para Tupã
+- [ ] Criar scripts/build-tupa.sh simplificado
+- [ ] Testar todos os scripts
 
-## Bloco 3: Database Schema (Dia 3-4)
-- [ ] Criar database/schema.sql
-- [ ] Criar tabela trades
-- [ ] Criar tabela position_snapshots
-- [ ] Criar tabela system_events
-- [ ] Criar tabela daily_metrics
-- [ ] Criar índices de performance
-- [ ] Testar schema no postgres
+## Bloco 3: Docker Compose + Database (Dia 3-5)
+- [ ] Criar compose/docker-compose.yml com 8 serviços
+- [ ] Configurar volumes persistentes e health checks
+- [ ] Criar database/schema.sql com 8 tabelas
+- [ ] Criar database/init.sql com dados iniciais
+- [ ] Criar scripts/validate-db.sh
 
-## Bloco 4: Configuração dos Pares (Dia 4-5)
-- [ ] Criar config/trading/pairs.yaml
-- [ ] Configurar DOGEUSDT
-- [ ] Configurar XRPUSDT
-- [ ] Configurar TRXUSDT
-- [ ] Configurar XLMUSDT
-- [ ] Configurar global_settings
+## Bloco 4: Configuração dos Pares + Tupã Pipeline (Dia 5-7)
+- [ ] Criar config/trading/pairs.yaml com 4 pares
+- [ ] Criar config/strategies/viper_smart_copy.tp com sintaxe v0.8.0
+- [ ] Criar config/system/profiles.yaml com 3 perfis
+- [ ] Criar scripts/validate-pipeline.sh
+- [ ] Validar pipeline com tupa check
 
-## Bloco 5: Market Data Service (Dia 5-8)
+## Bloco 5: Market Data Service (Dia 7-10)
 - [ ] Criar services/market-data/
 - [ ] Implementar WebSocket client Bybit
 - [ ] Subscrever canais públicos (4 pares)
-- [ ] Normalizar dados recebidos
-- [ ] Publicar no Redis Pub/Sub
+- [ ] Normalizar dados e publicar no Redis
 - [ ] Implementar reconnect strategy
 - [ ] Criar Dockerfile
 
-## Bloco 6: Strategy Engine (Dia 8-12)
+## Bloco 6: Strategy Engine (Dia 10-14)
 - [ ] Criar services/strategy/
-- [ ] Implementar Tupã Engine integration
-- [ ] Criar Risk Manager module
+- [ ] Integrar Tupã v0.8.0 via crates.io
+- [ ] Implementar Risk Manager module
 - [ ] Implementar position sizing (ATR)
 - [ ] Implementar Dynamic Trailing Stop
-- [ ] Implementar circuit breaker
+- [ ] Integrar circuit breaker nativo
 - [ ] Criar Dockerfile
 
-## Bloco 7: Order Executor (Dia 12-16)
+## Bloco 7: Order Executor (Dia 14-18)
 - [ ] Criar services/executor/
 - [ ] Implementar Bybit REST API client
-- [ ] Suporte a OCO orders
-- [ ] Implementar retry logic
-- [ ] Rate limiting
-- [ ] Reconciliation
+- [ ] Suporte a OCO orders (stop loss + take profit)
+- [ ] Implementar retry logic com backoff
+- [ ] Rate limiting com governor
+- [ ] Reconciliation local vs Bybit
 - [ ] Criar Dockerfile
 
-## Bloco 8: Monitor Service (Dia 16-20)
+## Bloco 8: Monitor Service (Dia 18-22)
 - [ ] Criar services/monitor/
 - [ ] Implementar health checks
 - [ ] Implementar Discord webhook client
 - [ ] Implementar reconciliation engine
 - [ ] Implementar Trailing Stop Monitor
+- [ ] Integrar tupa_audit para logging
 - [ ] Criar Dockerfile
 
-## Bloco 9: Error Handling (Dia 20-22)
+## Bloco 9: Error Handling (Dia 22-24)
 - [ ] Implementar error handling matrix
 - [ ] Criar error types estruturados
 - [ ] Implementar backoff strategies
 - [ ] Testar cada tipo de erro
 
-## Bloco 10: Testing & Validation (Dia 22-28)
+## Bloco 10: Testing & Validation (Dia 24-30)
 - [ ] Configurar testnet environment
 - [ ] Rodar paper trading 14 dias
 - [ ] Backtest com dados históricos
 - [ ] Validar risk management
 - [ ] Documentar resultados
 
-## Bloco 11: Documentation (Dia 28-30)
+## Bloco 11: Documentation (Dia 30-32)
 - [ ] Escrever ARCHITECTURE.md
 - [ ] Escrever OPERATIONS.md
 - [ ] Documentar procedimentos de emergência
 - [ ] Atualizar README.md
 
-## Bloco 12: Mainnet Micro Deployment (Dia 30+)
+## Bloco 12: Mainnet Micro Deployment (Dia 32+)
 - [ ] Criar API keys mainnet
 - [ ] Deploy em produção
 - [ ] Monitoramento intensivo 72h
 - [ ] Ajustar parâmetros se necessário
 
-## Bloco 13: Web Dashboard (Dia 30-40)
+## Bloco 13: Web Dashboard (Opcional, Dia 32-42)
 - [ ] Criar estrutura web/
 - [ ] Configurar Next.js 14
 - [ ] Implementar páginas principais
 - [ ] Integrar WebSocket real-time
 - [ ] Criar Dockerfile
 
-## Bloco 14: Smart Copy Optimization (Dia 40-43)
+## Bloco 14: Smart Copy Optimization (Opcional, Dia 42-45)
 - [ ] Configurar smart_copy_optimized.yaml
 - [ ] Implementar position smoothing
 - [ ] Testar com followers de teste
 - [ ] Documentar para followers
 
-## Bloco 15: Dynamic Trailing Stop (Dia 43-45)
+## Bloco 15: Dynamic Trailing Stop Validation (Opcional, Dia 45-47)
 - [ ] Implementar DynamicTrailingStop struct
 - [ ] Configurar ratchet levels por perfil
 - [ ] Integrar com Bybit amend_order
@@ -1816,6 +2322,12 @@ implementation:
 [ ] Leverage definido por perfil
 [ ] Entry timing evita condições adversas
 
+# Tupã Integration
+[ ] Pipeline compila com tupa check
+[ ] ExecutionPlan gera com tupa codegen
+[ ] Audit logging funciona
+[ ] Circuit breaker nativo integrado
+
 # Lead Trader
 [ ] Conta Bybit verificada (KYC)
 [ ] Copy Trading Leader registrado
@@ -1831,17 +2343,29 @@ implementation:
 # Inicialização
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
+./scripts/health-check.sh
+./scripts/validate-db.sh
+./scripts/validate-pipeline.sh
+./scripts/test-config.sh
 
 # Docker/Podman
 cd compose && podman-compose up --build -d
 podman-compose ps
 podman-compose logs -f
+podman-compose logs -f strategy
 podman-compose down
 
-# Backtesting
-./scripts/run-backtest.sh MEDIUM 2025-02-01 2026-02-28
+# Tupã CLI (se instalado separadamente)
+tupa --version
+tupa check config/strategies/viper_smart_copy.tp
+tupa codegen --backend hybrid --output /tmp/plan.json config/strategies/viper_smart_copy.tp
 
-# Trading Commands
+# Build
+./scripts/build-tupa.sh
+cargo build -p vipertrade-strategy --release
+cargo run -p vipertrade-backtest -- --profile MEDIUM --start 2025-02-01 --end 2026-02-28
+
+# Trading Commands (via API)
 curl http://localhost:8080/api/v1/status
 curl http://localhost:8080/api/v1/positions
 curl http://localhost:8080/api/v1/trades?limit=20
@@ -1857,6 +2381,7 @@ SELECT SUM(pnl) as total_pnl FROM trades WHERE status = 'closed';
 SELECT COUNT(*) as total_trades, COUNT(*) FILTER (WHERE pnl > 0) as winning_trades FROM trades WHERE status = 'closed';
 SELECT * FROM position_snapshots WHERE reconciled = FALSE;
 SELECT * FROM daily_metrics WHERE date = CURRENT_DATE;
+SELECT * FROM tupa_audit_logs ORDER BY executed_at DESC LIMIT 10;
 ```
 
 ---
@@ -1896,3 +2421,155 @@ system:status
 alert:critical
 alert:warning
 ```
+
+---
+
+## 2️⃣1️⃣ **Versionamento e Compatibilidade Tupã**
+
+```yaml
+versioning:
+  vipertrade: "0.8.0"
+  tupalang: 
+    source: "crates.io"
+    version: "0.8.0"
+    license: "Apache-2.0/MIT"
+  
+  compatibility_matrix:
+    vipertrade_0.8.0:
+      tupa_min: "0.8.0"
+      tupa_max: "0.8.x"
+      rust_min: "1.75"
+      podman_min: "4.0"
+  
+  update_policy:
+    check_crates_io: weekly
+    allow_patch_upgrades: true
+    require_review_for_minor: true
+    pin_exact_version_for_prod: true
+
+environments:
+  development:
+    tupa_backend: "json"
+    audit_level: "debug"
+    seed: 42
+    hot_reload: true
+    
+  testnet:
+    tupa_backend: "json"
+    audit_level: "detailed"
+    seed: 42
+    hot_reload: false
+    
+  production:
+    tupa_backend: "llvm"
+    audit_level: "compliance"
+    seed: null
+    hot_reload: false
+```
+
+---
+
+## 2️⃣2️⃣ **Tupã crates.io Integration**
+
+```yaml
+tupa_crates_io:
+  
+  available_crates:
+    - name: "tupa-runtime"
+      version: "0.8.0"
+      features: ["trading", "audit", "backtest"]
+      purpose: "Pipeline execution engine"
+    
+    - name: "tupa-codegen"
+      version: "0.8.0"
+      purpose: "ExecutionPlan generation"
+    
+    - name: "tupa-audit"
+      version: "0.8.0"
+      purpose: "Structured audit logging"
+    
+    - name: "tupa-effects"
+      version: "0.8.0"
+      purpose: "Controlled side effects"
+    
+    - name: "tupa-parser"
+      version: "0.8.0"
+      purpose: "Source code parsing"
+    
+    - name: "tupa-typecheck"
+      version: "0.8.0"
+      purpose: "Static type checking"
+  
+  benefits_over_git:
+    - "Faster builds (cargo registry cache)"
+    - "Proper semver versioning"
+    - "crates.io security audit integration"
+    - "Easier upgrades (cargo update)"
+    - "Offline builds with cargo vendor"
+    - "Dual licensing (Apache-2.0/MIT)"
+  
+  installation:
+    # Para embedding no ViperTrade:
+    embedding:
+      method: "cargo dependencies"
+      Cargo_toml: |
+        [dependencies]
+        tupa-runtime = { version = "0.8.0", features = ["trading", "audit"] }
+    
+    # Para operações (CLI standalone):
+    cli:
+      method: "pre-built binary from GitHub Releases"
+      install_command: |
+        curl -L https://github.com/marciopaiva/tupalang/releases/latest/download/tupa-linux-x86_64 \
+          -o /usr/local/bin/tupa
+        chmod +x /usr/local/bin/tupa
+      verify: "tupa --version"
+  
+  hybrid_distribution:
+    embedding:
+      benefits:
+        - "Zero-copy integration"
+        - "Type-safe pipeline execution"
+        - "Compile-time validation"
+    
+    cli:
+      benefits:
+        - "No Rust toolchain required"
+        - "Fast deployment"
+        - "Stable ABI"
+    
+    ci_cd:
+      build_strategy: "cache cargo registry"
+      offline_build: "cargo vendor for air-gapped environments"
+      artifact_signing: "cosign for release binaries"
+  
+  upgrade_policy:
+    patch_upgrades:
+      allowed: true
+      auto: true
+      example: "0.8.0 → 0.8.1"
+    
+    minor_upgrades:
+      allowed: true
+      auto: false
+      requires: "manual review + testnet validation"
+      example: "0.8.x → 0.9.0"
+    
+    major_upgrades:
+      allowed: true
+      auto: false
+      requires: "full regression testing + migration guide"
+      example: "0.x → 1.0"
+```
+
+---
+
+## ✅ **Status Final**
+
+| Seção | Status |
+|-------|--------|
+| 1-20 | ✅ Completo |
+| 21. Versionamento Tupã | ✅ Completo |
+| 22. Tupã crates.io Integration | ✅ Completo |
+| **Total** | **100% ESPECIFICAÇÃO COMPLETA** |
+
