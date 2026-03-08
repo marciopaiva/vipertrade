@@ -69,6 +69,11 @@ Primary deliverables:
 - Kill-switch, risk status, and copy-health endpoints operational.
 - Auth and access patterns for operator-level actions.
 
+Current progress:
+
+- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+
 Exit criteria:
 
 - Operator can audit and control runtime via API without direct DB access.
@@ -96,6 +101,11 @@ Primary deliverables:
 - Paper trading regression suite against strategy/risk/executor changes.
 - Promotion gate: paper -> testnet micro -> controlled live window.
 
+Current progress:
+
+- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+
 Exit criteria:
 
 - Backtest + paper reports satisfy risk and drawdown thresholds.
@@ -117,6 +127,11 @@ Primary deliverables:
 - Trailing ratchet behavior validated per risk profile.
 - Auto-unfollow prevention checks integrated into monitoring.
 
+Current progress:
+
+- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
+
 Exit criteria:
 
 - Copy success rate and follower-facing metrics hit target ranges.
@@ -137,6 +152,11 @@ Primary deliverables:
 - Mainnet micro rollout plan with rollback and disaster recovery drills.
 - Secrets rotation and operational security checks automated.
 - Release package with changelog, runbook, checklist, and evidence bundle.
+
+Current progress:
+
+- Phase 4 baseline validation script added: `scripts/phase4-validate.sh`.
+- Initial baseline evidence: `docs/operations/PHASE4_BASELINE_2026-03-08.md`.
 
 Exit criteria:
 

@@ -6,6 +6,7 @@
 - Run local CI: `./scripts/ci-local.sh`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 - Validate pipeline: `./scripts/validate-pipeline.sh`
+- Phase 4 baseline: `./scripts/phase4-validate.sh`
 
 ## Runtime Validation (Bridge Primary)
 
