@@ -138,3 +138,49 @@ No-Go:
 - Bybit errors like `110017`/`110094` in smoke cycle
 - any DB constraint error during close reconciliation
 - reconciliation diff persists after controlled `EXECUTOR_RECONCILE_FIX=true` window
+
+## 11) Reconciliation Incident Playbook
+
+1. Confirm monitor health and recent cycles:
+
+```bash
+./scripts/health-check.sh
+./scripts/compose.sh logs --since=20m monitor | grep -E "reconciliation: symbol=|bybit live query failed|alert suppressed by cooldown"
+```
+
+2. Check divergence and severity in database:
+
+```bash
+podman exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+SELECT symbol, reconciled, divergence, divergence_pct, snapshot_at
+FROM position_snapshots
+ORDER BY snapshot_at DESC
+LIMIT 20;
+
+SELECT severity, symbol, timestamp, data->>'drift_notional_usdt' AS drift_notional_usdt
+FROM system_events
+WHERE event_type = 'reconciliation_cycle'
+ORDER BY timestamp DESC
+LIMIT 20;
+SQL
+```
+
+3. Operator action matrix:
+
+- `warning`: monitor for 2-3 cycles; no emergency action.
+- `error`: pause new entries if persistent; validate Bybit/account connectivity.
+- `critical`: pause entries immediately and investigate position mismatch before resuming.
+
+4. Validate alert throttling:
+
+- Ensure repeated same `symbol+severity` events are not flooding Discord.
+- Adjust `ALERT_COOLDOWN_SEC` in `compose/.env` if needed, then restart monitor:
+
+```bash
+./scripts/compose.sh up -d --no-deps monitor
+```
+
+5. Capture evidence bundle:
+
+- Follow [RECONCILIATION_EVIDENCE](./RECONCILIATION_EVIDENCE.md)
+- Attach logs + SQL outputs to release/incident notes.
