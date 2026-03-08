@@ -5,20 +5,23 @@
 - Readiness Baseline: PASS
 - Rollback Drill: PASS
 - DR Backup Drill: PASS
+- Controlled Mainnet Micro: HOLD
 
 ## Evidence Index
 
 - `docs/operations/PHASE6_BASELINE_2026-03-08.md`
-- `docs/operations/artifacts/phase6/phase6_baseline_20260308T215026Z.json`
+- `docs/operations/artifacts/phase6/phase6_baseline_20260308T215641Z.json`
+- `docs/operations/PHASE6_MAINNET_MICRO_2026-03-08.md`
+- `docs/operations/artifacts/phase6/phase6_mainnet_micro_20260308T215704Z.json`
 - `docs/operations/PHASE6_PROMOTION_GATE.md`
 - `docs/PHASE6_MAINNET_READINESS_PLAN.md`
 
 ## Current Decision
 
-- Current decision: HOLD (Phase 6 kickoff complete; awaiting controlled mainnet micro window evidence).
+- Current decision: HOLD.
 
 ## Notes
 
 - Baseline readiness checks passed with `issues=0`.
-- Safe posture confirmed (`EXECUTOR_ENABLE_LIVE_ORDERS=false` in env and runtime).
-- Rollback drill and DR schema backup drill validated successfully.
+- Mainnet micro attempt failed at executor precheck (`wallet-balance` sanity check), so no orders were submitted.
+- Environment was restored to safe posture (`BYBIT_ENV=testnet`, `EXECUTOR_ENABLE_LIVE_ORDERS=false`) immediately after the failed attempt.

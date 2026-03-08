@@ -11,11 +11,11 @@
 - safe_runtime_live_disabled: true
 - rollback_tested: true
 - rollback_ok: true
-- rollback_elapsed_sec: 1
+- rollback_elapsed_sec: 0
 - dr_backup_ok: true
 - dr_backup_bytes: 27568
-- dr_backup_sha256: 34f0bdd1cda52a50d7179dd585a8a11cbb5bb7c42b8ca64037b6022d478ca467
+- dr_backup_sha256: 5906670c280d165789a664d6d1191ff9413a48fd387d405051bc493ed7bae40b
 
 ## Artifact
 
-- docs/operations/artifacts/phase6/phase6_baseline_20260308T215026Z.json
+- docs/operations/artifacts/phase6/phase6_baseline_20260308T215641Z.json
