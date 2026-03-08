@@ -19,6 +19,9 @@ Deliver an operator-grade API surface for Lead Trader operations, with explicit 
   - `GET /api/v1/performance`
   - `POST /api/v1/control/kill-switch`
 - Kill-switch control is deny-by-default when `OPERATOR_API_TOKEN` is not configured.
+- Item 2 delivered (operator auth and access split):
+  - middleware-based token auth on control routes
+  - public vs operator route separation documented in `docs/operations/API_ACCESS_MATRIX.md`
 
 ## Workstreams
 

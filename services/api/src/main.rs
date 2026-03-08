@@ -9,15 +9,25 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use warp::http::StatusCode;
 use warp::reply::Json as WarpJson;
-use warp::Filter;
+use warp::{Filter, Rejection, Reply};
 
 #[derive(Clone)]
 struct AppState {
     db_pool: Option<PgPool>,
     trading_mode: String,
     trading_profile: String,
+    operator_auth_mode: String,
     operator_api_token: Option<String>,
 }
+
+#[derive(Debug)]
+struct AuthRejection {
+    code: StatusCode,
+    error: &'static str,
+    message: String,
+}
+
+impl warp::reject::Reject for AuthRejection {}
 
 #[derive(Serialize)]
 struct ApiError {
@@ -37,6 +47,8 @@ struct StatusResponse {
     trading_mode: String,
     trading_profile: String,
     db_connected: bool,
+    operator_auth_mode: String,
+    operator_controls_enabled: bool,
     risk_status: String,
     critical_reconciliation_events_15m: i64,
     kill_switch: KillSwitchStatus,
@@ -164,6 +176,72 @@ fn json_err(
     warp::reply::with_status(warp::reply::json(&body), code)
 }
 
+fn with_state(
+    state: Arc<AppState>,
+) -> impl Filter<Extract = (Arc<AppState>,), Error = Infallible> + Clone {
+    warp::any().map(move || state.clone())
+}
+
+fn with_operator_auth(
+    state: Arc<AppState>,
+) -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
+    warp::header::optional::<String>("x-operator-token")
+        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_state(state))
+        .and_then(
+            |token_header: Option<String>,
+             operator_id_header: Option<String>,
+             state: Arc<AppState>| async move {
+                if !state.operator_auth_mode.eq_ignore_ascii_case("token") {
+                    return Err(warp::reject::custom(AuthRejection {
+                        code: StatusCode::FORBIDDEN,
+                        error: "auth_not_configured",
+                        message: "operator auth mode is not configured for token controls"
+                            .to_string(),
+                    }));
+                }
+
+                let Some(configured_token) = &state.operator_api_token else {
+                    return Err(warp::reject::custom(AuthRejection {
+                        code: StatusCode::FORBIDDEN,
+                        error: "auth_not_configured",
+                        message: "operator control auth is not configured".to_string(),
+                    }));
+                };
+
+                if token_header.as_deref() != Some(configured_token.as_str()) {
+                    return Err(warp::reject::custom(AuthRejection {
+                        code: StatusCode::UNAUTHORIZED,
+                        error: "invalid_token",
+                        message: "missing or invalid operator token".to_string(),
+                    }));
+                }
+
+                Ok(operator_id_header.unwrap_or_else(|| "operator".to_string()))
+            },
+        )
+}
+
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
+    if let Some(auth) = err.find::<AuthRejection>() {
+        return Ok(json_err(auth.code, auth.error, auth.message.clone()));
+    }
+
+    if err.is_not_found() {
+        return Ok(json_err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "route not found",
+        ));
+    }
+
+    Ok(json_err(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal_error",
+        "unhandled rejection",
+    ))
+}
+
 async fn fetch_kill_switch_status(pool: &PgPool) -> Result<KillSwitchStatus, sqlx::Error> {
     let row = sqlx::query_as::<
         _,
@@ -218,7 +296,7 @@ async fn fetch_critical_recon_15m(pool: &PgPool) -> Result<i64, sqlx::Error> {
     Ok(count)
 }
 
-async fn health_handler(state: Arc<AppState>) -> impl warp::Reply {
+async fn health_handler(state: Arc<AppState>) -> impl Reply {
     let payload = HealthResponse {
         status: "ok",
         db_connected: state.db_pool.is_some(),
@@ -226,7 +304,7 @@ async fn health_handler(state: Arc<AppState>) -> impl warp::Reply {
     json_ok(&payload)
 }
 
-async fn status_handler(state: Arc<AppState>) -> impl warp::Reply {
+async fn status_handler(state: Arc<AppState>) -> impl Reply {
     let mut kill_switch = KillSwitchStatus {
         enabled: false,
         reason: None,
@@ -257,6 +335,9 @@ async fn status_handler(state: Arc<AppState>) -> impl warp::Reply {
         trading_mode: state.trading_mode.clone(),
         trading_profile: state.trading_profile.clone(),
         db_connected: state.db_pool.is_some(),
+        operator_auth_mode: state.operator_auth_mode.clone(),
+        operator_controls_enabled: state.operator_api_token.is_some()
+            && state.operator_auth_mode.eq_ignore_ascii_case("token"),
         risk_status,
         critical_reconciliation_events_15m: critical_recon,
         kill_switch,
@@ -265,7 +346,7 @@ async fn status_handler(state: Arc<AppState>) -> impl warp::Reply {
     json_ok(&payload)
 }
 
-async fn positions_handler(state: Arc<AppState>) -> impl warp::Reply {
+async fn positions_handler(state: Arc<AppState>) -> impl Reply {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -309,7 +390,7 @@ async fn positions_handler(state: Arc<AppState>) -> impl warp::Reply {
     }
 }
 
-async fn trades_handler(query: TradesQuery, state: Arc<AppState>) -> impl warp::Reply {
+async fn trades_handler(query: TradesQuery, state: Arc<AppState>) -> impl Reply {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -424,7 +505,7 @@ async fn fetch_window(pool: &PgPool, hours: i32) -> Result<PerformanceWindow, sq
     })
 }
 
-async fn performance_handler(state: Arc<AppState>) -> impl warp::Reply {
+async fn performance_handler(state: Arc<AppState>) -> impl Reply {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -489,26 +570,9 @@ async fn performance_handler(state: Arc<AppState>) -> impl warp::Reply {
 
 async fn kill_switch_handler(
     req: KillSwitchRequest,
-    token_header: Option<String>,
-    operator_id_header: Option<String>,
+    operator_id: String,
     state: Arc<AppState>,
-) -> impl warp::Reply {
-    let Some(configured_token) = &state.operator_api_token else {
-        return json_err(
-            StatusCode::FORBIDDEN,
-            "auth_not_configured",
-            "operator control auth is not configured",
-        );
-    };
-
-    if token_header.as_deref() != Some(configured_token.as_str()) {
-        return json_err(
-            StatusCode::UNAUTHORIZED,
-            "invalid_token",
-            "missing or invalid operator token",
-        );
-    }
-
+) -> impl Reply {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -517,7 +581,6 @@ async fn kill_switch_handler(
         );
     };
 
-    let actor = operator_id_header.unwrap_or_else(|| "operator".to_string());
     let reason = req
         .reason
         .clone()
@@ -526,7 +589,7 @@ async fn kill_switch_handler(
     let event_data = json!({
         "enabled": req.enabled,
         "reason": reason,
-        "actor": actor,
+        "actor": operator_id,
         "source": "api",
     });
 
@@ -564,12 +627,6 @@ async fn kill_switch_handler(
         updated: true,
         kill_switch,
     })
-}
-
-fn with_state(
-    state: Arc<AppState>,
-) -> impl Filter<Extract = (Arc<AppState>,), Error = Infallible> + Clone {
-    warp::any().map(move || state.clone())
 }
 
 async fn shutdown_signal() {
@@ -622,6 +679,8 @@ async fn main() {
         db_pool,
         trading_mode: std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string()),
         trading_profile: std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string()),
+        operator_auth_mode: std::env::var("OPERATOR_AUTH_MODE")
+            .unwrap_or_else(|_| "token".to_string()),
         operator_api_token: read_non_empty_env("OPERATOR_API_TOKEN"),
     });
 
@@ -664,8 +723,7 @@ async fn main() {
         .and(warp::path::end())
         .and(warp::post())
         .and(warp::body::json::<KillSwitchRequest>())
-        .and(warp::header::optional::<String>("x-operator-token"))
-        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_operator_auth(state.clone()))
         .and(with_state(state.clone()))
         .then(kill_switch_handler);
 
@@ -681,7 +739,8 @@ async fn main() {
         .or(performance)
         .or(kill_switch)
         .or(legacy_root)
-        .or(legacy_health);
+        .or(legacy_health)
+        .recover(handle_rejection);
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
