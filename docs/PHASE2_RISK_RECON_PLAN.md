@@ -10,6 +10,7 @@ Close monitor-driven risk controls and reconciliation with clear operational evi
   - `HEALTH_CHECK_INTERVAL_SEC` with fallback `HEALTH_CHECK_INTERVAL_MIN`
   - `RECONCILIATION_INTERVAL_SEC` with fallback `RECONCILIATION_INTERVAL_MIN`
   - `MAX_POSITION_DRIFT_NOTIONAL_USDT` (default: 5.0)
+  - `ALERT_COOLDOWN_SEC` (default: 300)
 - Periodic monitor heartbeat loop.
 - Periodic reconciliation loop for `DOGEUSDT`, `XRPUSDT`, `TRXUSDT`, `XLMUSDT`.
 - Drift computation and severity classification (`info`, `warning`, `error`, `critical`).
@@ -21,18 +22,18 @@ Close monitor-driven risk controls and reconciliation with clear operational evi
   - `warning` -> `DISCORD_WEBHOOK_WARNING`
   - `error` and `critical` -> `DISCORD_WEBHOOK_CRITICAL`
   - `info` -> no alert (noise control)
+- Alert dedup/throttling by `symbol + severity` using `ALERT_COOLDOWN_SEC`.
 - Bybit source-of-truth pull in monitor:
   - authenticated GET `/v5/position/list` per symbol
   - notional from live position data, with snapshot fallback if API is unavailable
+- Operational evidence and playbook:
+  - [docs/operations/RECONCILIATION_EVIDENCE.md](./operations/RECONCILIATION_EVIDENCE.md)
+  - runbook section `11) Reconciliation Incident Playbook`
 
 ## Remaining Gaps to close Phase 2
 
-1. Alert policy hardening:
-   - add deduplication/cooldown window for repeated symbol alerts
-   - document escalation path and operator action matrix per severity
-2. Operational evidence bundle:
-   - SQL queries + log snippets proving drift detect/resolve behavior
-   - runbook section for reconciliation incident handling
+1. Execute a controlled validation window and attach evidence bundle to the phase closure note.
+2. Confirm alert noise level in live-like volatility and tune `ALERT_COOLDOWN_SEC` if needed.
 
 ## Exit Criteria (Phase 2)
 

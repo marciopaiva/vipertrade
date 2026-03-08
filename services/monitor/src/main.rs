@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::error::Error;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
@@ -18,6 +19,7 @@ struct MonitorConfig {
     health_check_interval_sec: u64,
     reconciliation_interval_sec: u64,
     max_position_drift_notional_usdt: f64,
+    alert_cooldown_sec: u64,
     redis_url: String,
     discord_webhook_critical: Option<String>,
     discord_webhook_warning: Option<String>,
@@ -44,6 +46,11 @@ impl MonitorConfig {
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(5.0);
 
+        let alert_cooldown_sec = std::env::var("ALERT_COOLDOWN_SEC")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(300);
+
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://vipertrade-redis:6379".to_string());
 
@@ -61,6 +68,7 @@ impl MonitorConfig {
             health_check_interval_sec,
             reconciliation_interval_sec,
             max_position_drift_notional_usdt,
+            alert_cooldown_sec,
             redis_url,
             discord_webhook_critical,
             discord_webhook_warning,
@@ -127,6 +135,13 @@ fn now_ms() -> String {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     ms.to_string()
+}
+
+fn now_epoch_sec() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
@@ -415,7 +430,22 @@ fn discord_webhook_for<'a>(cfg: &'a MonitorConfig, severity: &str) -> Option<&'a
     }
 }
 
-async fn publish_discord_alert(cfg: &MonitorConfig, result: &ReconResult) {
+fn should_emit_alert(last_sent_at: Option<i64>, now_epoch_sec: i64, cooldown_sec: u64) -> bool {
+    if cooldown_sec == 0 {
+        return true;
+    }
+
+    match last_sent_at {
+        None => true,
+        Some(last) => now_epoch_sec.saturating_sub(last) >= cooldown_sec as i64,
+    }
+}
+
+async fn maybe_publish_discord_alert(
+    cfg: &MonitorConfig,
+    result: &ReconResult,
+    alert_last_sent: &mut HashMap<String, i64>,
+) {
     if result.severity == "info" {
         return;
     }
@@ -423,6 +453,17 @@ async fn publish_discord_alert(cfg: &MonitorConfig, result: &ReconResult) {
     let Some(webhook) = discord_webhook_for(cfg, result.severity) else {
         return;
     };
+
+    let now = now_epoch_sec();
+    let key = format!("{}:{}", result.symbol, result.severity);
+    let last = alert_last_sent.get(&key).copied();
+    if !should_emit_alert(last, now, cfg.alert_cooldown_sec) {
+        println!(
+            "reconciliation: alert suppressed by cooldown symbol={} severity={} cooldown_sec={}",
+            result.symbol, result.severity, cfg.alert_cooldown_sec
+        );
+        return;
+    }
 
     let content = format!(
         "[vipertrade][reconciliation][{}] symbol={} drift_notional_usdt={:.6} drift_pct={:.6} local_notional_usdt={:.6} bybit_notional_usdt={:.6} reconciled={}",
@@ -437,15 +478,25 @@ async fn publish_discord_alert(cfg: &MonitorConfig, result: &ReconResult) {
 
     let payload = json!({ "content": content });
     let client = reqwest::Client::new();
-    if let Err(err) = client.post(webhook).json(&payload).send().await {
-        eprintln!(
-            "reconciliation: failed to publish Discord alert for {}: {}",
-            result.symbol, err
-        );
+    match client.post(webhook).json(&payload).send().await {
+        Ok(_) => {
+            alert_last_sent.insert(key, now);
+        }
+        Err(err) => {
+            eprintln!(
+                "reconciliation: failed to publish Discord alert for {}: {}",
+                result.symbol, err
+            );
+        }
     }
 }
 
-async fn run_reconciliation_cycle(http: &reqwest::Client, pool: &PgPool, cfg: &MonitorConfig) {
+async fn run_reconciliation_cycle(
+    http: &reqwest::Client,
+    pool: &PgPool,
+    cfg: &MonitorConfig,
+    alert_last_sent: &mut HashMap<String, i64>,
+) {
     for symbol in RECON_SYMBOLS {
         let local_notional_usdt = match fetch_local_notional_usdt(pool, symbol).await {
             Ok(v) => v,
@@ -487,7 +538,7 @@ async fn run_reconciliation_cycle(http: &reqwest::Client, pool: &PgPool, cfg: &M
         }
 
         publish_recon_event(&cfg.redis_url, &result).await;
-        publish_discord_alert(cfg, &result).await;
+        maybe_publish_discord_alert(cfg, &result, alert_last_sent).await;
 
         println!(
             "reconciliation: symbol={} local={} bybit={} drift={} severity={}",
@@ -530,10 +581,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = MonitorConfig::from_env();
     println!(
-        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT bybit_env={}",
+        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT cooldown={}s bybit_env={}",
         cfg.health_check_interval_sec,
         cfg.reconciliation_interval_sec,
         cfg.max_position_drift_notional_usdt,
+        cfg.alert_cooldown_sec,
         cfg.bybit_env
     );
 
@@ -590,13 +642,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let cfg_for_recon = cfg.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(recon_interval));
+            let mut alert_last_sent: HashMap<String, i64> = HashMap::new();
             loop {
                 tokio::select! {
                     _ = recon_task_shutdown.changed() => {
                         break;
                     }
                     _ = ticker.tick() => {
-                        run_reconciliation_cycle(&http, &pool, &cfg_for_recon).await;
+                        run_reconciliation_cycle(&http, &pool, &cfg_for_recon, &mut alert_last_sent).await;
                     }
                 }
             }
@@ -628,6 +681,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 mod tests {
     use super::{
         classify_severity, compute_drift, parse_position_notional_usdt, read_interval_sec,
+        should_emit_alert,
     };
     use serde_json::json;
 
@@ -687,5 +741,13 @@ mod tests {
 
         let v = parse_position_notional_usdt(&payload, "XRPUSDT").expect("parse must work");
         assert!((v - 21.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn should_emit_alert_respects_cooldown() {
+        assert!(should_emit_alert(None, 1000, 300));
+        assert!(!should_emit_alert(Some(900), 1000, 300));
+        assert!(should_emit_alert(Some(600), 1000, 300));
+        assert!(should_emit_alert(Some(995), 1000, 0));
     }
 }
