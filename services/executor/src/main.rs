@@ -28,6 +28,7 @@ struct ExecutorConfig {
     bybit_account_type: String,
     live_orders_enabled: bool,
     live_symbol_allowlist: HashSet<String>,
+    reconcile_fix: bool,
 }
 
 #[derive(Clone)]
@@ -66,6 +67,9 @@ impl ExecutorConfig {
                 .unwrap_or_else(|_| "DOGEUSDT".to_string())
                 .as_str(),
         );
+        let reconcile_fix = std::env::var("EXECUTOR_RECONCILE_FIX")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
 
         Self {
             redis_url,
@@ -77,6 +81,7 @@ impl ExecutorConfig {
             bybit_account_type,
             live_orders_enabled,
             live_symbol_allowlist,
+            reconcile_fix,
         }
     }
 
@@ -188,11 +193,26 @@ struct BybitSymbolConstraints {
     min_notional: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct OrderExecutionMeta {
     avg_price: Option<f64>,
     fee: Option<f64>,
     executed_qty: Option<f64>,
+    fills: Vec<BybitFill>,
+}
+
+#[derive(Debug, Clone)]
+struct BybitFill {
+    execution_id: String,
+    order_id: String,
+    side: Option<String>,
+    exec_qty: f64,
+    exec_price: Option<f64>,
+    exec_fee: f64,
+    fee_currency: Option<String>,
+    is_maker: Option<bool>,
+    exec_time_ms: Option<i64>,
+    raw_data: Value,
 }
 
 fn realized_pnl(
@@ -522,7 +542,8 @@ async fn mark_processed(
 
         sqlx::query(
             "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT DO NOTHING",
         )
         .bind("executor_event_processed")
         .bind(if status == "error" { "error" } else { "info" })
@@ -591,6 +612,57 @@ async fn persist_trade(
     .bind(false)
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+async fn persist_bybit_fills(
+    state: &ExecutorState,
+    event: &StrategyDecisionEvent,
+    bybit_order_id: &str,
+    fills: &[BybitFill],
+) -> Result<(), sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(());
+    };
+
+    for fill in fills {
+        sqlx::query(
+            "INSERT INTO bybit_fills (
+                bybit_execution_id,
+                bybit_order_id,
+                order_link_id,
+                symbol,
+                side,
+                exec_qty,
+                exec_price,
+                exec_fee,
+                fee_currency,
+                is_maker,
+                exec_time,
+                raw_data
+            ) VALUES (
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                CASE WHEN $11 IS NULL THEN NULL ELSE to_timestamp(($11::double precision)/1000.0) END,
+                $12
+            )
+            ON CONFLICT (bybit_execution_id) DO NOTHING",
+        )
+        .bind(&fill.execution_id)
+        .bind(if fill.order_id.is_empty() { bybit_order_id } else { &fill.order_id })
+        .bind(&event.event_id)
+        .bind(&event.decision.symbol)
+        .bind(fill.side.as_deref())
+        .bind(fill.exec_qty)
+        .bind(fill.exec_price)
+        .bind(fill.exec_fee)
+        .bind(fill.fee_currency.as_deref())
+        .bind(fill.is_maker)
+        .bind(fill.exec_time_ms)
+        .bind(&fill.raw_data)
+        .execute(pool)
+        .await?;
+    }
 
     Ok(())
 }
@@ -839,12 +911,12 @@ async fn fetch_order_execution_price(
     Ok(maybe_avg)
 }
 
-async fn fetch_order_execution_fill_stats(
+async fn fetch_order_execution_fills(
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
     symbol: &str,
     order_id: &str,
-) -> Result<(Option<f64>, Option<f64>), Box<dyn Error>> {
+) -> Result<Vec<BybitFill>, Box<dyn Error>> {
     let query = format!(
         "category=linear&symbol={}&orderId={}",
         symbol.to_uppercase(),
@@ -861,39 +933,80 @@ async fn fetch_order_execution_fill_stats(
         return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
     }
 
-    let (total_fee, total_qty) = value
+    let fills = value
         .get("result")
         .and_then(|r| r.get("list"))
         .and_then(Value::as_array)
-        .map(|fills| {
-            fills.iter().fold((0.0, 0.0), |(fee_acc, qty_acc), fill| {
-                let fee = fill
-                    .get("execFee")
-                    .and_then(Value::as_str)
-                    .and_then(|x| x.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                let qty = fill
-                    .get("execQty")
-                    .and_then(Value::as_str)
-                    .and_then(|x| x.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                (fee_acc + fee, qty_acc + qty)
-            })
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|fill| {
+                    let execution_id = fill
+                        .get("execId")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if execution_id.is_empty() {
+                        return None;
+                    }
+
+                    let order_id = fill
+                        .get("orderId")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+
+                    let exec_qty = fill
+                        .get("execQty")
+                        .and_then(Value::as_str)
+                        .and_then(|x| x.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    if exec_qty <= 0.0 {
+                        return None;
+                    }
+
+                    let exec_price = fill
+                        .get("execPrice")
+                        .and_then(Value::as_str)
+                        .and_then(|x| x.parse::<f64>().ok())
+                        .filter(|v| *v > 0.0);
+
+                    let exec_fee = fill
+                        .get("execFee")
+                        .and_then(Value::as_str)
+                        .and_then(|x| x.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+
+                    let fee_currency = fill
+                        .get("feeCurrency")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+
+                    let side = fill.get("side").and_then(Value::as_str).map(str::to_string);
+                    let is_maker = fill.get("isMaker").and_then(Value::as_bool);
+                    let exec_time_ms = fill
+                        .get("execTime")
+                        .and_then(Value::as_str)
+                        .and_then(|x| x.parse::<i64>().ok());
+
+                    Some(BybitFill {
+                        execution_id,
+                        order_id,
+                        side,
+                        exec_qty,
+                        exec_price,
+                        exec_fee,
+                        fee_currency,
+                        is_maker,
+                        exec_time_ms,
+                        raw_data: fill.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
         })
-        .unwrap_or((0.0, 0.0));
+        .unwrap_or_default();
 
-    let fee = if total_fee.abs() < 1e-12 {
-        None
-    } else {
-        Some(total_fee)
-    };
-    let qty = if total_qty.abs() < 1e-12 {
-        None
-    } else {
-        Some(total_qty)
-    };
-
-    Ok((fee, qty))
+    Ok(fills)
 }
 
 async fn fetch_order_execution_meta(
@@ -902,23 +1015,44 @@ async fn fetch_order_execution_meta(
     symbol: &str,
     order_id: &str,
 ) -> Result<OrderExecutionMeta, Box<dyn Error>> {
-    let avg_price = fetch_order_execution_price(http, cfg, symbol, order_id).await?;
-    let (fee, executed_qty) =
-        match fetch_order_execution_fill_stats(http, cfg, symbol, order_id).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!(
-                    "Failed to fetch Bybit fill stats symbol={} order_id={} err={}",
-                    symbol, order_id, e
-                );
-                (None, None)
-            }
-        };
+    let avg_price_from_order = fetch_order_execution_price(http, cfg, symbol, order_id).await?;
+    let fills = match fetch_order_execution_fills(http, cfg, symbol, order_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "Failed to fetch Bybit fills symbol={} order_id={} err={}",
+                symbol, order_id, e
+            );
+            Vec::new()
+        }
+    };
+
+    let total_fee: f64 = fills.iter().map(|f| f.exec_fee).sum();
+    let total_qty: f64 = fills.iter().map(|f| f.exec_qty).sum();
+    let weighted_notional: f64 = fills
+        .iter()
+        .filter_map(|f| f.exec_price.map(|p| p * f.exec_qty))
+        .sum();
+
+    let avg_price_from_fills = if total_qty > 0.0 && weighted_notional > 0.0 {
+        Some(weighted_notional / total_qty)
+    } else {
+        None
+    };
 
     Ok(OrderExecutionMeta {
-        avg_price,
-        fee,
-        executed_qty,
+        avg_price: avg_price_from_order.or(avg_price_from_fills),
+        fee: if total_fee.abs() < 1e-12 {
+            None
+        } else {
+            Some(total_fee)
+        },
+        executed_qty: if total_qty.abs() < 1e-12 {
+            None
+        } else {
+            Some(total_qty)
+        },
+        fills,
     })
 }
 
@@ -1002,6 +1136,67 @@ async fn record_reconciliation_event(
     Ok(())
 }
 
+async fn apply_reconciliation_reduce_local(
+    pool: &PgPool,
+    symbol: &str,
+    side: &str,
+    target_qty: f64,
+) -> Result<(f64, f64), sqlx::Error> {
+    let open_trades: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT trade_id::text, quantity::double precision
+         FROM trades
+         WHERE symbol = $1 AND side = $2 AND status = 'open'
+         ORDER BY opened_at DESC",
+    )
+    .bind(symbol)
+    .bind(side)
+    .fetch_all(pool)
+    .await?;
+
+    let local_qty: f64 = open_trades.iter().map(|(_, q)| *q).sum();
+    let mut to_reduce = (local_qty - target_qty).max(0.0);
+    let eps = 1e-9_f64;
+
+    for (trade_id, qty) in open_trades {
+        if to_reduce <= eps {
+            break;
+        }
+
+        if to_reduce + eps >= qty {
+            sqlx::query(
+                "UPDATE trades
+                 SET status='closed',
+                     close_reason='error',
+                     closed_at=NOW(),
+                     quantity=0,
+                     updated_at=NOW()
+                 WHERE trade_id::text=$1",
+            )
+            .bind(&trade_id)
+            .execute(pool)
+            .await?;
+            to_reduce -= qty;
+        } else {
+            let new_qty = (qty - to_reduce).max(0.0);
+            sqlx::query(
+                "UPDATE trades
+                 SET quantity=$2,
+                     updated_at=NOW()
+                 WHERE trade_id::text=$1",
+            )
+            .bind(&trade_id)
+            .bind(new_qty)
+            .execute(pool)
+            .await?;
+
+            break;
+        }
+    }
+
+    let final_qty = local_open_qty(pool, symbol, side).await?;
+    Ok((local_qty, final_qty))
+}
+
 async fn run_reconciliation_tick(
     state: &ExecutorState,
     http: &reqwest::Client,
@@ -1032,12 +1227,53 @@ async fn run_reconciliation_tick(
 
             if diff > 1e-6 {
                 eprintln!(
-                    "Reconciliation diff symbol={} side={} local_qty={} bybit_qty={} diff={}",
-                    symbol, side, local_qty, bybit_qty, diff
+                    "Reconciliation diff symbol={} side={} local_qty={} bybit_qty={} diff={} fix_mode={}",
+                    symbol, side, local_qty, bybit_qty, diff, cfg.reconcile_fix
                 );
-                let _ =
-                    record_reconciliation_event(pool, &symbol, side, local_qty, bybit_qty, diff)
+
+                if cfg.reconcile_fix {
+                    if local_qty > bybit_qty + 1e-6 {
+                        match apply_reconciliation_reduce_local(pool, &symbol, side, bybit_qty)
+                            .await
+                        {
+                            Ok((before, after)) => {
+                                let _ = record_reconciliation_event(
+                                    pool,
+                                    &symbol,
+                                    side,
+                                    before,
+                                    bybit_qty,
+                                    (before - bybit_qty).abs(),
+                                )
+                                .await;
+                                println!(
+                                    "Reconciliation fix applied symbol={} side={} before_local={} target_bybit={} after_local={}",
+                                    symbol, side, before, bybit_qty, after
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Reconciliation fix failed symbol={} side={} err={}",
+                                    symbol, side, e
+                                );
+                            }
+                        }
+                    } else {
+                        let _ = record_reconciliation_event(
+                            pool, &symbol, side, local_qty, bybit_qty, diff,
+                        )
                         .await;
+                        eprintln!(
+                            "Reconciliation fix skipped symbol={} side={} reason=local_less_than_bybit",
+                            symbol, side
+                        );
+                    }
+                } else {
+                    let _ = record_reconciliation_event(
+                        pool, &symbol, side, local_qty, bybit_qty, diff,
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -1098,7 +1334,7 @@ async fn handle_decision_event(
             "Live orders disabled; dry-run for event_id={} action={} symbol={}",
             event.event_id, event.decision.action, event.decision.symbol
         );
-        mark_processed(state, &event.event_id, &event, "dry_run", None, None).await?;
+        mark_processed(state, &idem_key, &event, "dry_run", None, None).await?;
         return Ok(());
     }
 
@@ -1135,9 +1371,19 @@ async fn handle_decision_event(
                         avg_price: None,
                         fee: None,
                         executed_qty: None,
+                        fills: Vec::new(),
                     }
                 }
             };
+
+            if let Err(e) =
+                persist_bybit_fills(state, &event, &order_id, &execution_meta.fills).await
+            {
+                eprintln!(
+                    "Failed to persist Bybit fills event_id={} order_id={} err={}",
+                    event.event_id, order_id, e
+                );
+            }
 
             if is_close_action(&event.decision.action) {
                 let execution_price = execution_meta
@@ -1251,9 +1497,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = ExecutorConfig::from_env();
     println!(
-        "Executor mode env={} live_orders_enabled={} base_url={} allowlist={:?}",
+        "Executor mode env={} live_orders_enabled={} reconcile_fix={} base_url={} allowlist={:?}",
         cfg.bybit_env,
         cfg.live_orders_enabled,
+        cfg.reconcile_fix,
         cfg.bybit_base_url(),
         cfg.live_symbol_allowlist
     );
