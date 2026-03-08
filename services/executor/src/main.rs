@@ -426,6 +426,7 @@ async fn persist_trade(
 async fn close_open_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
+    close_price: f64,
 ) -> Result<CloseReconcileResult, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(CloseReconcileResult::NoLocalOpen);
@@ -457,7 +458,6 @@ async fn close_open_trade(
     };
 
     let close_qty = event.decision.quantity;
-    let close_price = event.decision.entry_price;
     let eps = 1e-9_f64;
     let effective_close_qty = if close_qty > open_qty {
         open_qty
@@ -500,6 +500,7 @@ async fn close_open_trade(
          SET status = 'closed',
              close_reason = 'manual',
              closed_at = NOW(),
+             quantity = 0,
              pnl = COALESCE(pnl, 0) + $2,
              pnl_pct = CASE
                  WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2) / (entry_price * quantity)) * 100)
@@ -594,6 +595,41 @@ async fn submit_market_order(
     Ok(order_id)
 }
 
+async fn fetch_order_execution_price(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    order_id: &str,
+) -> Result<Option<f64>, Box<dyn Error>> {
+    let query = format!(
+        "category=linear&symbol={}&orderId={}",
+        symbol.to_uppercase(),
+        order_id
+    );
+
+    let value = bybit_private_get(http, cfg, "/v5/order/realtime", &query).await?;
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let maybe_avg = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .and_then(|order| order.get("avgPrice"))
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|p| *p > 0.0);
+
+    Ok(maybe_avg)
+}
+
 async fn handle_decision_event(
     state: &ExecutorState,
     http: &reqwest::Client,
@@ -662,7 +698,32 @@ async fn handle_decision_event(
             let mut status = "submitted";
 
             if is_close_action(&event.decision.action) {
-                match close_open_trade(state, &event).await {
+                let execution_price = match fetch_order_execution_price(
+                    http,
+                    cfg,
+                    &event.decision.symbol,
+                    &order_id,
+                )
+                .await
+                {
+                    Ok(Some(price)) => price,
+                    Ok(None) => {
+                        eprintln!(
+                            "Bybit avgPrice missing for event_id={} order_id={}, fallback to decision price={}",
+                            event.event_id, order_id, event.decision.entry_price
+                        );
+                        event.decision.entry_price
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to fetch Bybit execution price event_id={} order_id={} err={}, fallback decision price={}",
+                            event.event_id, order_id, e, event.decision.entry_price
+                        );
+                        event.decision.entry_price
+                    }
+                };
+
+                match close_open_trade(state, &event, execution_price).await {
                     Ok(CloseReconcileResult::Closed {
                         trade_id,
                         realized_pnl,
@@ -938,6 +999,124 @@ mod tests {
         let short_pnl = realized_pnl("Short", 100.0, 90.0, 2.0, 2.0);
         assert_eq!(long_pnl, 40.0);
         assert_eq!(short_pnl, 40.0);
+    }
+
+    #[tokio::test]
+    async fn db_close_reconcile_partial_then_full() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-close-{}", now_ms());
+
+        sqlx::query(
+            "INSERT INTO trades (
+                order_link_id,
+                bybit_order_id,
+                symbol,
+                side,
+                quantity,
+                entry_price,
+                leverage,
+                status,
+                decision_hash,
+                smart_copy_compatible,
+                pipeline_version,
+                paper_trade
+            ) VALUES ($1,$2,'DOGEUSDT','Long',10,1.0,2.0,'open',$3,true,'it',true)",
+        )
+        .bind(&trade_key)
+        .bind(format!("bybit-{}", trade_key))
+        .bind(format!("hash-{}", trade_key))
+        .execute(&pool)
+        .await
+        .expect("seed trade");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+        };
+
+        let partial: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": format!("{}-p", trade_key),
+            "source_event_id": format!("{}-sp", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "CLOSE_LONG",
+                "symbol": "DOGEUSDT",
+                "quantity": 4.0,
+                "leverage": 2.0,
+                "entry_price": 1.1,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("partial event");
+
+        let res = close_open_trade(&state, &partial, 1.1)
+            .await
+            .expect("partial close should work");
+        assert!(matches!(res, CloseReconcileResult::Partial { .. }));
+
+        let (qty_after_partial, status_after_partial): (f64, String) = sqlx::query_as(
+            "SELECT quantity::double precision, status FROM trades WHERE order_link_id = $1",
+        )
+        .bind(&trade_key)
+        .fetch_one(&pool)
+        .await
+        .expect("query partial");
+        assert!((qty_after_partial - 6.0).abs() < 1e-9);
+        assert_eq!(status_after_partial, "open");
+
+        let full: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": format!("{}-f", trade_key),
+            "source_event_id": format!("{}-sf", trade_key),
+            "timestamp": "2026-01-01T00:01:00Z",
+            "decision": {
+                "action": "CLOSE_LONG",
+                "symbol": "DOGEUSDT",
+                "quantity": 6.0,
+                "leverage": 2.0,
+                "entry_price": 1.2,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("full event");
+
+        let res = close_open_trade(&state, &full, 1.2)
+            .await
+            .expect("full close should work");
+        assert!(matches!(res, CloseReconcileResult::Closed { .. }));
+
+        let (status_after_full, closed_at_is_set, qty_after_full): (String, bool, f64) = sqlx::query_as(
+            "SELECT status, (closed_at IS NOT NULL), quantity::double precision FROM trades WHERE order_link_id = $1",
+        )
+        .bind(&trade_key)
+        .fetch_one(&pool)
+        .await
+        .expect("query full");
+        assert_eq!(status_after_full, "closed");
+        assert!(closed_at_is_set);
+        assert!(qty_after_full.abs() < 1e-9);
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&trade_key)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
     }
 
     #[test]
