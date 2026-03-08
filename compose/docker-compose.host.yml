@@ -325,6 +325,7 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
       OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN}
+      OPERATOR_AUTH_MODE: ${OPERATOR_AUTH_MODE:-token}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_api=info"
     healthcheck:
