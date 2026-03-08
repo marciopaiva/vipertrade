@@ -16,19 +16,21 @@ struct MonitorConfig {
     reconciliation_interval_sec: u64,
     max_position_drift_notional_usdt: f64,
     redis_url: String,
+    discord_webhook_critical: Option<String>,
+    discord_webhook_warning: Option<String>,
+    discord_webhook_info: Option<String>,
 }
 
 impl MonitorConfig {
     fn from_env() -> Self {
-        let health_check_interval_sec = std::env::var("HEALTH_CHECK_INTERVAL_SEC")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(60);
+        let health_check_interval_sec =
+            read_interval_sec("HEALTH_CHECK_INTERVAL_SEC", "HEALTH_CHECK_INTERVAL_MIN", 60);
 
-        let reconciliation_interval_sec = std::env::var("RECONCILIATION_INTERVAL_SEC")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(300);
+        let reconciliation_interval_sec = read_interval_sec(
+            "RECONCILIATION_INTERVAL_SEC",
+            "RECONCILIATION_INTERVAL_MIN",
+            300,
+        );
 
         let max_position_drift_notional_usdt = std::env::var("MAX_POSITION_DRIFT_NOTIONAL_USDT")
             .ok()
@@ -38,11 +40,18 @@ impl MonitorConfig {
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://vipertrade-redis:6379".to_string());
 
+        let discord_webhook_critical = read_non_empty_env("DISCORD_WEBHOOK_CRITICAL");
+        let discord_webhook_warning = read_non_empty_env("DISCORD_WEBHOOK_WARNING");
+        let discord_webhook_info = read_non_empty_env("DISCORD_WEBHOOK_INFO");
+
         Self {
             health_check_interval_sec,
             reconciliation_interval_sec,
             max_position_drift_notional_usdt,
             redis_url,
+            discord_webhook_critical,
+            discord_webhook_warning,
+            discord_webhook_info,
         }
     }
 }
@@ -56,6 +65,31 @@ struct ReconResult {
     drift_pct: f64,
     severity: &'static str,
     reconciled: bool,
+}
+
+fn read_non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn read_interval_sec(sec_var: &str, min_var: &str, default_sec: u64) -> u64 {
+    if let Some(sec) = std::env::var(sec_var)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        return sec;
+    }
+
+    if let Some(min) = std::env::var(min_var)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        return min.saturating_mul(60);
+    }
+
+    default_sec
 }
 
 fn resolve_database_url() -> Option<String> {
@@ -212,6 +246,44 @@ async fn publish_recon_event(redis_url: &str, result: &ReconResult) {
     }
 }
 
+fn discord_webhook_for<'a>(cfg: &'a MonitorConfig, severity: &str) -> Option<&'a str> {
+    match severity {
+        "critical" | "error" => cfg.discord_webhook_critical.as_deref(),
+        "warning" => cfg.discord_webhook_warning.as_deref(),
+        _ => cfg.discord_webhook_info.as_deref(),
+    }
+}
+
+async fn publish_discord_alert(cfg: &MonitorConfig, result: &ReconResult) {
+    if result.severity == "info" {
+        return;
+    }
+
+    let Some(webhook) = discord_webhook_for(cfg, result.severity) else {
+        return;
+    };
+
+    let content = format!(
+        "[vipertrade][reconciliation][{}] symbol={} drift_notional_usdt={:.6} drift_pct={:.6} local_notional_usdt={:.6} bybit_notional_usdt={:.6} reconciled={}",
+        result.severity,
+        result.symbol,
+        result.drift_notional_usdt,
+        result.drift_pct,
+        result.local_notional_usdt,
+        result.bybit_notional_usdt,
+        result.reconciled
+    );
+
+    let payload = json!({ "content": content });
+    let client = reqwest::Client::new();
+    if let Err(err) = client.post(webhook).json(&payload).send().await {
+        eprintln!(
+            "reconciliation: failed to publish Discord alert for {}: {}",
+            result.symbol, err
+        );
+    }
+}
+
 async fn run_reconciliation_cycle(pool: &PgPool, cfg: &MonitorConfig) {
     for symbol in RECON_SYMBOLS {
         let local_notional_usdt = match fetch_local_notional_usdt(pool, symbol).await {
@@ -254,6 +326,7 @@ async fn run_reconciliation_cycle(pool: &PgPool, cfg: &MonitorConfig) {
         }
 
         publish_recon_event(&cfg.redis_url, &result).await;
+        publish_discord_alert(cfg, &result).await;
 
         println!(
             "reconciliation: symbol={} local={} bybit={} drift={} severity={}",
@@ -390,7 +463,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_severity, compute_drift};
+    use super::{classify_severity, compute_drift, read_interval_sec};
 
     #[test]
     fn compute_drift_uses_absolute_delta() {
@@ -406,5 +479,16 @@ mod tests {
         assert_eq!(classify_severity(8.0, threshold), "warning");
         assert_eq!(classify_severity(19.0, threshold), "error");
         assert_eq!(classify_severity(25.0, threshold), "critical");
+    }
+
+    #[test]
+    fn read_interval_uses_min_fallback() {
+        const SEC_VAR: &str = "VT_TEST_HEALTH_SEC";
+        const MIN_VAR: &str = "VT_TEST_HEALTH_MIN";
+
+        std::env::remove_var(SEC_VAR);
+        std::env::set_var(MIN_VAR, "2");
+        assert_eq!(read_interval_sec(SEC_VAR, MIN_VAR, 60), 120);
+        std::env::remove_var(MIN_VAR);
     }
 }
