@@ -10,10 +10,10 @@
 - trailing_profiles_complete: true
 - smart_copy_in_band_ratio_ok: true
 - smart_copy_band_usdt: 5.0..30.0
-- smart_copy_trades_total_24h: 1
-- smart_copy_trades_in_band_24h: 1
-- smart_copy_in_band_ratio_24h: 1.000000
+- smart_copy_trades_total_72h: 1
+- smart_copy_trades_in_band_72h: 1
+- smart_copy_in_band_ratio_72h: 1.000000
 
 ## Artifact
 
-- docs/operations/artifacts/phase5/phase5_baseline_20260308T211546Z.json
+- docs/operations/artifacts/phase5/phase5_baseline_20260308T212230Z.json
