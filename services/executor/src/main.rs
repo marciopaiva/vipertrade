@@ -179,6 +179,13 @@ enum CloseReconcileResult {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BybitSymbolConstraints {
+    min_order_qty: f64,
+    qty_step: f64,
+    min_notional: Option<f64>,
+}
+
 fn realized_pnl(
     side: &str,
     entry_price: f64,
@@ -193,6 +200,126 @@ fn realized_pnl(
     };
 
     signed_delta * quantity * leverage
+}
+
+fn parse_positive_f64(v: Option<&Value>) -> Option<f64> {
+    v.and_then(Value::as_str)
+        .and_then(|x| x.parse::<f64>().ok())
+        .filter(|x| *x > 0.0)
+}
+
+fn format_order_qty(qty: f64, qty_step: f64) -> String {
+    let precision = if qty_step >= 1.0 {
+        0
+    } else {
+        let step_repr = format!("{:.12}", qty_step);
+        step_repr
+            .trim_end_matches('0')
+            .split('.')
+            .nth(1)
+            .map(|d| d.len())
+            .unwrap_or(0)
+    };
+
+    if precision == 0 {
+        format!("{:.0}", qty)
+    } else {
+        let raw = format!("{qty:.precision$}");
+        raw.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn normalize_order_quantity(qty: f64, c: BybitSymbolConstraints) -> Result<f64, String> {
+    if qty <= 0.0 {
+        return Err("quantity must be > 0".to_string());
+    }
+
+    let eps = 1e-9_f64;
+    let mut normalized = qty;
+
+    if c.qty_step > 0.0 {
+        normalized = (qty / c.qty_step).floor() * c.qty_step;
+    }
+
+    if normalized + eps < c.min_order_qty {
+        return Err(format!(
+            "quantity {} below minOrderQty {} after qtyStep normalization",
+            normalized, c.min_order_qty
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn ensure_min_notional(
+    action: &str,
+    qty: f64,
+    decision_price: f64,
+    c: BybitSymbolConstraints,
+) -> Result<(), String> {
+    if is_close_action(action) {
+        return Ok(());
+    }
+
+    let Some(min_notional) = c.min_notional else {
+        return Ok(());
+    };
+
+    if decision_price <= 0.0 {
+        return Err("decision entry_price must be > 0 for min-notional validation".to_string());
+    }
+
+    let notional = qty * decision_price;
+    if notional + 1e-9 < min_notional {
+        return Err(format!(
+            "order notional {} below minNotionalValue {}",
+            notional, min_notional
+        ));
+    }
+
+    Ok(())
+}
+
+async fn fetch_symbol_constraints(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> Result<BybitSymbolConstraints, Box<dyn Error>> {
+    let path = format!(
+        "/v5/market/instruments-info?category=linear&symbol={}",
+        symbol.to_uppercase()
+    );
+    let value = bybit_public_get(http, cfg, &path).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let instrument = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .ok_or("missing instrument metadata")?;
+
+    let lot = instrument
+        .get("lotSizeFilter")
+        .ok_or("missing lotSizeFilter")?;
+
+    let min_order_qty = parse_positive_f64(lot.get("minOrderQty")).ok_or("missing minOrderQty")?;
+    let qty_step = parse_positive_f64(lot.get("qtyStep")).ok_or("missing qtyStep")?;
+    let min_notional = parse_positive_f64(lot.get("minNotionalValue"));
+
+    Ok(BybitSymbolConstraints {
+        min_order_qty,
+        qty_step,
+        min_notional,
+    })
 }
 
 fn decision_hash(event: &StrategyDecisionEvent) -> String {
@@ -539,13 +666,37 @@ async fn submit_market_order(
     let side = action_to_side(&event.decision.action).ok_or("unsupported action for order")?;
 
     let close_action = is_close_action(&event.decision.action);
+    let constraints = fetch_symbol_constraints(http, cfg, &event.decision.symbol).await?;
+    let normalized_qty = normalize_order_quantity(event.decision.quantity, constraints)
+        .map_err(|e| format!("quantity validation failed: {e}"))?;
+
+    ensure_min_notional(
+        &event.decision.action,
+        normalized_qty,
+        event.decision.entry_price,
+        constraints,
+    )
+    .map_err(|e| format!("notional validation failed: {e}"))?;
+
+    if (normalized_qty - event.decision.quantity).abs() > 1e-9 {
+        println!(
+            "Adjusted order quantity event_id={} symbol={} action={} original_qty={} normalized_qty={}",
+            event.event_id,
+            event.decision.symbol,
+            event.decision.action,
+            event.decision.quantity,
+            normalized_qty
+        );
+    }
+
+    let qty_str = format_order_qty(normalized_qty, constraints.qty_step);
 
     let body = json!({
         "category": "linear",
         "symbol": event.decision.symbol,
         "side": side,
         "orderType": "Market",
-        "qty": format!("{}", event.decision.quantity),
+        "qty": qty_str,
         "orderLinkId": event.event_id,
         "reduceOnly": close_action,
         "closeOnTrigger": close_action,
@@ -999,6 +1150,43 @@ mod tests {
         let short_pnl = realized_pnl("Short", 100.0, 90.0, 2.0, 2.0);
         assert_eq!(long_pnl, 40.0);
         assert_eq!(short_pnl, 40.0);
+    }
+
+    #[test]
+    fn normalizes_quantity_by_step() {
+        let c = BybitSymbolConstraints {
+            min_order_qty: 1.0,
+            qty_step: 0.1,
+            min_notional: Some(5.0),
+        };
+        let q = normalize_order_quantity(10.09, c).expect("normalize qty");
+        assert!((q - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rejects_quantity_below_min_after_normalization() {
+        let c = BybitSymbolConstraints {
+            min_order_qty: 1.0,
+            qty_step: 0.1,
+            min_notional: Some(5.0),
+        };
+        let err = normalize_order_quantity(0.95, c).expect_err("should reject");
+        assert!(err.contains("below minOrderQty"));
+    }
+
+    #[test]
+    fn validates_min_notional_for_enter_and_skips_close() {
+        let c = BybitSymbolConstraints {
+            min_order_qty: 1.0,
+            qty_step: 0.1,
+            min_notional: Some(5.0),
+        };
+
+        let low = ensure_min_notional("ENTER_LONG", 10.0, 0.4, c);
+        assert!(low.is_err());
+
+        let close = ensure_min_notional("CLOSE_LONG", 1.0, 0.1, c);
+        assert!(close.is_ok());
     }
 
     #[tokio::test]
