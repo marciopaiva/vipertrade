@@ -6,7 +6,8 @@ Derived from `VIPERTRADE_SPEC.md` (blocos 0-15), with formal phase gating for ex
 
 - Phase 1: Completed (2026-03-08)
 - Phase 2: Completed (2026-03-08)
-- Phase 3: In progress (current execution focus)
+- Phase 3: Completed (2026-03-08)
+- Phase 4: In progress (current execution focus)
 
 ## Phase 1 - Foundation and Runtime Hardening (Completed)
 
@@ -51,7 +52,7 @@ Done evidence:
 - Alert cooldown and operator playbook documented.
 - Validation report: `docs/operations/PHASE2_VALIDATION_2026-03-08.md`.
 
-## Phase 3 - Lead Trader Operations and API Surface (In progress)
+## Phase 3 - Lead Trader Operations and API Surface (Completed)
 
 Scope:
 
@@ -72,6 +73,12 @@ Exit criteria:
 
 - Operator can audit and control runtime via API without direct DB access.
 - Public metrics and internal metrics remain consistent over rolling windows.
+
+Done evidence:
+
+- Validation report: `docs/operations/PHASE3_VALIDATION_2026-03-08.md`.
+- API `/api/v1` read surface validated (`health`, `status`, `positions`, `trades`, `performance`).
+- Kill-switch control validated for both deny-by-default and positive operator flow with audit trail.
 
 ## Phase 4 - Backtesting and Paper-to-Live Validation
 
