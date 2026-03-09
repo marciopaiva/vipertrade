@@ -1,10 +1,32 @@
 use redis::AsyncCommands;
+use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use viper_domain::{MarketSignal, MarketSignalEvent};
+
+fn parse_trading_pairs() -> Vec<String> {
+    let raw = std::env::var("TRADING_PAIRS")
+        .unwrap_or_else(|_| "DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT".to_string());
+    let pairs: Vec<String> = raw
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if pairs.is_empty() {
+        vec![
+            "DOGEUSDT".to_string(),
+            "XRPUSDT".to_string(),
+            "TRXUSDT".to_string(),
+            "XLMUSDT".to_string(),
+        ]
+    } else {
+        pairs
+    }
+}
 
 async fn shutdown_signal() {
     #[cfg(unix)]
@@ -74,8 +96,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Connected to Redis. Starting market data loop...");
 
-    let symbols = vec!["BTCUSDT", "ETHUSDT", "SOLUSDT"];
-    let mut price = 60000.0;
+    let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+    let symbols = parse_trading_pairs();
+    println!(
+        "Market-data running in BYBIT_ENV={} with pairs={}",
+        bybit_env,
+        symbols.join(",")
+    );
+
+    let mut prices: HashMap<String, f64> = symbols
+        .iter()
+        .map(|s| (s.clone(), 100.0 + rand::random::<f64>() * 50.0))
+        .collect();
 
     loop {
         if *shutdown_rx.borrow() {
@@ -84,13 +116,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         for symbol in &symbols {
+            let entry = prices.entry(symbol.clone()).or_insert(100.0);
             let change = (rand::random::<f64>() - 0.5) * 100.0;
-            price += change;
+            *entry = (*entry + change).max(0.0001);
 
             let signal = MarketSignal {
                 symbol: symbol.to_string(),
-                current_price: price,
-                atr_14: price * 0.02,
+                current_price: *entry,
+                atr_14: *entry * 0.02,
                 volume_24h: 1_000_000,
                 funding_rate: 0.0001,
                 trend_score: 0.8,
