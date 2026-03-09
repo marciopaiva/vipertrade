@@ -37,4 +37,3 @@ curl -s http://localhost:3000/api/dashboard
 - `api_kill_switch_set`
 - `api_executor_state_set`
 - `api_risk_limits_set`
-
