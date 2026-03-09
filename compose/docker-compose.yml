@@ -348,6 +348,11 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
       REDIS_URL: redis://redis:6379
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      BYBIT_API_KEY: ${BYBIT_API_KEY}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET}
+      BYBIT_RECV_WINDOW: ${BYBIT_RECV_WINDOW:-5000}
+      BYBIT_ACCOUNT_TYPE: ${BYBIT_ACCOUNT_TYPE:-UNIFIED}
       JWT_SECRET: ${JWT_SECRET:-generate_me}
       TRADING_MODE: ${TRADING_MODE:-paper}
       TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
@@ -393,4 +398,3 @@ volumes:
 networks:
   viper-net:
     driver: bridge
-
