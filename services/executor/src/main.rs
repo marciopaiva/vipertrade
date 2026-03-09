@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use hmac::{Hmac, Mac};
-use reqwest::header::CONTENT_TYPE;
 use redis::AsyncCommands;
+use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
@@ -522,14 +522,14 @@ async fn run_bybit_sanity_checks(
 
     for account_type in candidates {
         let query = format!("accountType={account_type}");
-        let wallet_value = match bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query).await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                wallet_errors.push(format!("accountType={account_type} request_error={e}"));
-                continue;
-            }
-        };
+        let wallet_value =
+            match bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query).await {
+                Ok(v) => v,
+                Err(e) => {
+                    wallet_errors.push(format!("accountType={account_type} request_error={e}"));
+                    continue;
+                }
+            };
 
         let wallet_ret = wallet_value
             .get("retCode")
