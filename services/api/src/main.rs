@@ -511,11 +511,17 @@ async fn fetch_risk_limits_status(
     .fetch_optional(pool)
     .await?;
 
-    if let Some((max_daily_loss_pct, max_leverage, risk_per_trade_pct, reason, actor, updated_at)) = row {
+    if let Some((max_daily_loss_pct, max_leverage, risk_per_trade_pct, reason, actor, updated_at)) =
+        row
+    {
         Ok(RiskLimitsStatus {
-            max_daily_loss_pct: round6(max_daily_loss_pct.unwrap_or(defaults.default_max_daily_loss_pct)),
+            max_daily_loss_pct: round6(
+                max_daily_loss_pct.unwrap_or(defaults.default_max_daily_loss_pct),
+            ),
             max_leverage: round6(max_leverage.unwrap_or(defaults.default_max_leverage)),
-            risk_per_trade_pct: round6(risk_per_trade_pct.unwrap_or(defaults.default_risk_per_trade_pct)),
+            risk_per_trade_pct: round6(
+                risk_per_trade_pct.unwrap_or(defaults.default_risk_per_trade_pct),
+            ),
             reason,
             actor,
             updated_at,
@@ -793,7 +799,16 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
             let items = rows
                 .into_iter()
                 .map(
-                    |(event_id, event_type, severity, category, symbol, trade_id, data, timestamp)| {
+                    |(
+                        event_id,
+                        event_type,
+                        severity,
+                        category,
+                        symbol,
+                        trade_id,
+                        data,
+                        timestamp,
+                    )| {
                         EventItem {
                             event_id,
                             event_type,
@@ -1035,7 +1050,8 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
     let checked_at = Utc::now();
     let bybit_url = resolve_bybit_rest_url();
     let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
-    let account_type = read_non_empty_env("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|| "UNIFIED".to_string());
+    let account_type =
+        read_non_empty_env("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|| "UNIFIED".to_string());
     let url = format!(
         "{}/v5/account/wallet-balance?accountType={}",
         bybit_url, account_type
@@ -1127,9 +1143,7 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            let ret_code = parsed
-                .get("retCode")
-                .and_then(|v| v.as_i64());
+            let ret_code = parsed.get("retCode").and_then(|v| v.as_i64());
             let ret_msg = parsed
                 .get("retMsg")
                 .and_then(|v| v.as_str())
@@ -1147,7 +1161,9 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
                 } else {
                     Some(format!(
                         "retCode={} retMsg={}",
-                        ret_code.map(|v| v.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        ret_code
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
                         ret_msg.clone().unwrap_or_else(|| "unknown".to_string())
                     ))
                 },
@@ -1366,14 +1382,16 @@ async fn risk_limits_control_handler(
         );
     };
 
-    let current = fetch_risk_limits_status(pool, &state).await.unwrap_or(RiskLimitsStatus {
-        max_daily_loss_pct: state.default_max_daily_loss_pct,
-        max_leverage: state.default_max_leverage,
-        risk_per_trade_pct: state.default_risk_per_trade_pct,
-        reason: None,
-        actor: None,
-        updated_at: None,
-    });
+    let current = fetch_risk_limits_status(pool, &state)
+        .await
+        .unwrap_or(RiskLimitsStatus {
+            max_daily_loss_pct: state.default_max_daily_loss_pct,
+            max_leverage: state.default_max_leverage,
+            risk_per_trade_pct: state.default_risk_per_trade_pct,
+            reason: None,
+            actor: None,
+            updated_at: None,
+        });
 
     let max_daily_loss_pct = req.max_daily_loss_pct.unwrap_or(current.max_daily_loss_pct);
     let max_leverage = req.max_leverage.unwrap_or(current.max_leverage);
