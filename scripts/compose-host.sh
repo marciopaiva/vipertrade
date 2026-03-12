@@ -16,21 +16,27 @@ if [[ ! -f "$HOST_FILE" ]]; then
   exit 1
 fi
 
-if [[ "${COMPOSE_PROVIDER:-}" == "podman-compose" ]]; then
+if [[ "${COMPOSE_PROVIDER:-}" == "docker-compose-plugin" ]]; then
+  PROVIDER="docker-compose-plugin"
+elif [[ "${COMPOSE_PROVIDER:-}" == "podman-compose" ]]; then
   PROVIDER="podman-compose"
 elif [[ "${COMPOSE_PROVIDER:-}" == "podman-compose-plugin" ]]; then
   PROVIDER="podman-compose-plugin"
+elif docker compose version >/dev/null 2>&1; then
+  PROVIDER="docker-compose-plugin"
 elif command -v podman-compose >/dev/null 2>&1; then
   PROVIDER="podman-compose"
 elif podman compose version >/dev/null 2>&1; then
   PROVIDER="podman-compose-plugin"
 else
-  echo "ERROR: podman-compose or podman compose not found" >&2
+  echo "ERROR: docker compose, podman-compose, or podman compose not found" >&2
   exit 1
 fi
 
 run_compose() {
-  if [[ "$PROVIDER" == "podman-compose" ]]; then
+  if [[ "$PROVIDER" == "docker-compose-plugin" ]]; then
+    docker compose --env-file "$COMPOSE_ENV_FILE" -f "$HOST_FILE" "$@"
+  elif [[ "$PROVIDER" == "podman-compose" ]]; then
     podman-compose -f "$HOST_FILE" "$@"
   else
     podman compose --env-file "$COMPOSE_ENV_FILE" -f "$HOST_FILE" "$@"
@@ -38,6 +44,10 @@ run_compose() {
 }
 
 force_cleanup_viper() {
+  if [[ "$PROVIDER" == "docker-compose-plugin" ]]; then
+    return 0
+  fi
+
   local names
   names=$(podman ps -a --format '{{.Names}}' | grep '^vipertrade-' || true)
   if [[ -n "$names" ]]; then
