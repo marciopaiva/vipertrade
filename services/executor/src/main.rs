@@ -27,9 +27,11 @@ struct ExecutorConfig {
     bybit_api_secret: String,
     recv_window: String,
     bybit_account_type: String,
+    executor_default_enabled: bool,
     live_orders_enabled: bool,
     live_symbol_allowlist: HashSet<String>,
     reconcile_fix: bool,
+    paper_max_open_positions: i64,
 }
 
 #[derive(Clone)]
@@ -37,6 +39,12 @@ struct ExecutorState {
     db_pool: Option<PgPool>,
     processed_in_memory: Arc<Mutex<HashSet<String>>>,
     constraints_cache: Arc<Mutex<HashMap<String, (Instant, BybitSymbolConstraints)>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeControls {
+    executor_enabled: bool,
+    kill_switch_enabled: bool,
 }
 
 impl ExecutorConfig {
@@ -60,6 +68,9 @@ impl ExecutorConfig {
         let recv_window = std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
         let bybit_account_type =
             std::env::var("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|_| "UNIFIED".to_string());
+        let executor_default_enabled = std::env::var("EXECUTOR_DEFAULT_ENABLED")
+            .map(|v| !matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO"))
+            .unwrap_or(true);
         let live_orders_enabled = std::env::var("EXECUTOR_ENABLE_LIVE_ORDERS")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
@@ -71,6 +82,11 @@ impl ExecutorConfig {
         let reconcile_fix = std::env::var("EXECUTOR_RECONCILE_FIX")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let paper_max_open_positions = std::env::var("EXECUTOR_PAPER_MAX_OPEN_POSITIONS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(2);
 
         Self {
             redis_url,
@@ -80,9 +96,11 @@ impl ExecutorConfig {
             bybit_api_secret,
             recv_window,
             bybit_account_type,
+            executor_default_enabled,
             live_orders_enabled,
             live_symbol_allowlist,
             reconcile_fix,
+            paper_max_open_positions,
         }
     }
 
@@ -164,6 +182,23 @@ fn close_action_to_position_side(action: &str) -> Option<&'static str> {
         "CLOSE_LONG" => Some("Long"),
         "CLOSE_SHORT" => Some("Short"),
         _ => None,
+    }
+}
+
+fn close_reason_from_decision(reason: &str) -> &'static str {
+    let normalized = reason.to_ascii_lowercase();
+    if normalized.contains("trailing_stop") {
+        "trailing_stop"
+    } else if normalized.contains("stop_loss") {
+        "stop_loss"
+    } else if normalized.contains("take_profit") {
+        "take_profit"
+    } else if normalized.contains("time_exit") {
+        "time_exit"
+    } else if normalized.contains("circuit_breaker") {
+        "circuit_breaker"
+    } else {
+        "manual"
     }
 }
 
@@ -638,6 +673,47 @@ async fn mark_processed(
     Ok(())
 }
 
+async fn fetch_latest_control_flag(
+    pool: &PgPool,
+    event_type: &str,
+    default_enabled: bool,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar::<_, Option<bool>>(
+        "SELECT (data->>'enabled')::boolean
+         FROM system_events
+         WHERE event_type = $1
+         ORDER BY timestamp DESC
+         LIMIT 1",
+    )
+    .bind(event_type)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.flatten().unwrap_or(default_enabled))
+}
+
+async fn fetch_runtime_controls(
+    state: &ExecutorState,
+    cfg: &ExecutorConfig,
+) -> Result<RuntimeControls, sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(RuntimeControls {
+            executor_enabled: true,
+            kill_switch_enabled: false,
+        });
+    };
+
+    let executor_enabled =
+        fetch_latest_control_flag(pool, "api_executor_state_set", cfg.executor_default_enabled)
+            .await?;
+    let kill_switch_enabled = fetch_latest_control_flag(pool, "api_kill_switch_set", false).await?;
+
+    Ok(RuntimeControls {
+        executor_enabled,
+        kill_switch_enabled,
+    })
+}
+
 async fn persist_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
@@ -645,6 +721,7 @@ async fn persist_trade(
     entry_qty: f64,
     entry_price: f64,
     fees: f64,
+    paper_trade: bool,
 ) -> Result<(), sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(());
@@ -672,8 +749,11 @@ async fn persist_trade(
             decision_hash,
             smart_copy_compatible,
             pipeline_version,
-            paper_trade
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12)
+            paper_trade,
+            trailing_stop_activated,
+            trailing_stop_peak_price,
+            trailing_stop_final_distance_pct
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13,$14,$15)
         ON CONFLICT (order_link_id) DO NOTHING",
     )
     .bind(&event.event_id)
@@ -687,11 +767,48 @@ async fn persist_trade(
     .bind(hash)
     .bind(event.decision.smart_copy_compatible)
     .bind(&event.schema_version)
+    .bind(paper_trade)
     .bind(false)
+    .bind(entry_price)
+    .bind(0.0_f64)
     .execute(pool)
     .await?;
 
     Ok(())
+}
+
+async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(0);
+    };
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM trades WHERE status = 'open'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count)
+}
+
+async fn has_open_trade_for_symbol_side(
+    state: &ExecutorState,
+    symbol: &str,
+    side: &str,
+) -> Result<bool, sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(false);
+    };
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM trades WHERE status = 'open' AND symbol = $1 AND side = $2",
+    )
+    .bind(symbol)
+    .bind(side)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count > 0)
 }
 
 async fn persist_bybit_fills(
@@ -794,6 +911,7 @@ async fn close_open_trade(
         effective_close_qty,
         leverage,
     );
+    let close_reason = close_reason_from_decision(&event.decision.reason);
 
     if close_qty + eps < open_qty {
         sqlx::query(
@@ -823,7 +941,7 @@ async fn close_open_trade(
     sqlx::query(
         "UPDATE trades
          SET status = 'closed',
-             close_reason = 'manual',
+             close_reason = $5,
              closed_at = NOW(),
              pnl = COALESCE(pnl, 0) + $2,
              fees = COALESCE(fees, 0) + $3,
@@ -839,6 +957,7 @@ async fn close_open_trade(
     .bind(pnl_delta)
     .bind(close_fee)
     .bind(close_price)
+    .bind(close_reason)
     .execute(pool)
     .await?;
 
@@ -1400,6 +1519,35 @@ async fn handle_decision_event(
         return Ok(());
     }
 
+    let is_close = is_close_action(&event.decision.action);
+    let runtime_controls = fetch_runtime_controls(state, cfg).await?;
+
+    if !runtime_controls.executor_enabled && !is_close {
+        println!(
+            "Executor disabled by operator control; blocking event_id={} action={} symbol={}",
+            event.event_id, event.decision.action, event.decision.symbol
+        );
+        mark_processed(
+            state,
+            &idem_key,
+            &event,
+            "blocked_executor_disabled",
+            None,
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if runtime_controls.kill_switch_enabled && !is_close {
+        println!(
+            "Kill switch enabled; blocking event_id={} action={} symbol={}",
+            event.event_id, event.decision.action, event.decision.symbol
+        );
+        mark_processed(state, &idem_key, &event, "blocked_kill_switch", None, None).await?;
+        return Ok(());
+    }
+
     if cfg.live_orders_enabled && !cfg.is_symbol_allowed_live(&event.decision.symbol) {
         println!(
             "Live order blocked by allowlist event_id={} symbol={} allowlist={:?}",
@@ -1418,11 +1566,144 @@ async fn handle_decision_event(
     }
 
     if !cfg.live_orders_enabled {
+        let paper_order_id = format!("paper-{}", event.event_id);
         println!(
-            "Live orders disabled; dry-run for event_id={} action={} symbol={}",
-            event.event_id, event.decision.action, event.decision.symbol
+            "Live orders disabled; paper-trade dry-run for event_id={} action={} symbol={}",
+            event.event_id, event.decision.action, event.decision.symbol,
         );
-        mark_processed(state, &idem_key, &event, "dry_run", None, None).await?;
+
+        let mut status = "paper_dry_run";
+        if is_close_action(&event.decision.action) {
+            let close_qty = event.decision.quantity;
+            let close_price = event.decision.entry_price;
+            match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
+                Ok(CloseReconcileResult::Closed { .. }) => {
+                    status = "paper_close";
+                }
+                Ok(CloseReconcileResult::Partial { .. }) => {
+                    status = "paper_close_partial";
+                }
+                Ok(CloseReconcileResult::CloseQtyExceedsOpen { .. }) => {
+                    status = "paper_close_qty_exceeds_open";
+                }
+                Ok(CloseReconcileResult::NoLocalOpen) => {
+                    status = "paper_close_no_local_open";
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Failed to reconcile paper close event_id={} err={}",
+                        event.event_id, e
+                    );
+                    status = "paper_close_no_persist";
+                }
+            }
+        } else {
+            let side = if event.decision.action == "ENTER_LONG" {
+                "Long"
+            } else {
+                "Short"
+            };
+
+            match has_open_trade_for_symbol_side(state, &event.decision.symbol, side).await {
+                Ok(true) => {
+                    status = "paper_open_blocked_existing_open";
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        status,
+                        Some(&paper_order_id),
+                        None,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!(
+                        "Failed checking open trade for symbol/side event_id={} symbol={} side={} err={}",
+                        event.event_id, event.decision.symbol, side, e
+                    );
+                    status = "paper_open_guard_error";
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        status,
+                        Some(&paper_order_id),
+                        Some("paper guard query failed"),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
+            match count_open_trades(state).await {
+                Ok(open_count) if open_count >= cfg.paper_max_open_positions => {
+                    status = "paper_open_blocked_max_open_positions";
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        status,
+                        Some(&paper_order_id),
+                        None,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!(
+                        "Failed checking global open trades event_id={} err={}",
+                        event.event_id, e
+                    );
+                    status = "paper_open_guard_error";
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        status,
+                        Some(&paper_order_id),
+                        Some("paper max-open guard query failed"),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
+            let entry_qty = event.decision.quantity;
+            let entry_price = event.decision.entry_price;
+            if let Err(e) = persist_trade(
+                state,
+                &event,
+                &paper_order_id,
+                entry_qty,
+                entry_price,
+                0.0,
+                true,
+            )
+            .await
+            {
+                eprintln!(
+                    "Failed to persist paper trade for event_id={} order_id={} err={}",
+                    event.event_id, paper_order_id, e
+                );
+                status = "paper_open_no_persist";
+            } else {
+                status = "paper_open";
+            }
+        }
+
+        mark_processed(
+            state,
+            &idem_key,
+            &event,
+            status,
+            Some(&paper_order_id),
+            None,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -1554,7 +1835,16 @@ async fn handle_decision_event(
                 let entry_fee = execution_meta.fee.unwrap_or(0.0);
 
                 if let Err(e) =
-                    persist_trade(state, &event, &order_id, entry_qty, entry_price, entry_fee).await
+                    persist_trade(
+                        state,
+                        &event,
+                        &order_id,
+                        entry_qty,
+                        entry_price,
+                        entry_fee,
+                        false,
+                    )
+                    .await
                 {
                     eprintln!(
                         "Failed to persist trade for event_id={} order_id={} err={}",
@@ -1585,10 +1875,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = ExecutorConfig::from_env();
     println!(
-        "Executor mode env={} live_orders_enabled={} reconcile_fix={} base_url={} allowlist={:?}",
+        "Executor mode env={} executor_default_enabled={} live_orders_enabled={} reconcile_fix={} paper_max_open_positions={} base_url={} allowlist={:?}",
         cfg.bybit_env,
+        cfg.executor_default_enabled,
         cfg.live_orders_enabled,
         cfg.reconcile_fix,
+        cfg.paper_max_open_positions,
         cfg.bybit_base_url(),
         cfg.live_symbol_allowlist
     );
@@ -2043,10 +2335,10 @@ mod tests {
 
     #[test]
     fn parses_allowlist() {
-        let set = parse_allowlist("dogeusdt, xrpusdt ,, TRXUSDT");
+        let set = parse_allowlist("dogeusdt, xrpusdt ,, ADAUSDT");
         assert!(set.contains("DOGEUSDT"));
         assert!(set.contains("XRPUSDT"));
-        assert!(set.contains("TRXUSDT"));
+        assert!(set.contains("ADAUSDT"));
         assert_eq!(set.len(), 3);
     }
 }

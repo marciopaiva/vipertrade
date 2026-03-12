@@ -1,10 +1,13 @@
 use futures_util::StreamExt;
 use redis::AsyncCommands;
 use serde_json::{json, Value};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -20,6 +23,54 @@ struct StrategyConfig {
     global: Value,
     pairs: HashMap<String, Value>,
     profiles: Value,
+}
+
+#[derive(Debug, Clone)]
+struct RatchetLevel {
+    at_profit_pct: f64,
+    trail_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+struct TrailingRuntimeConfig {
+    enabled: bool,
+    activate_after_profit_pct: f64,
+    initial_trail_pct: f64,
+    ratchet_levels: Vec<RatchetLevel>,
+    move_to_break_even_at: f64,
+    min_move_threshold_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+struct OpenTradeSnapshot {
+    trade_id: String,
+    side: String,
+    quantity: f64,
+    entry_price: f64,
+    trailing_stop_activated: bool,
+    trailing_stop_peak_price: f64,
+    trailing_stop_final_distance_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+struct TrailingEval {
+    activated: bool,
+    peak_price: f64,
+    trail_pct: f64,
+    trailing_stop_price: f64,
+}
+
+#[derive(Debug, Clone)]
+struct EntryGuardState {
+    blocked_side: String,
+    cooldown_until: Instant,
+    awaiting_flip: bool,
+}
+
+#[derive(Debug, Clone)]
+struct SignalConfirmationState {
+    side: String,
+    consecutive_valid_ticks: usize,
 }
 
 impl StrategyConfig {
@@ -126,6 +177,188 @@ impl StrategyConfig {
             .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "max_spread_pct"], 0.001))
     }
 
+    fn max_atr_pct(&self, symbol: &str) -> f64 {
+        self.pair_cfg(symbol)
+            .map(|v| cfg_f64(v, &["entry_filters", "max_atr_pct"], 0.05))
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "max_atr_pct"], 0.05))
+    }
+
+    fn min_trend_score_for_side(&self, symbol: &str, side: &str) -> f64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "min_trend_score_short"
+        } else {
+            "min_trend_score_long"
+        };
+
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", side_key],
+                    cfg_f64(v, &["entry_filters", "min_trend_score"], 0.25),
+                )
+            })
+            .unwrap_or_else(|| {
+                cfg_f64(
+                    &self.global,
+                    &["entry_filters", side_key],
+                    cfg_f64(&self.global, &["entry_filters", "min_trend_score"], 0.25),
+                )
+            })
+    }
+
+    fn allow_long(&self, symbol: &str) -> bool {
+        self.pair_cfg(symbol)
+            .map(|v| cfg_bool(v, &["entry_filters", "allow_long"], true))
+            .unwrap_or(true)
+    }
+
+    fn allow_short(&self, symbol: &str) -> bool {
+        self.pair_cfg(symbol)
+            .map(|v| cfg_bool(v, &["entry_filters", "allow_short"], true))
+            .unwrap_or(true)
+    }
+
+    fn min_signal_confirmation_ticks(&self, symbol: &str) -> usize {
+        self.pair_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["entry_filters", "min_signal_confirmation_ticks"]))
+            .and_then(Value::as_u64)
+            .map(|v| v as usize)
+            .unwrap_or_else(|| {
+                cfg_get(&self.global, &["entry_filters", "min_signal_confirmation_ticks"])
+                    .and_then(Value::as_u64)
+                    .map(|v| v as usize)
+                    .unwrap_or(2)
+            })
+    }
+
+    fn min_signal_confirmation_ticks_for_side(&self, symbol: &str, side: &str) -> usize {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "min_signal_confirmation_ticks_short"
+        } else {
+            "min_signal_confirmation_ticks_long"
+        };
+
+        self.pair_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["entry_filters", side_key]))
+            .and_then(Value::as_u64)
+            .map(|v| v as usize)
+            .unwrap_or_else(|| {
+                cfg_get(&self.global, &["entry_filters", side_key])
+                    .and_then(Value::as_u64)
+                    .map(|v| v as usize)
+                    .unwrap_or_else(|| self.min_signal_confirmation_ticks(symbol))
+            })
+    }
+
+    fn stop_loss_cooldown_minutes_for_side(&self, symbol: &str, side: &str) -> i64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "stop_loss_cooldown_minutes_short"
+        } else {
+            "stop_loss_cooldown_minutes_long"
+        };
+
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_i64(
+                    v,
+                    &["entry_filters", side_key],
+                    cfg_i64(v, &["entry_filters", "stop_loss_cooldown_minutes"], 3),
+                )
+            })
+            .unwrap_or_else(|| {
+                cfg_i64(
+                    &self.global,
+                    &["entry_filters", side_key],
+                    cfg_i64(&self.global, &["entry_filters", "stop_loss_cooldown_minutes"], 3),
+                )
+            })
+    }
+
+    fn min_volume_ratio_for_side(&self, symbol: &str, side: &str) -> f64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "min_volume_ratio_short"
+        } else {
+            "min_volume_ratio_long"
+        };
+
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", side_key],
+                    cfg_f64(v, &["entry_filters", "min_volume_ratio"], 1.0),
+                )
+            })
+            .unwrap_or_else(|| {
+                cfg_f64(
+                    &self.global,
+                    &["entry_filters", side_key],
+                    cfg_f64(&self.global, &["entry_filters", "min_volume_ratio"], 1.0),
+                )
+            })
+    }
+
+    fn rsi_bounds_for_side(&self, symbol: &str, side: &str) -> (f64, f64) {
+        let (min_key, max_key, default_min, default_max) = if side.eq_ignore_ascii_case("short") {
+            ("rsi_short_min", "rsi_short_max", 32.0, 50.0)
+        } else {
+            ("rsi_long_min", "rsi_long_max", 50.0, 68.0)
+        };
+
+        let min_value = self
+            .pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", min_key],
+                    cfg_f64(&self.global, &["entry_filters", min_key], default_min),
+                )
+            })
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", min_key], default_min));
+        let max_value = self
+            .pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", max_key],
+                    cfg_f64(&self.global, &["entry_filters", max_key], default_max),
+                )
+            })
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", max_key], default_max));
+        (min_value, max_value)
+    }
+
+    fn btc_macro_penalty_for_side(
+        &self,
+        symbol: &str,
+        side: &str,
+        btc_regime: &str,
+        btc_trend_score: f64,
+        btc_consensus_count: i64,
+    ) -> Option<f64> {
+        if symbol.eq_ignore_ascii_case("BTCUSDT") {
+            return Some(0.0);
+        }
+
+        let aligned = if side.eq_ignore_ascii_case("short") {
+            btc_regime.eq_ignore_ascii_case("bearish") && btc_trend_score <= -0.05 && btc_consensus_count >= 2
+        } else {
+            btc_regime.eq_ignore_ascii_case("bullish") && btc_trend_score >= 0.05 && btc_consensus_count >= 2
+        };
+
+        if aligned {
+            return Some(0.0);
+        }
+
+        let neutral = btc_regime.eq_ignore_ascii_case("neutral") && btc_consensus_count >= 2;
+        if neutral {
+            return Some(0.05);
+        }
+
+        None
+    }
+
     fn min_volume_24h_usdt(&self, symbol: &str) -> i64 {
         self.pair_cfg(symbol)
             .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
@@ -184,6 +417,70 @@ impl StrategyConfig {
             "move_to_break_even_at": 0.02
         })
     }
+
+    fn trailing_enabled(&self, symbol: &str) -> bool {
+        let pair_enabled = self
+            .pair_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["trailing_stop", "enabled"]))
+            .and_then(Value::as_bool);
+        pair_enabled.unwrap_or_else(|| {
+            cfg_get(&self.global, &["trailing_stop", "enabled"])
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+        })
+    }
+
+    fn trailing_min_move_threshold_pct(&self) -> f64 {
+        cfg_f64(
+            &self.global,
+            &["trailing_stop", "min_move_threshold_pct"],
+            0.002,
+        )
+    }
+
+    fn trailing_runtime_config(&self, symbol: &str) -> TrailingRuntimeConfig {
+        let cfg = self.trailing_config(symbol);
+        let mut ratchet_levels = cfg
+            .get("ratchet_levels")
+            .and_then(Value::as_array)
+            .map(|levels| {
+                levels
+                    .iter()
+                    .filter_map(|level| {
+                        let at_profit_pct = level.get("at_profit_pct")?.as_f64()?;
+                        let trail_pct = level.get("trail_pct")?.as_f64()?;
+                        Some(RatchetLevel {
+                            at_profit_pct,
+                            trail_pct,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        ratchet_levels.sort_by(|a, b| {
+            a.at_profit_pct
+                .partial_cmp(&b.at_profit_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        TrailingRuntimeConfig {
+            enabled: self.trailing_enabled(symbol),
+            activate_after_profit_pct: cfg
+                .get("activate_after_profit_pct")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.015),
+            initial_trail_pct: cfg
+                .get("initial_trail_pct")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.008),
+            ratchet_levels,
+            move_to_break_even_at: cfg
+                .get("move_to_break_even_at")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.02),
+            min_move_threshold_pct: self.trailing_min_move_threshold_pct(),
+        }
+    }
 }
 
 fn cfg_get<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
@@ -206,6 +503,12 @@ fn cfg_i64(value: &Value, path: &[&str], default: i64) -> i64 {
         .unwrap_or(default)
 }
 
+fn cfg_bool(value: &Value, path: &[&str], default: bool) -> bool {
+    cfg_get(value, path)
+        .and_then(Value::as_bool)
+        .unwrap_or(default)
+}
+
 fn get_f64(state: &Value, key: &str, default: f64) -> f64 {
     state.get(key).and_then(Value::as_f64).unwrap_or(default)
 }
@@ -224,6 +527,234 @@ fn get_string(state: &Value, key: &str, default: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or(default)
         .to_string()
+}
+
+fn side_from_trend(trend: f64) -> &'static str {
+    if trend >= 0.0 {
+        "Long"
+    } else {
+        "Short"
+    }
+}
+
+fn is_same_direction(side: &str, trend: f64) -> bool {
+    side.eq_ignore_ascii_case(side_from_trend(trend))
+}
+
+fn resolve_database_url() -> Option<String> {
+    if let Ok(v) = std::env::var("DATABASE_URL") {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+
+    let host = std::env::var("DB_HOST").ok()?;
+    let port = std::env::var("DB_PORT")
+        .ok()
+        .unwrap_or_else(|| "5432".to_string());
+    let db = std::env::var("DB_NAME").ok()?;
+    let user = std::env::var("DB_USER").ok()?;
+    let pass = std::env::var("DB_PASSWORD").ok()?;
+
+    Some(format!(
+        "postgresql://{}:{}@{}:{}/{}",
+        user, pass, host, port, db
+    ))
+}
+
+async fn fetch_open_trade_for_symbol(
+    pool: &PgPool,
+    symbol: &str,
+) -> Result<Option<OpenTradeSnapshot>, sqlx::Error> {
+    let row = sqlx::query_as::<_, (String, String, f64, f64, bool, f64, f64)>(
+        "SELECT
+            trade_id::text,
+            side,
+            quantity::double precision,
+            entry_price::double precision,
+            COALESCE(trailing_stop_activated, false),
+            COALESCE(trailing_stop_peak_price::double precision, entry_price::double precision),
+            COALESCE(trailing_stop_final_distance_pct::double precision, 0)
+        FROM trades
+        WHERE status = 'open' AND symbol = $1
+        ORDER BY opened_at ASC
+        LIMIT 1",
+    )
+    .bind(symbol)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(
+        |(
+            trade_id,
+            side,
+            quantity,
+            entry_price,
+            trailing_stop_activated,
+            trailing_stop_peak_price,
+            trailing_stop_final_distance_pct,
+        )| OpenTradeSnapshot {
+            trade_id,
+            side,
+            quantity,
+            entry_price,
+            trailing_stop_activated,
+            trailing_stop_peak_price,
+            trailing_stop_final_distance_pct,
+        },
+    ))
+}
+
+async fn update_trade_trailing_state(
+    pool: &PgPool,
+    trade_id: &str,
+    activated: bool,
+    peak_price: f64,
+    trail_pct: f64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE trades
+         SET trailing_stop_activated = $2,
+             trailing_stop_peak_price = $3,
+             trailing_stop_final_distance_pct = $4
+         WHERE trade_id::text = $1",
+    )
+    .bind(trade_id)
+    .bind(activated)
+    .bind(peak_price)
+    .bind(trail_pct)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn has_recent_stop_loss_for_symbol(
+    pool: &PgPool,
+    symbol: &str,
+    cooldown_minutes: i64,
+) -> Result<bool, sqlx::Error> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint
+         FROM trades
+         WHERE symbol = $1
+           AND status = 'closed'
+           AND close_reason = 'stop_loss'
+           AND closed_at >= NOW() - make_interval(mins => $2::int)",
+    )
+    .bind(symbol)
+    .bind(cooldown_minutes)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count > 0)
+}
+
+fn create_hold_decision(symbol: &str, reason: &str) -> StrategyDecision {
+    StrategyDecision {
+        action: "HOLD".to_string(),
+        symbol: symbol.to_string(),
+        quantity: 0.0,
+        leverage: 0.0,
+        entry_price: 0.0,
+        stop_loss: 0.0,
+        take_profit: 0.0,
+        reason: reason.to_string(),
+        smart_copy_compatible: false,
+    }
+}
+
+fn create_close_decision(symbol: &str, side: &str, quantity: f64, close_price: f64, reason: &str) -> Option<StrategyDecision> {
+    let action = match side {
+        "Long" => "CLOSE_LONG",
+        "Short" => "CLOSE_SHORT",
+        _ => return None,
+    };
+
+    Some(StrategyDecision {
+        action: action.to_string(),
+        symbol: symbol.to_string(),
+        quantity,
+        leverage: 0.0,
+        entry_price: close_price,
+        stop_loss: 0.0,
+        take_profit: 0.0,
+        reason: reason.to_string(),
+        smart_copy_compatible: true,
+    })
+}
+
+fn current_profit_pct(side: &str, entry: f64, current: f64) -> f64 {
+    if entry <= 0.0 || current <= 0.0 {
+        return 0.0;
+    }
+    if side == "Long" {
+        (current - entry) / entry
+    } else {
+        (entry - current) / entry
+    }
+}
+
+fn evaluate_trailing(
+    open: &OpenTradeSnapshot,
+    current_price: f64,
+    trailing: &TrailingRuntimeConfig,
+) -> Option<TrailingEval> {
+    if !trailing.enabled || current_price <= 0.0 || open.entry_price <= 0.0 {
+        return None;
+    }
+
+    let profit_pct = current_profit_pct(&open.side, open.entry_price, current_price);
+    let mut activated = open.trailing_stop_activated || profit_pct >= trailing.activate_after_profit_pct;
+    if !activated {
+        return None;
+    }
+
+    let mut peak_price = if open.trailing_stop_peak_price > 0.0 {
+        open.trailing_stop_peak_price
+    } else {
+        open.entry_price
+    };
+
+    if open.side == "Long" {
+        peak_price = peak_price.max(current_price);
+    } else {
+        peak_price = peak_price.min(current_price);
+    }
+
+    let mut trail_pct = trailing.initial_trail_pct;
+    for level in &trailing.ratchet_levels {
+        if profit_pct >= level.at_profit_pct {
+            trail_pct = level.trail_pct;
+        }
+    }
+
+    // Preserve ratcheted progress already persisted for this trade.
+    if open.trailing_stop_final_distance_pct > 0.0 {
+        trail_pct = trail_pct.max(open.trailing_stop_final_distance_pct);
+    }
+
+    let mut trailing_stop_price = if open.side == "Long" {
+        peak_price * (1.0 - trail_pct)
+    } else {
+        peak_price * (1.0 + trail_pct)
+    };
+
+    if profit_pct >= trailing.move_to_break_even_at {
+        if open.side == "Long" {
+            trailing_stop_price = trailing_stop_price.max(open.entry_price);
+        } else {
+            trailing_stop_price = trailing_stop_price.min(open.entry_price);
+        }
+    }
+
+    activated = true;
+    Some(TrailingEval {
+        activated,
+        peak_price,
+        trail_pct,
+        trailing_stop_price,
+    })
 }
 
 fn first_pipeline(program: &Program) -> Result<&PipelineDecl, Box<dyn Error>> {
@@ -270,11 +801,83 @@ fn execute_strategy_step(
         "validate_entry" => {
             let spread_pct = get_f64(&state, "spread_pct", 1.0);
             let volume_24h = get_i64(&state, "volume_24h", 0);
-            let trend_score = get_f64(&state, "trend_score", 0.0).abs();
+            let raw_trend_score = get_f64(&state, "trend_score", 0.0);
+            let trend_score = raw_trend_score.abs();
+            let current_price = get_f64(&state, "current_price", 0.0);
+            let atr_14 = get_f64(&state, "atr_14", 0.0);
+            let trend_slope = get_f64(&state, "trend_slope", 0.0);
+            let ema_fast = get_f64(&state, "ema_fast", 0.0);
+            let ema_slow = get_f64(&state, "ema_slow", 0.0);
+            let rsi_14 = get_f64(&state, "rsi_14", 50.0);
+            let macd_line = get_f64(&state, "macd_line", 0.0);
+            let macd_signal = get_f64(&state, "macd_signal", 0.0);
+            let macd_histogram = get_f64(&state, "macd_histogram", 0.0);
+            let volume_ratio = get_f64(&state, "volume_ratio", 0.0);
+            let btc_regime = get_string(&state, "btc_regime", "neutral");
+            let btc_trend_score = get_f64(&state, "btc_trend_score", 0.0);
+            let btc_consensus_count = get_i64(&state, "btc_consensus_count", 0);
+            let regime = get_string(&state, "regime", "neutral");
+            let exchanges_available = get_i64(&state, "exchanges_available", 0);
+            let bybit_regime = get_string(&state, "bybit_regime", "neutral");
+            let bullish_exchanges = get_i64(&state, "bullish_exchanges", 0);
+            let bearish_exchanges = get_i64(&state, "bearish_exchanges", 0);
+            let entry_side = if raw_trend_score >= 0.0 { "long" } else { "short" };
+            let (rsi_min, rsi_max) = cfg.rsi_bounds_for_side(&symbol, entry_side);
+            let Some(btc_macro_penalty) = cfg.btc_macro_penalty_for_side(
+                &symbol,
+                entry_side,
+                &btc_regime,
+                btc_trend_score,
+                btc_consensus_count,
+            ) else {
+                return Ok(json!(false));
+            };
+            let atr_pct = if current_price > 0.0 {
+                atr_14 / current_price
+            } else {
+                1.0
+            };
+            let strict_long_ok = cfg.allow_long(&symbol)
+                && regime.eq_ignore_ascii_case("bullish")
+                && bybit_regime.eq_ignore_ascii_case("bullish")
+                && bullish_exchanges >= 2
+                && bearish_exchanges == 0
+                && exchanges_available >= 3
+                && trend_slope > 0.0
+                && ema_fast > ema_slow
+                && current_price >= ema_fast
+                && rsi_14 >= rsi_min
+                && rsi_14 <= rsi_max
+                && macd_line > macd_signal
+                && macd_histogram > 0.0
+                && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                && trend_score
+                    >= (cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty);
+
+            let directional_ok = if raw_trend_score >= 0.0 {
+                cfg.allow_long(&symbol)
+                    && strict_long_ok
+            } else {
+                cfg.allow_short(&symbol)
+                    && regime.eq_ignore_ascii_case("bearish")
+                    && bybit_regime.eq_ignore_ascii_case("bearish")
+                    && bearish_exchanges >= 2
+                    && bullish_exchanges == 0
+                    && exchanges_available >= 3
+                    && trend_slope < 0.0
+                    && ema_fast < ema_slow
+                    && current_price <= ema_fast
+                    && rsi_14 >= rsi_min
+                    && rsi_14 <= rsi_max
+                    && macd_line < macd_signal
+                    && macd_histogram < 0.0
+                    && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+            };
             Ok(json!(
                 spread_pct <= cfg.max_spread_pct(&symbol)
                     && volume_24h >= cfg.min_volume_24h_usdt(&symbol)
-                    && trend_score >= 0.15
+                    && atr_pct <= cfg.max_atr_pct(&symbol)
+                    && directional_ok
             ))
         }
         "check_funding" => {
@@ -381,6 +984,225 @@ fn register_strategy_steps(runtime: &Runtime, plan: &ExecutionPlan, cfg: Arc<Str
     }
 }
 
+async fn publish_decision_event(
+    publish_conn: &mut redis::aio::MultiplexedConnection,
+    source_event_id: &str,
+    decision: StrategyDecision,
+) -> Result<(), Box<dyn Error>> {
+    let decision_event = StrategyDecisionEvent::new(source_event_id.to_string(), decision);
+    decision_event.validate()?;
+
+    let decision_json = serde_json::to_string(&decision_event)?;
+    publish_conn
+        .publish::<_, _, ()>("viper:decisions", decision_json)
+        .await?;
+
+    println!(
+        "Published decision event {} for {} action={}",
+        decision_event.event_id, decision_event.decision.symbol, decision_event.decision.action
+    );
+    Ok(())
+}
+
+fn should_persist_trailing_update(
+    open: &OpenTradeSnapshot,
+    eval: &TrailingEval,
+    min_move_threshold_pct: f64,
+) -> bool {
+    if open.trailing_stop_activated != eval.activated {
+        return true;
+    }
+
+    let peak_base = open.trailing_stop_peak_price.abs().max(1e-9);
+    let peak_move_pct = (eval.peak_price - open.trailing_stop_peak_price).abs() / peak_base;
+    if peak_move_pct >= min_move_threshold_pct {
+        return true;
+    }
+
+    (eval.trail_pct - open.trailing_stop_final_distance_pct).abs() >= 1e-9
+}
+
+fn evaluate_open_trade_exit(
+    symbol: &str,
+    current_price: f64,
+    open: &OpenTradeSnapshot,
+    cfg: &StrategyConfig,
+) -> (Option<StrategyDecision>, Option<TrailingEval>) {
+    if current_price <= 0.0 || open.entry_price <= 0.0 {
+        return (
+            Some(create_hold_decision(symbol, "open_position_invalid_price")),
+            None,
+        );
+    }
+
+    let side = open.side.as_str();
+    let sl_pct = cfg.stop_loss_pct(symbol);
+    let hard_stop = if side == "Long" {
+        open.entry_price * (1.0 - sl_pct)
+    } else {
+        open.entry_price * (1.0 + sl_pct)
+    };
+
+    if (side == "Long" && current_price <= hard_stop) || (side == "Short" && current_price >= hard_stop)
+    {
+        return (
+            create_close_decision(
+                symbol,
+                side,
+                open.quantity,
+                current_price,
+                "stop_loss_triggered",
+            ),
+            None,
+        );
+    }
+
+    let tp_pct = cfg.take_profit_pct(symbol);
+    let fixed_take_profit = if side == "Long" {
+        open.entry_price * (1.0 + tp_pct)
+    } else {
+        open.entry_price * (1.0 - tp_pct)
+    };
+    if (side == "Long" && current_price >= fixed_take_profit)
+        || (side == "Short" && current_price <= fixed_take_profit)
+    {
+        return (
+            create_close_decision(
+                symbol,
+                side,
+                open.quantity,
+                current_price,
+                "take_profit_triggered",
+            ),
+            None,
+        );
+    }
+
+    let trailing_cfg = cfg.trailing_runtime_config(symbol);
+    if let Some(eval) = evaluate_trailing(open, current_price, &trailing_cfg) {
+        let trailing_hit = if side == "Long" {
+            current_price <= eval.trailing_stop_price
+        } else {
+            current_price >= eval.trailing_stop_price
+        };
+
+        if trailing_hit {
+            return (
+                create_close_decision(
+                    symbol,
+                    side,
+                    open.quantity,
+                    current_price,
+                    "trailing_stop_triggered",
+                ),
+                Some(eval),
+            );
+        }
+
+        return (None, Some(eval));
+    }
+
+    (None, None)
+}
+
+fn enforce_entry_guards(
+    symbol: &str,
+    trend: f64,
+    mut decision: StrategyDecision,
+    entry_guards: &mut HashMap<String, EntryGuardState>,
+    cooldown_minutes: i64,
+    recent_stop_loss_same_symbol: bool,
+    signal_confirmations: &mut HashMap<String, SignalConfirmationState>,
+    min_confirmation_ticks: usize,
+) -> StrategyDecision {
+    if !matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+        return decision;
+    }
+
+    let proposed_side = if decision.action == "ENTER_LONG" {
+        "Long"
+    } else {
+        "Short"
+    };
+
+    if recent_stop_loss_same_symbol {
+        decision.action = "HOLD".to_string();
+        decision.quantity = 0.0;
+        decision.leverage = 0.0;
+        decision.entry_price = 0.0;
+        decision.stop_loss = 0.0;
+        decision.take_profit = 0.0;
+        decision.reason = format!("cooldown_stop_loss_{}m", cooldown_minutes);
+        decision.smart_copy_compatible = false;
+        return decision;
+    }
+
+    let confirmation = signal_confirmations
+        .entry(symbol.to_string())
+        .or_insert_with(|| SignalConfirmationState {
+            side: proposed_side.to_string(),
+            consecutive_valid_ticks: 0,
+        });
+
+    if !confirmation.side.eq_ignore_ascii_case(proposed_side) {
+        confirmation.side = proposed_side.to_string();
+        confirmation.consecutive_valid_ticks = 1;
+    } else {
+        confirmation.consecutive_valid_ticks += 1;
+    }
+
+    if confirmation.consecutive_valid_ticks < min_confirmation_ticks {
+        decision.action = "HOLD".to_string();
+        decision.quantity = 0.0;
+        decision.leverage = 0.0;
+        decision.entry_price = 0.0;
+        decision.stop_loss = 0.0;
+        decision.take_profit = 0.0;
+        decision.reason = format!(
+            "awaiting_signal_confirmation_{}/{}",
+            confirmation.consecutive_valid_ticks, min_confirmation_ticks
+        );
+        decision.smart_copy_compatible = false;
+        return decision;
+    }
+
+    if let Some(guard) = entry_guards.get_mut(symbol) {
+        if Instant::now() < guard.cooldown_until {
+            decision.action = "HOLD".to_string();
+            decision.quantity = 0.0;
+            decision.leverage = 0.0;
+            decision.entry_price = 0.0;
+            decision.stop_loss = 0.0;
+            decision.take_profit = 0.0;
+            decision.reason = format!("cooldown_stop_loss_{}m", cooldown_minutes);
+            decision.smart_copy_compatible = false;
+            return decision;
+        }
+
+        if !guard.awaiting_flip {
+            return decision;
+        }
+
+        if !is_same_direction(&guard.blocked_side, trend) {
+            guard.awaiting_flip = false;
+            return decision;
+        }
+
+        if guard.blocked_side.eq_ignore_ascii_case(proposed_side) {
+            decision.action = "HOLD".to_string();
+            decision.quantity = 0.0;
+            decision.leverage = 0.0;
+            decision.entry_price = 0.0;
+            decision.stop_loss = 0.0;
+            decision.take_profit = 0.0;
+            decision.reason = "blocked_until_trend_flip".to_string();
+            decision.smart_copy_compatible = false;
+        }
+    }
+
+    decision
+}
+
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -479,6 +1301,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
     let mut messages = pubsub.on_message();
+    let mut entry_guards = HashMap::<String, EntryGuardState>::new();
+    let mut signal_confirmations = HashMap::<String, SignalConfirmationState>::new();
+    let default_stop_loss_cooldown_minutes = 3_i64;
+
+    let db_pool = match resolve_database_url() {
+        Some(database_url) => match PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(&database_url)
+            .await
+        {
+            Ok(pool) => {
+                println!("Strategy database connection: enabled");
+                Some(pool)
+            }
+            Err(err) => {
+                eprintln!(
+                    "Strategy database unavailable (open-position trailing disabled): {}",
+                    err
+                );
+                None
+            }
+        },
+        None => {
+            println!("Strategy database connection: disabled (missing DB_* env)");
+            None
+        }
+    };
 
     loop {
         tokio::select! {
@@ -508,6 +1358,70 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 };
 
+                let symbol = signal_event.signal.symbol.to_uppercase();
+                let trend = signal_event.signal.trend_score;
+
+                if let Some(guard) = entry_guards.get_mut(&symbol) {
+                    if Instant::now() >= guard.cooldown_until {
+                        // Cooldown expiration alone is not enough; same-direction reentry stays blocked
+                        // until the market bias flips once.
+                    }
+                    if guard.awaiting_flip && !is_same_direction(&guard.blocked_side, trend) {
+                        guard.awaiting_flip = false;
+                    }
+                }
+
+                if let Some(pool) = &db_pool {
+                    match fetch_open_trade_for_symbol(pool, &symbol).await {
+                        Ok(Some(open)) => {
+                            let current_price = signal_event.signal.current_price;
+                            let (close_decision, trailing_eval) =
+                                evaluate_open_trade_exit(&symbol, current_price, &open, cfg.as_ref());
+                            if let Some(eval) = trailing_eval {
+                                let trailing_cfg = cfg.trailing_runtime_config(&symbol);
+                                if should_persist_trailing_update(
+                                    &open,
+                                    &eval,
+                                    trailing_cfg.min_move_threshold_pct,
+                                ) {
+                                    if let Err(err) = update_trade_trailing_state(
+                                        pool,
+                                        &open.trade_id,
+                                        eval.activated,
+                                        eval.peak_price,
+                                        eval.trail_pct,
+                                    )
+                                    .await
+                                    {
+                                        eprintln!(
+                                            "Failed to persist trailing state trade_id={} err={}",
+                                            open.trade_id, err
+                                        );
+                                    }
+                                }
+                            }
+                            let decision = close_decision.unwrap_or_else(|| {
+                                create_hold_decision(&symbol, "open_position_monitoring")
+                            });
+
+                            if let Err(err) =
+                                publish_decision_event(&mut publish_conn, &signal_event.event_id, decision)
+                                    .await
+                            {
+                                eprintln!("Failed to publish open-position decision: {}", err);
+                            }
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            eprintln!(
+                                "Failed to query open trade for symbol={} err={}",
+                                symbol, err
+                            );
+                        }
+                    }
+                }
+
                 let input = serde_json::to_value(&signal_event.signal)?;
                 let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
                     Ok(v) => v,
@@ -525,25 +1439,95 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
                     Ok(decision) => {
-                        let decision_event =
-                            StrategyDecisionEvent::new(signal_event.event_id.clone(), decision);
+                        let intended_side = if decision.action == "ENTER_SHORT" {
+                            "short"
+                        } else {
+                            "long"
+                        };
+                        let min_confirmation_ticks =
+                            cfg.min_signal_confirmation_ticks_for_side(&symbol, intended_side);
+                        let stop_loss_cooldown_minutes = cfg
+                            .stop_loss_cooldown_minutes_for_side(&symbol, intended_side)
+                            .max(default_stop_loss_cooldown_minutes);
+                        let recent_stop_loss_same_symbol = if let Some(pool) = &db_pool {
+                            if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                                match has_recent_stop_loss_for_symbol(
+                                    pool,
+                                    &symbol,
+                                    stop_loss_cooldown_minutes,
+                                )
+                                .await
+                                {
+                                    Ok(v) => v,
+                                    Err(err) => {
+                                        eprintln!(
+                                            "Failed to check stop-loss cooldown symbol={} err={}",
+                                            symbol, err
+                                        );
+                                        false
+                                    }
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
 
-                        if let Err(err) = decision_event.validate() {
+                        let decision = enforce_entry_guards(
+                            &symbol,
+                            trend,
+                            decision,
+                            &mut entry_guards,
+                            stop_loss_cooldown_minutes,
+                            recent_stop_loss_same_symbol,
+                            &mut signal_confirmations,
+                            min_confirmation_ticks,
+                        );
+
+                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                            signal_confirmations.remove(&symbol);
+                        }
+
+                        if decision.reason == "stop_loss_triggered" {
+                            let blocked_side = if decision.action == "CLOSE_LONG" {
+                                "Long"
+                            } else if decision.action == "CLOSE_SHORT" {
+                                "Short"
+                            } else {
+                                ""
+                            };
+                            if !blocked_side.is_empty() {
+                                let cooldown_minutes = cfg
+                                    .stop_loss_cooldown_minutes_for_side(
+                                        &symbol,
+                                        &blocked_side.to_lowercase(),
+                                    )
+                                    .max(default_stop_loss_cooldown_minutes);
+                                entry_guards.insert(
+                                    symbol.clone(),
+                                    EntryGuardState {
+                                        blocked_side: blocked_side.to_string(),
+                                        cooldown_until: Instant::now()
+                                            + Duration::from_secs(
+                                                (cooldown_minutes * 60) as u64,
+                                            ),
+                                        awaiting_flip: true,
+                                    },
+                                );
+                                signal_confirmations.remove(&symbol);
+                            }
+                        }
+
+                        if let Err(err) =
+                            publish_decision_event(&mut publish_conn, &signal_event.event_id, decision)
+                                .await
+                        {
                             eprintln!(
                                 "Invalid strategy decision event contract for {}: {}",
                                 signal_event.signal.symbol, err
                             );
-                            continue;
                         }
-
-                        let decision_json = serde_json::to_string(&decision_event)?;
-                        publish_conn
-                            .publish::<_, _, ()>("viper:decisions", decision_json)
-                            .await?;
-                        println!(
-                            "Published decision event {} for {}",
-                            decision_event.event_id, signal_event.signal.symbol
-                        );
                     }
                     Err(e) => {
                         eprintln!(
