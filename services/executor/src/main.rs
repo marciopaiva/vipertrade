@@ -1992,8 +1992,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             maybe_msg = messages.next() => {
                 let Some(msg) = maybe_msg else {
-                    println!("Decision stream ended, stopping viper-executor");
-                    break;
+                    eprintln!("Decision stream ended unexpectedly; exiting so container can restart");
+                    return Err("decision stream ended unexpectedly".into());
                 };
 
                 let payload: String = msg.get_payload()?;

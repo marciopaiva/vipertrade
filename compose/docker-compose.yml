@@ -66,6 +66,8 @@ services:
       dockerfile: services/market-data/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-market-data
     ports:
       - "8081:8081"
@@ -107,6 +109,8 @@ services:
       dockerfile: services/analytics/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-analytics
     ports:
       - "8086:8086"
@@ -149,6 +153,8 @@ services:
         TUPA_VERSION: "v0.8.0-rc.3"
         TUPA_BACKEND: ${TUPA_BACKEND:-hybrid}
         RUST_VERSION: "1.83"
+        STRATEGY_BUILDER_IMAGE: ${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}
+        STRATEGY_RUNTIME_IMAGE: ${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}
     container_name: vipertrade-strategy
     ports:
       - "8082:8082"
@@ -204,6 +210,8 @@ services:
       dockerfile: services/executor/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-executor
     ports:
       - "8083:8083"
@@ -259,6 +267,8 @@ services:
       dockerfile: services/monitor/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-monitor
     ports:
       - "8084:8084"
@@ -303,6 +313,8 @@ services:
       dockerfile: services/backtest/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-backtest
     ports:
       - "8085:8085"
@@ -343,6 +355,7 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_VERSION: "20"
+        WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-vipertrade-base-web-node:20-bookworm}
     container_name: vipertrade-web
     ports:
       - "3000:3000"
@@ -381,6 +394,8 @@ services:
       dockerfile: services/api/Dockerfile
       args:
         RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
     container_name: vipertrade-api
     ports:
       - "8080:8080"

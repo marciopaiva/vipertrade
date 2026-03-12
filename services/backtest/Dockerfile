@@ -1,6 +1,8 @@
 # Base Rust Image
 ARG RUST_VERSION=1.83
-FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+ARG RUST_BUILDER_IMAGE=rust:${RUST_VERSION}-slim-bookworm
+ARG RUST_RUNTIME_IMAGE=debian:bookworm-slim
+FROM ${RUST_BUILDER_IMAGE} AS builder
 
 WORKDIR /usr/src/app
 
@@ -17,7 +19,7 @@ COPY . .
 RUN cargo build --release --package viper-backtest
 
 # Runtime Image
-FROM debian:bookworm-slim
+FROM ${RUST_RUNTIME_IMAGE}
 
 WORKDIR /app
 

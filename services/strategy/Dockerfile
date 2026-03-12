@@ -1,6 +1,8 @@
 # Base Rust Image
 ARG RUST_VERSION=1.83
-FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+ARG STRATEGY_BUILDER_IMAGE=rust:${RUST_VERSION}-slim-bookworm
+ARG STRATEGY_RUNTIME_IMAGE=python:3.12-slim-bookworm
+FROM ${STRATEGY_BUILDER_IMAGE} AS builder
 
 WORKDIR /usr/src/app
 
@@ -19,7 +21,7 @@ COPY . .
 RUN cargo build --release --package viper-strategy
 
 # Runtime Image
-FROM python:3.12-slim-bookworm
+FROM ${STRATEGY_RUNTIME_IMAGE}
 
 ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
@@ -31,7 +33,7 @@ RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3
 # Install Tupã CLI
 ARG TUPA_VERSION=v0.8.0
 ADD https://github.com/marciopaiva/tupalang/releases/download/${TUPA_VERSION}/tupa-linux-x86_64 /usr/local/bin/tupa
-RUN chmod +x /usr/local/bin/tupa &&     ls -l /usr/local/bin/tupa
+RUN chmod +x /usr/local/bin/tupa && ls -l /usr/local/bin/tupa
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-strategy /usr/local/bin/viper-strategy
