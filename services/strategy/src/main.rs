@@ -225,10 +225,13 @@ impl StrategyConfig {
             .and_then(Value::as_u64)
             .map(|v| v as usize)
             .unwrap_or_else(|| {
-                cfg_get(&self.global, &["entry_filters", "min_signal_confirmation_ticks"])
-                    .and_then(Value::as_u64)
-                    .map(|v| v as usize)
-                    .unwrap_or(2)
+                cfg_get(
+                    &self.global,
+                    &["entry_filters", "min_signal_confirmation_ticks"],
+                )
+                .and_then(Value::as_u64)
+                .map(|v| v as usize)
+                .unwrap_or(2)
             })
     }
 
@@ -270,7 +273,11 @@ impl StrategyConfig {
                 cfg_i64(
                     &self.global,
                     &["entry_filters", side_key],
-                    cfg_i64(&self.global, &["entry_filters", "stop_loss_cooldown_minutes"], 3),
+                    cfg_i64(
+                        &self.global,
+                        &["entry_filters", "stop_loss_cooldown_minutes"],
+                        3,
+                    ),
                 )
             })
     }
@@ -342,9 +349,13 @@ impl StrategyConfig {
         }
 
         let aligned = if side.eq_ignore_ascii_case("short") {
-            btc_regime.eq_ignore_ascii_case("bearish") && btc_trend_score <= -0.05 && btc_consensus_count >= 2
+            btc_regime.eq_ignore_ascii_case("bearish")
+                && btc_trend_score <= -0.05
+                && btc_consensus_count >= 2
         } else {
-            btc_regime.eq_ignore_ascii_case("bullish") && btc_trend_score >= 0.05 && btc_consensus_count >= 2
+            btc_regime.eq_ignore_ascii_case("bullish")
+                && btc_trend_score >= 0.05
+                && btc_consensus_count >= 2
         };
 
         if aligned {
@@ -664,7 +675,13 @@ fn create_hold_decision(symbol: &str, reason: &str) -> StrategyDecision {
     }
 }
 
-fn create_close_decision(symbol: &str, side: &str, quantity: f64, close_price: f64, reason: &str) -> Option<StrategyDecision> {
+fn create_close_decision(
+    symbol: &str,
+    side: &str,
+    quantity: f64,
+    close_price: f64,
+    reason: &str,
+) -> Option<StrategyDecision> {
     let action = match side {
         "Long" => "CLOSE_LONG",
         "Short" => "CLOSE_SHORT",
@@ -705,7 +722,8 @@ fn evaluate_trailing(
     }
 
     let profit_pct = current_profit_pct(&open.side, open.entry_price, current_price);
-    let mut activated = open.trailing_stop_activated || profit_pct >= trailing.activate_after_profit_pct;
+    let mut activated =
+        open.trailing_stop_activated || profit_pct >= trailing.activate_after_profit_pct;
     if !activated {
         return None;
     }
@@ -821,7 +839,11 @@ fn execute_strategy_step(
             let bybit_regime = get_string(&state, "bybit_regime", "neutral");
             let bullish_exchanges = get_i64(&state, "bullish_exchanges", 0);
             let bearish_exchanges = get_i64(&state, "bearish_exchanges", 0);
-            let entry_side = if raw_trend_score >= 0.0 { "long" } else { "short" };
+            let entry_side = if raw_trend_score >= 0.0 {
+                "long"
+            } else {
+                "short"
+            };
             let (rsi_min, rsi_max) = cfg.rsi_bounds_for_side(&symbol, entry_side);
             let Some(btc_macro_penalty) = cfg.btc_macro_penalty_for_side(
                 &symbol,
@@ -855,8 +877,7 @@ fn execute_strategy_step(
                     >= (cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty);
 
             let directional_ok = if raw_trend_score >= 0.0 {
-                cfg.allow_long(&symbol)
-                    && strict_long_ok
+                cfg.allow_long(&symbol) && strict_long_ok
             } else {
                 cfg.allow_short(&symbol)
                     && regime.eq_ignore_ascii_case("bearish")
@@ -1043,7 +1064,8 @@ fn evaluate_open_trade_exit(
         open.entry_price * (1.0 + sl_pct)
     };
 
-    if (side == "Long" && current_price <= hard_stop) || (side == "Short" && current_price >= hard_stop)
+    if (side == "Long" && current_price <= hard_stop)
+        || (side == "Short" && current_price >= hard_stop)
     {
         return (
             create_close_decision(

@@ -157,7 +157,10 @@ async fn fetch_bybit_snapshot(
     Ok((price, trend_score))
 }
 
-async fn fetch_binance_snapshot(http: &reqwest::Client, symbol: &str) -> Result<(f64, f64), String> {
+async fn fetch_binance_snapshot(
+    http: &reqwest::Client,
+    symbol: &str,
+) -> Result<(f64, f64), String> {
     let kline_url = format!(
         "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit=200",
         symbol
@@ -562,7 +565,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         for symbol in &symbols {
             match fetch_bybit_snapshot(&http, &bybit_base, symbol).await {
                 Ok((price, trend_score)) => {
-                    if let Err(e) = insert_snapshot(&pool, "bybit", symbol, price, trend_score).await {
+                    if let Err(e) =
+                        insert_snapshot(&pool, "bybit", symbol, price, trend_score).await
+                    {
                         eprintln!("insert bybit snapshot failed {}: {}", symbol, e);
                     }
                 }
@@ -571,7 +576,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             match fetch_binance_snapshot(&http, symbol).await {
                 Ok((price, trend_score)) => {
-                    if let Err(e) = insert_snapshot(&pool, "binance", symbol, price, trend_score).await {
+                    if let Err(e) =
+                        insert_snapshot(&pool, "binance", symbol, price, trend_score).await
+                    {
                         eprintln!("insert binance snapshot failed {}: {}", symbol, e);
                     }
                 }
@@ -580,7 +587,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             match fetch_okx_snapshot(&http, symbol).await {
                 Ok((price, trend_score)) => {
-                    if let Err(e) = insert_snapshot(&pool, "okx", symbol, price, trend_score).await {
+                    if let Err(e) = insert_snapshot(&pool, "okx", symbol, price, trend_score).await
+                    {
                         eprintln!("insert okx snapshot failed {}: {}", symbol, e);
                     }
                 }

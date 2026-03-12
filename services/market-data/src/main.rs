@@ -151,8 +151,7 @@ fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
 }
 
 fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
-    rows
-        .into_iter()
+    rows.into_iter()
         .filter_map(|row| {
             if row.len() < 5 {
                 return None;
@@ -539,7 +538,9 @@ async fn fetch_market_signal_bybit(
         .ok_or_else(|| "missing ticker item".to_string())?;
 
     let fallback_price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let current_price = parse_f64(&ticker.last_price).unwrap_or(fallback_price).max(0.0);
+    let current_price = parse_f64(&ticker.last_price)
+        .unwrap_or(fallback_price)
+        .max(0.0);
 
     let atr_14 = compute_atr14(&candles);
 
@@ -918,11 +919,31 @@ fn aggregate_signals(
     } else {
         0.0
     };
-    let ema_fast = if weight_total > 0.0 { ema_fast_sum / weight_total } else { 0.0 };
-    let ema_slow = if weight_total > 0.0 { ema_slow_sum / weight_total } else { 0.0 };
-    let rsi_14 = if weight_total > 0.0 { rsi_sum / weight_total } else { 50.0 };
-    let macd_line = if weight_total > 0.0 { macd_line_sum / weight_total } else { 0.0 };
-    let macd_signal = if weight_total > 0.0 { macd_signal_sum / weight_total } else { 0.0 };
+    let ema_fast = if weight_total > 0.0 {
+        ema_fast_sum / weight_total
+    } else {
+        0.0
+    };
+    let ema_slow = if weight_total > 0.0 {
+        ema_slow_sum / weight_total
+    } else {
+        0.0
+    };
+    let rsi_14 = if weight_total > 0.0 {
+        rsi_sum / weight_total
+    } else {
+        50.0
+    };
+    let macd_line = if weight_total > 0.0 {
+        macd_line_sum / weight_total
+    } else {
+        0.0
+    };
+    let macd_signal = if weight_total > 0.0 {
+        macd_signal_sum / weight_total
+    } else {
+        0.0
+    };
     let macd_histogram = if weight_total > 0.0 {
         macd_histogram_sum / weight_total
     } else {
@@ -1132,8 +1153,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
     let symbols = parse_trading_pairs();
     let base_url = bybit_base_url();
-    let analytics_scores_url =
-        std::env::var("ANALYTICS_SCORES_URL").unwrap_or_else(|_| "http://analytics:8086/scores".to_string());
+    let analytics_scores_url = std::env::var("ANALYTICS_SCORES_URL")
+        .unwrap_or_else(|_| "http://analytics:8086/scores".to_string());
     let analytics_min_evaluated = std::env::var("ANALYTICS_MIN_EVALUATED")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
