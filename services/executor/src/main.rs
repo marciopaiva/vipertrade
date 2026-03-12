@@ -782,11 +782,10 @@ async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
         return Ok(0);
     };
 
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM trades WHERE status = 'open'",
-    )
-    .fetch_one(pool)
-    .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM trades WHERE status = 'open'")
+            .fetch_one(pool)
+            .await?;
 
     Ok(count)
 }
@@ -1834,17 +1833,16 @@ async fn handle_decision_event(
                     .unwrap_or(event.decision.entry_price);
                 let entry_fee = execution_meta.fee.unwrap_or(0.0);
 
-                if let Err(e) =
-                    persist_trade(
-                        state,
-                        &event,
-                        &order_id,
-                        entry_qty,
-                        entry_price,
-                        entry_fee,
-                        false,
-                    )
-                    .await
+                if let Err(e) = persist_trade(
+                    state,
+                    &event,
+                    &order_id,
+                    entry_qty,
+                    entry_price,
+                    entry_fee,
+                    false,
+                )
+                .await
                 {
                     eprintln!(
                         "Failed to persist trade for event_id={} order_id={} err={}",

@@ -7,8 +7,8 @@ use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
 use sqlx::PgPool;
-use std::convert::Infallible;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -430,7 +430,11 @@ fn resolve_position_triggers(
         .and_then(|p| p.trailing_enabled)
         .unwrap_or(state.position_config.global.trailing_enabled);
     let trailing_profile = pair_cfg
-        .and_then(|p| p.trailing_by_profile.get(&state.trading_profile.to_uppercase()).cloned())
+        .and_then(|p| {
+            p.trailing_by_profile
+                .get(&state.trading_profile.to_uppercase())
+                .cloned()
+        })
         .unwrap_or_else(default_trailing_profile);
 
     let is_long = side.eq_ignore_ascii_case("long");
@@ -859,7 +863,19 @@ async fn positions_handler(state: Arc<AppState>) -> impl Reply {
         );
     };
 
-    let rows = sqlx::query_as::<_, (String, String, String, f64, f64, bool, Option<f64>, Option<f64>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            f64,
+            f64,
+            bool,
+            Option<f64>,
+            Option<f64>,
+        ),
+    >(
         "SELECT
              trade_id::text,
              symbol,
@@ -880,27 +896,46 @@ async fn positions_handler(state: Arc<AppState>) -> impl Reply {
         Ok(rows) => {
             let items = rows
                 .into_iter()
-                .map(|(trade_id, symbol, side, quantity, notional_usdt, trailing_stop_activated, trailing_stop_peak_price, trailing_stop_final_distance_pct)| {
-                    let entry_price = if quantity > 0.0 { notional_usdt / quantity } else { 0.0 };
-                    let (stop_loss_price, trailing_activation_price, fixed_take_profit_price, break_even_price) =
-                        resolve_position_triggers(state.as_ref(), &symbol, &side, entry_price);
-
-                    PositionItem {
+                .map(
+                    |(
                         trade_id,
                         symbol,
                         side,
                         quantity,
                         notional_usdt,
-                        entry_price,
                         trailing_stop_activated,
                         trailing_stop_peak_price,
                         trailing_stop_final_distance_pct,
-                        stop_loss_price,
-                        trailing_activation_price,
-                        fixed_take_profit_price,
-                        break_even_price,
-                    }
-                })
+                    )| {
+                        let entry_price = if quantity > 0.0 {
+                            notional_usdt / quantity
+                        } else {
+                            0.0
+                        };
+                        let (
+                            stop_loss_price,
+                            trailing_activation_price,
+                            fixed_take_profit_price,
+                            break_even_price,
+                        ) = resolve_position_triggers(state.as_ref(), &symbol, &side, entry_price);
+
+                        PositionItem {
+                            trade_id,
+                            symbol,
+                            side,
+                            quantity,
+                            notional_usdt,
+                            entry_price,
+                            trailing_stop_activated,
+                            trailing_stop_peak_price,
+                            trailing_stop_final_distance_pct,
+                            stop_loss_price,
+                            trailing_activation_price,
+                            fixed_take_profit_price,
+                            break_even_price,
+                        }
+                    },
+                )
                 .collect();
             json_ok(&PositionsResponse { items })
         }
@@ -1754,7 +1789,8 @@ async fn main() {
         default_max_leverage: read_f64_env("MAX_LEVERAGE", 2.0),
         default_risk_per_trade_pct: read_f64_env("RISK_PER_TRADE_PCT", 1.25),
         position_config: load_position_config(
-            &std::env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string()),
+            &std::env::var("STRATEGY_CONFIG")
+                .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string()),
         ),
     });
 
