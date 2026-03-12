@@ -1338,8 +1338,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             maybe_msg = messages.next() => {
                 let Some(msg) = maybe_msg else {
-                    println!("Market data stream ended, stopping viper-strategy");
-                    break;
+                    eprintln!("Market data stream ended unexpectedly; exiting so container can restart");
+                    return Err("market data stream ended unexpectedly".into());
                 };
 
                 let payload: String = msg.get_payload()?;

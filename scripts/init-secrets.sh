@@ -98,6 +98,37 @@ for var in DB_PASSWORD NEXTAUTH_SECRET; do
     fi
 done
 
+# 7.1 Keep compose variables compatible with DB_* naming used in template
+if ! grep -q '^POSTGRES_DB=' compose/.env; then
+    echo "POSTGRES_DB=${DB_NAME:-vipertrade}" >> compose/.env
+fi
+if ! grep -q '^POSTGRES_USER=' compose/.env; then
+    echo "POSTGRES_USER=${DB_USER:-viper}" >> compose/.env
+fi
+if ! grep -q '^POSTGRES_PASSWORD=' compose/.env; then
+    DB_PASSWORD_VALUE="$(grep '^DB_PASSWORD=' compose/.env | head -n1 | cut -d'=' -f2-)"
+    if [[ -n "$DB_PASSWORD_VALUE" ]]; then
+        echo "POSTGRES_PASSWORD=${DB_PASSWORD_VALUE}" >> compose/.env
+    fi
+fi
+
+# 7.2 Ensure standardized base-image variables exist
+if ! grep -q '^RUST_BUILDER_IMAGE=' compose/.env; then
+    echo "RUST_BUILDER_IMAGE=vipertrade-base-rust-builder:1.83" >> compose/.env
+fi
+if ! grep -q '^RUST_RUNTIME_IMAGE=' compose/.env; then
+    echo "RUST_RUNTIME_IMAGE=vipertrade-base-rust-runtime:bookworm" >> compose/.env
+fi
+if ! grep -q '^STRATEGY_BUILDER_IMAGE=' compose/.env; then
+    echo "STRATEGY_BUILDER_IMAGE=vipertrade-base-strategy-builder:1.83" >> compose/.env
+fi
+if ! grep -q '^STRATEGY_RUNTIME_IMAGE=' compose/.env; then
+    echo "STRATEGY_RUNTIME_IMAGE=vipertrade-base-strategy-runtime:3.12-bookworm" >> compose/.env
+fi
+if ! grep -q '^WEB_BASE_IMAGE=' compose/.env; then
+    echo "WEB_BASE_IMAGE=vipertrade-base-web-node:20-bookworm" >> compose/.env
+fi
+
 # Load envs for display
 set +u # Allow unbound variables for display
 source compose/.env

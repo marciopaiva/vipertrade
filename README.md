@@ -23,6 +23,7 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
 cp compose/.env.example compose/.env
+./scripts/build-base-images.sh
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
 ```
