@@ -65,8 +65,10 @@ services:
     environment:
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC:-wss://stream-testnet.bybit.com/v5/public/linear}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       REDIS_HOST: localhost
+      ANALYTICS_SCORES_URL: ${ANALYTICS_SCORES_URL:-http://localhost:8086/scores}
+      ANALYTICS_MIN_EVALUATED: ${ANALYTICS_MIN_EVALUATED:-20}
       REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_market_data=${LOG_LEVEL:-info},tupa=warn"
@@ -77,6 +79,43 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  analytics:
+    build:
+      context: ..
+      dockerfile: services/analytics/Dockerfile
+      args:
+        RUST_VERSION: "1.83"
+    container_name: vipertrade-analytics
+    network_mode: host
+    environment:
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-vipertrade}
+      DB_USER: ${POSTGRES_USER:-viper}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      ANALYTICS_HORIZON_MINUTES: ${ANALYTICS_HORIZON_MINUTES:-5}
+      ANALYTICS_LOOKBACK_HOURS: ${ANALYTICS_LOOKBACK_HOURS:-24}
+      ANALYTICS_SAMPLE_INTERVAL_SECONDS: ${ANALYTICS_SAMPLE_INTERVAL_SECONDS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -160,7 +199,7 @@ services:
       BYBIT_ACCOUNT_TYPE: ${BYBIT_ACCOUNT_TYPE:-UNIFIED}
       EXECUTOR_ENABLE_LIVE_ORDERS: ${EXECUTOR_ENABLE_LIVE_ORDERS:-false}
       EXECUTOR_LIVE_SYMBOL_ALLOWLIST: ${EXECUTOR_LIVE_SYMBOL_ALLOWLIST:-DOGEUSDT}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       REDIS_URL: redis://localhost:6379
       REDIS_HOST: localhost
       REDIS_PORT: 6379
@@ -288,6 +327,7 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev_only_change_me}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    command: sh -lc "rm -rf .next && npm install && npm run dev"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
@@ -357,4 +397,3 @@ volumes:
   postgres_data:
   redis_data:
   tupa-cache:
-

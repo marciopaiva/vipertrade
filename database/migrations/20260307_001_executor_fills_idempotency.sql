@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS bybit_fills (
     bybit_execution_id TEXT NOT NULL UNIQUE,
     bybit_order_id TEXT NOT NULL,
     order_link_id TEXT,
-    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'TRXUSDT', 'XLMUSDT')),
+    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'XLMUSDT')),
     side TEXT,
     exec_qty NUMERIC NOT NULL CHECK (exec_qty > 0),
     exec_price NUMERIC,

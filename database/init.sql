@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS trading_pairs_config (
 INSERT INTO trading_pairs_config (symbol, category, min_order_value_usdt, max_order_value_usdt, price_precision, qty_precision, tick_size, step_size, min_24h_volume_usdt) VALUES
     ('DOGEUSDT', 'meme_coin', 5.00, 50.00, 5, 0, 0.00001, 1, 50000000),
     ('XRPUSDT', 'large_cap_alt', 5.00, 50.00, 4, 1, 0.0001, 1, 100000000),
-    ('TRXUSDT', 'large_cap_alt', 5.00, 50.00, 5, 0, 0.00001, 1, 80000000),
+    ('ADAUSDT', 'large_cap_alt', 5.00, 50.00, 4, 0, 0.0001, 1, 50000000),
     ('XLMUSDT', 'large_cap_alt', 5.00, 50.00, 5, 0, 0.00001, 1, 60000000)
 ON CONFLICT (symbol) DO NOTHING;
 

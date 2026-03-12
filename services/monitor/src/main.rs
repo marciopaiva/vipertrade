@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 type HmacSha256 = Hmac<Sha256>;
-const RECON_SYMBOLS: [&str; 4] = ["DOGEUSDT", "XRPUSDT", "TRXUSDT", "XLMUSDT"];
+const RECON_SYMBOLS: [&str; 4] = ["DOGEUSDT", "XRPUSDT", "ADAUSDT", "XLMUSDT"];
 
 #[derive(Debug, Clone)]
 struct MonitorConfig {

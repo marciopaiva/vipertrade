@@ -72,8 +72,10 @@ services:
     environment:
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC:-wss://stream-testnet.bybit.com/v5/public/linear}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       REDIS_URL: redis://redis:6379
+      ANALYTICS_SCORES_URL: ${ANALYTICS_SCORES_URL:-http://analytics:8086/scores}
+      ANALYTICS_MIN_EVALUATED: ${ANALYTICS_MIN_EVALUATED:-20}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -85,6 +87,46 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
+    networks:
+      - viper-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  analytics:
+    build:
+      context: ..
+      dockerfile: services/analytics/Dockerfile
+      args:
+        RUST_VERSION: "1.83"
+    container_name: vipertrade-analytics
+    ports:
+      - "8086:8086"
+    environment:
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-vipertrade}
+      DB_USER: ${POSTGRES_USER:-viper}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      ANALYTICS_HORIZON_MINUTES: ${ANALYTICS_HORIZON_MINUTES:-5}
+      ANALYTICS_LOOKBACK_HOURS: ${ANALYTICS_LOOKBACK_HOURS:-24}
+      ANALYTICS_SAMPLE_INTERVAL_SECONDS: ${ANALYTICS_SAMPLE_INTERVAL_SECONDS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -175,7 +217,7 @@ services:
       EXECUTOR_ENABLE_LIVE_ORDERS: ${EXECUTOR_ENABLE_LIVE_ORDERS:-false}
       EXECUTOR_LIVE_SYMBOL_ALLOWLIST: ${EXECUTOR_LIVE_SYMBOL_ALLOWLIST:-DOGEUSDT}
       EXECUTOR_RECONCILE_FIX: ${EXECUTOR_RECONCILE_FIX:-false}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}
+      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       REDIS_URL: redis://redis:6379
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -317,9 +359,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    volumes:
-      - ../web:/app
-      - /app/node_modules
     depends_on:
       postgres:
         condition: service_healthy

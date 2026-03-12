@@ -36,6 +36,18 @@ global:
     max_spread_pct: 0.001  # 0.1% máximo
     max_atr_pct: 0.05  # 5% volatilidade máxima
     max_funding_rate_pct: 0.015  # 1.5% funding máximo
+    min_trend_score: 0.25
+    min_signal_confirmation_ticks: 2
+    min_volume_ratio: 1.0
+    min_volume_ratio_long: 0.90
+    min_volume_ratio_short: 0.95
+    rsi_long_min: 50
+    rsi_long_max: 80
+    rsi_short_min: 20
+    rsi_short_max: 50
+    stop_loss_cooldown_minutes: 3
+    stop_loss_cooldown_minutes_short: 5
+    min_signal_confirmation_ticks_short: 4
 
 # ═══════════════════════════════════════════════════════════
 # DOGEUSDT - Meme Coin (Alta Volatilidade)
@@ -57,8 +69,8 @@ DOGEUSDT:
   
   # Risk parameters (mais conservador devido à volatilidade)
   risk:
-    stop_loss_pct: 0.02        # 2% (mais amplo que BTC)
-    take_profit_pct: 0.04      # 4% (4:1 R/R compensa volatilidade)
+    stop_loss_pct: 0.0025      # 0.25% para teste scalp
+    take_profit_pct: 0.003      # 0.30% para teste scalp
     max_position_usdt: 15.00   # Máx 15% do capital
     atr_period: 14
     atr_multiplier: 0.5        # Reduz sizing em alta volatilidade
@@ -77,14 +89,14 @@ DOGEUSDT:
             trail_pct: 0.02
         move_to_break_even_at: 0.02
       MEDIUM:
-        activate_after_profit_pct: 0.02
-        initial_trail_pct: 0.01
+        activate_after_profit_pct: 0.0025
+        initial_trail_pct: 0.0015
         ratchet_levels:
-          - at_profit_pct: 0.04
-            trail_pct: 0.015
-          - at_profit_pct: 0.08
-            trail_pct: 0.025
-        move_to_break_even_at: 0.025
+          - at_profit_pct: 0.0045
+            trail_pct: 0.002
+          - at_profit_pct: 0.0075
+            trail_pct: 0.003
+        move_to_break_even_at: 0.003
       AGGRESSIVE:
         activate_after_profit_pct: 0.025
         initial_trail_pct: 0.012
@@ -100,6 +112,16 @@ DOGEUSDT:
     min_24h_volume_usdt: 50000000  # $50M mínimo
     max_spread_pct: 0.001          # 0.1% spread máximo
     avoid_during_low_liquidity: true
+
+  entry_filters:
+    min_trend_score_long: 0.38
+    min_trend_score_short: 0.35
+    min_trend_score: 0.38
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0055
   
   # Smart Copy specific
   smart_copy:
@@ -124,8 +146,8 @@ XRPUSDT:
     max_order_value_usdt: 50.00
   
   risk:
-    stop_loss_pct: 0.018
-    take_profit_pct: 0.036
+    stop_loss_pct: 0.0025
+    take_profit_pct: 0.003
     max_position_usdt: 20.00
     atr_period: 14
     atr_multiplier: 0.6
@@ -143,14 +165,14 @@ XRPUSDT:
             trail_pct: 0.018
         move_to_break_even_at: 0.018
       MEDIUM:
-        activate_after_profit_pct: 0.015
-        initial_trail_pct: 0.008
+        activate_after_profit_pct: 0.0025
+        initial_trail_pct: 0.0015
         ratchet_levels:
-          - at_profit_pct: 0.03
-            trail_pct: 0.012
-          - at_profit_pct: 0.06
-            trail_pct: 0.02
-        move_to_break_even_at: 0.02
+          - at_profit_pct: 0.0045
+            trail_pct: 0.002
+          - at_profit_pct: 0.007
+            trail_pct: 0.003
+        move_to_break_even_at: 0.003
       AGGRESSIVE:
         activate_after_profit_pct: 0.02
         initial_trail_pct: 0.01
@@ -165,70 +187,92 @@ XRPUSDT:
     min_24h_volume_usdt: 100000000
     max_spread_pct: 0.001
     avoid_during_low_liquidity: true
+
+  entry_filters:
+    allow_long: true
+    allow_short: true
+    min_trend_score_long: 0.22
+    min_trend_score_short: 0.32
+    min_trend_score: 0.22
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0045
   
   smart_copy:
     recommended_for_beginners: true
     warning: null
 
 # ═══════════════════════════════════════════════════════════
-# TRXUSDT - Large Cap Alt (Média Volatilidade)
+# ADAUSDT - Large Cap Alt (Média-Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
 
-TRXUSDT:
+ADAUSDT:
   enabled: true
   category: "large_cap_alt"
-  volatility_profile: "medium"
+  volatility_profile: "medium-high"
   
   bybit:
-    price_precision: 5
+    price_precision: 4
     qty_precision: 0
-    tick_size: 0.00001
+    tick_size: 0.0001
     step_size: 1
     min_order_value_usdt: 5.00
     max_order_value_usdt: 50.00
   
   risk:
-    stop_loss_pct: 0.015       # TRX tende a ser menos volátil
-    take_profit_pct: 0.030
+    stop_loss_pct: 0.0025
+    take_profit_pct: 0.003
     max_position_usdt: 20.00
     atr_period: 14
-    atr_multiplier: 0.7        # Mais agressivo devido à menor volatilidade
+    atr_multiplier: 0.65
   
   trailing_stop:
     enabled: true
     by_profile:
       CONSERVATIVE:
-        activate_after_profit_pct: 0.01
-        initial_trail_pct: 0.005
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
         ratchet_levels:
-          - at_profit_pct: 0.02
-            trail_pct: 0.008
-          - at_profit_pct: 0.04
-            trail_pct: 0.015
-        move_to_break_even_at: 0.015
-      MEDIUM:
-        activate_after_profit_pct: 0.015
-        initial_trail_pct: 0.008
-        ratchet_levels:
-          - at_profit_pct: 0.03
-            trail_pct: 0.012
-          - at_profit_pct: 0.06
-            trail_pct: 0.02
-        move_to_break_even_at: 0.02
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.02
-        initial_trail_pct: 0.01
-        ratchet_levels:
-          - at_profit_pct: 0.05
+          - at_profit_pct: 0.025
+            trail_pct: 0.010
+          - at_profit_pct: 0.050
             trail_pct: 0.018
-          - at_profit_pct: 0.10
-            trail_pct: 0.03
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.0025
+        initial_trail_pct: 0.0015
+        ratchet_levels:
+          - at_profit_pct: 0.0045
+            trail_pct: 0.0020
+          - at_profit_pct: 0.0070
+            trail_pct: 0.0030
+        move_to_break_even_at: 0.0030
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.020
+        initial_trail_pct: 0.010
+        ratchet_levels:
+          - at_profit_pct: 0.040
+            trail_pct: 0.018
+          - at_profit_pct: 0.080
+            trail_pct: 0.030
         move_to_break_even_at: 0.025
   
   liquidity:
-    min_24h_volume_usdt: 80000000
+    min_24h_volume_usdt: 50000000
     max_spread_pct: 0.001
     avoid_during_low_liquidity: true
+
+  entry_filters:
+    min_trend_score_long: 0.28
+    min_trend_score_short: 0.24
+    min_trend_score: 0.28
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0035
   
   smart_copy:
     recommended_for_beginners: true
@@ -252,8 +296,8 @@ XLMUSDT:
     max_order_value_usdt: 50.00
   
   risk:
-    stop_loss_pct: 0.018
-    take_profit_pct: 0.036
+    stop_loss_pct: 0.0025
+    take_profit_pct: 0.003
     max_position_usdt: 20.00
     atr_period: 14
     atr_multiplier: 0.6
@@ -271,14 +315,14 @@ XLMUSDT:
             trail_pct: 0.018
         move_to_break_even_at: 0.018
       MEDIUM:
-        activate_after_profit_pct: 0.015
-        initial_trail_pct: 0.008
+        activate_after_profit_pct: 0.0025
+        initial_trail_pct: 0.0015
         ratchet_levels:
-          - at_profit_pct: 0.03
-            trail_pct: 0.012
-          - at_profit_pct: 0.06
-            trail_pct: 0.02
-        move_to_break_even_at: 0.02
+          - at_profit_pct: 0.0045
+            trail_pct: 0.002
+          - at_profit_pct: 0.007
+            trail_pct: 0.003
+        move_to_break_even_at: 0.003
       AGGRESSIVE:
         activate_after_profit_pct: 0.02
         initial_trail_pct: 0.01
@@ -290,9 +334,19 @@ XLMUSDT:
         move_to_break_even_at: 0.025
   
   liquidity:
-    min_24h_volume_usdt: 60000000
+    min_24h_volume_usdt: 20000000
     max_spread_pct: 0.001
     avoid_during_low_liquidity: true
+
+  entry_filters:
+    min_trend_score_long: 0.32
+    min_trend_score_short: 0.28
+    min_trend_score: 0.32
+    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 4
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0038
   
   smart_copy:
     recommended_for_beginners: true

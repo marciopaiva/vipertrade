@@ -8,11 +8,53 @@ pub const SCHEMA_VERSION: &str = "1.0";
 pub struct MarketSignal {
     pub symbol: String,
     pub current_price: f64,
+    #[serde(default)]
+    pub bybit_price: f64,
     pub atr_14: f64,
     pub volume_24h: i64,
     pub funding_rate: f64,
     pub trend_score: f64,
     pub spread_pct: f64,
+    #[serde(default)]
+    pub ema_fast: f64,
+    #[serde(default)]
+    pub ema_slow: f64,
+    #[serde(default)]
+    pub rsi_14: f64,
+    #[serde(default)]
+    pub macd_line: f64,
+    #[serde(default)]
+    pub macd_signal: f64,
+    #[serde(default)]
+    pub macd_histogram: f64,
+    #[serde(default)]
+    pub volume_ratio: f64,
+    #[serde(default)]
+    pub btc_regime: String,
+    #[serde(default)]
+    pub btc_trend_score: f64,
+    #[serde(default)]
+    pub btc_consensus_count: i64,
+    #[serde(default)]
+    pub btc_volume_ratio: f64,
+    #[serde(default)]
+    pub regime: String,
+    #[serde(default)]
+    pub consensus_side: String,
+    #[serde(default)]
+    pub consensus_count: i64,
+    #[serde(default)]
+    pub exchanges_available: i64,
+    #[serde(default)]
+    pub consensus_ratio: f64,
+    #[serde(default)]
+    pub trend_slope: f64,
+    #[serde(default)]
+    pub bybit_regime: String,
+    #[serde(default)]
+    pub bullish_exchanges: i64,
+    #[serde(default)]
+    pub bearish_exchanges: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -126,11 +168,32 @@ mod tests {
         MarketSignal {
             symbol: "DOGEUSDT".to_string(),
             current_price: 0.17,
+            bybit_price: 0.17,
             atr_14: 0.01,
             volume_24h: 100_000_000,
             funding_rate: 0.001,
             trend_score: 0.7,
             spread_pct: 0.0005,
+            ema_fast: 0.171,
+            ema_slow: 0.168,
+            rsi_14: 61.0,
+            macd_line: 0.002,
+            macd_signal: 0.0015,
+            macd_histogram: 0.0005,
+            volume_ratio: 1.2,
+            btc_regime: "bullish".to_string(),
+            btc_trend_score: 0.65,
+            btc_consensus_count: 3,
+            btc_volume_ratio: 1.4,
+            regime: "bullish".to_string(),
+            consensus_side: "bullish".to_string(),
+            consensus_count: 3,
+            exchanges_available: 3,
+            consensus_ratio: 1.0,
+            trend_slope: 0.004,
+            bybit_regime: "bullish".to_string(),
+            bullish_exchanges: 3,
+            bearish_exchanges: 0,
         }
     }
 

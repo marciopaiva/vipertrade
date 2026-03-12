@@ -6,6 +6,7 @@ import type { CSSProperties, ReactNode } from "react";
 type DashboardPayload = {
   source: { baseUrl: string; fetchedAt: string };
   status: {
+    service?: string;
     risk_status?: string;
     trading_mode?: string;
     trading_profile?: string;
@@ -36,7 +37,23 @@ type DashboardPayload = {
     last_30d?: { total_trades?: number; total_pnl?: number; win_rate?: number };
     max_drawdown_30d?: number | null;
   };
-  positions: { items?: Array<{ symbol: string; side: string; quantity: number; notional_usdt: number }> };
+  positions: {
+    items?: Array<{
+      trade_id: string;
+      symbol: string;
+      side: string;
+      quantity: number;
+      notional_usdt: number;
+      entry_price: number;
+      trailing_stop_activated?: boolean;
+      trailing_stop_peak_price?: number | null;
+      trailing_stop_final_distance_pct?: number | null;
+      stop_loss_price?: number | null;
+      trailing_activation_price?: number | null;
+      fixed_take_profit_price?: number | null;
+      break_even_price?: number | null;
+    }>;
+  };
   trades: {
     items?: Array<{
       trade_id: string;
@@ -47,6 +64,7 @@ type DashboardPayload = {
       entry_price: number;
       exit_price?: number | null;
       pnl?: number | null;
+      close_reason?: string | null;
       opened_at: string;
       closed_at?: string | null;
     }>;
@@ -60,6 +78,48 @@ type DashboardPayload = {
       symbol?: string | null;
       data?: Record<string, unknown>;
       timestamp: string;
+    }>;
+  };
+  market_signals?: {
+    updated_at?: string | null;
+    items?: Record<string, {
+      symbol: string;
+      current_price: number;
+      bybit_price?: number;
+      atr_14: number;
+      volume_24h: number;
+      funding_rate: number;
+      trend_score: number;
+      spread_pct: number;
+    }> | Array<{
+      symbol: string;
+      current_price: number;
+      bybit_price?: number;
+      atr_14: number;
+      volume_24h: number;
+      funding_rate: number;
+      trend_score: number;
+      spread_pct: number;
+    }>;
+  };
+  analytics_scores?: {
+    updated_at?: string;
+    horizon_minutes?: number;
+    lookback_hours?: number;
+    exchanges?: Array<{
+      exchange: string;
+      evaluated: number;
+      hits: number;
+      hit_rate: number;
+      avg_forward_return: number;
+    }>;
+    by_symbol?: Array<{
+      exchange: string;
+      symbol: string;
+      evaluated: number;
+      hits: number;
+      hit_rate: number;
+      avg_forward_return: number;
     }>;
   };
   risk_kpis: {
@@ -105,12 +165,102 @@ type DashboardPayload = {
   warnings?: string[];
 };
 
+type ControlKind = "kill-switch" | "executor" | "risk-limits";
+type SignalBucket = { buy: number; hold: number; sell: number; total: number };
+type HoldReasonStat = { reason: string; count: number };
+type TokenSignalSummary = SignalBucket & { symbol: string; holdReasons: HoldReasonStat[] };
+type TokenDecisionCardData = {
+  symbol: string;
+  regime: string;
+  bybitRegime: string;
+  consensusCount: number;
+  exchangesAvailable: number;
+  trendScore: number;
+  stateLabel: string;
+  stateTone: "positive" | "negative" | "neutral";
+  recentSummary: string;
+  mainBlock: string;
+};
+type RealtimeMarketSignal = {
+  symbol: string;
+  current_price: number;
+  bybit_price?: number;
+  atr_14: number;
+  volume_24h: number;
+  funding_rate: number;
+  trend_score: number;
+  spread_pct: number;
+  regime?: string;
+  consensus_side?: string;
+  consensus_count?: number;
+  exchanges_available?: number;
+  bybit_regime?: string;
+};
+
 function num(value: number | null | undefined, digits = 2) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return value.toFixed(digits);
 }
 
-type ControlKind = "kill-switch" | "executor" | "risk-limits";
+function pct(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function humanVolume(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toFixed(0);
+}
+
+function prettifyReason(reason: string | null | undefined) {
+  if (!reason) return "No clear block";
+  return reason
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function regimeTone(regime: string | null | undefined) {
+  if (regime === "bullish") return { label: "Bullish", ok: true };
+  if (regime === "bearish") return { label: "Bearish", ok: false };
+  return { label: "Neutral", ok: undefined };
+}
+
+function usd(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+}
+
+function usdAdaptive(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  const digits = Math.abs(value) < 0.1 ? 4 : 2;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function statusTone(ok: boolean): CSSProperties {
+  return {
+    color: ok ? "#38f9a5" : "#ff8f8f",
+    borderColor: ok ? "rgba(56, 249, 165, 0.55)" : "rgba(255, 143, 143, 0.5)",
+    background: ok ? "rgba(4, 89, 63, 0.28)" : "rgba(107, 16, 16, 0.3)",
+  };
+}
+
+function serviceColor(name: string, ok: boolean): string {
+  if (!ok) return "#ff6478";
+  if (name.includes("bybit")) return "#f7b500";
+  if (name === "api") return "#11c4ff";
+  if (name === "executor") return "#00e5a8";
+  if (name === "analytics") return "#7bc4ff";
+  if (name === "strategy") return "#9580ff";
+  return "#46d8ff";
+}
 
 export default function Home() {
   const [data, setData] = useState<DashboardPayload | null>(null);
@@ -131,9 +281,18 @@ export default function Home() {
   const fetchDashboard = useCallback(async () => {
     try {
       const res = await fetch("/api/dashboard", { cache: "no-store" });
-      const body = (await res.json()) as DashboardPayload & { message?: string };
+      const raw = await res.text();
+      let body: (DashboardPayload & { message?: string }) | null = null;
+      try {
+        body = raw ? (JSON.parse(raw) as DashboardPayload & { message?: string }) : null;
+      } catch {
+        throw new Error(`dashboard response is not JSON (http ${res.status})`);
+      }
       if (!res.ok) {
         throw new Error(body?.message || `failed: ${res.status}`);
+      }
+      if (!body) {
+        throw new Error(`empty dashboard response (http ${res.status})`);
       }
       setData(body);
       setError("");
@@ -169,20 +328,194 @@ export default function Home() {
   const trades = useMemo(() => data?.trades?.items ?? [], [data]);
   const events = useMemo(() => data?.events?.items ?? [], [data]);
   const services = useMemo(() => data?.services ?? [], [data]);
+  const closedTrades = useMemo(() => trades.filter((t) => t.status === "closed"), [trades]);
+  const tradeStats = useMemo(() => {
+    const avgClosedPnlPct =
+      closedTrades.length > 0
+        ? closedTrades.reduce((acc, t) => {
+            const notional = t.quantity * t.entry_price;
+            if (!notional) return acc;
+            return acc + ((t.pnl ?? 0) / notional);
+          }, 0) / closedTrades.length
+        : null;
+    return {
+      winRate24h: data?.performance?.last_24h?.win_rate,
+      winRate7d: data?.performance?.last_7d?.win_rate,
+      pnl24h: data?.performance?.last_24h?.total_pnl,
+      totalTrades: data?.performance?.last_30d?.total_trades ?? closedTrades.length,
+      avgClosedPnlPct,
+    };
+  }, [closedTrades, data]);
 
-  const checklist = useMemo(
-    () => [
-      { label: "Backend online", ok: !!data?.status?.db_connected },
-      { label: "Operator controls enabled", ok: !!data?.control_state?.operator_controls_enabled },
-      { label: "Service health checks available", ok: services.length > 0 },
-      { label: "Timeline events available", ok: events.length > 0 },
-      {
-        label: "Risk KPIs available",
-        ok: typeof data?.risk_kpis?.critical_events_24h === "number",
-      },
-    ],
-    [data, events.length, services.length],
+  const online = useMemo(() => services.length > 0 && services.some((svc) => svc.name === "api" && svc.ok), [services]);
+
+  const flowOrder = ["bybit", "binance", "okx", "market-data", "strategy", "executor", "api", "monitor", "analytics", "backtest", "bybit-private"];
+  const flowServices = useMemo(
+    () => flowOrder.map((name) => services.find((svc) => svc.name === name)).filter(Boolean) as DashboardPayload["services"],
+    [services],
   );
+
+  const executorServiceOk = useMemo(() => {
+    const svc = services.find((item) => item.name === "executor");
+    return !!svc?.ok;
+  }, [services]);
+  const executionMode = data?.status?.trading_mode === "live" ? "live" : "paper";
+  const executorControlEnabled = !!data?.control_state?.executor?.enabled;
+  const killSwitchEnabled = !!data?.control_state?.kill_switch?.enabled;
+  const executorVisualState: "running" | "paused" | "down" =
+    !executorServiceOk ? "down" : executorControlEnabled ? "running" : "paused";
+
+  const tokenSignalStats = useMemo<TokenSignalSummary[]>(() => {
+    const defaultTokens = ["DOGEUSDT", "XRPUSDT", "ADAUSDT", "XLMUSDT"];
+    const stats = new Map<string, SignalBucket>();
+    const holdReasons = new Map<string, Map<string, number>>();
+    for (const token of defaultTokens) {
+      stats.set(token, { buy: 0, hold: 0, sell: 0, total: 0 });
+      holdReasons.set(token, new Map<string, number>());
+    }
+
+    for (const evt of events) {
+      if (evt.event_type !== "executor_event_processed") continue;
+      const symbolRaw =
+        evt.symbol ||
+        (typeof evt.data?.symbol === "string" ? evt.data.symbol : null) ||
+        (typeof evt.data?.decision_symbol === "string" ? evt.data.decision_symbol : null);
+      if (!symbolRaw) continue;
+      const symbol = String(symbolRaw).toUpperCase();
+
+      const actionRaw = typeof evt.data?.action === "string" ? evt.data.action.toUpperCase() : "";
+      let bucket: keyof SignalBucket | null = null;
+      if (actionRaw === "HOLD") bucket = "hold";
+      else if (actionRaw === "ENTER_LONG" || actionRaw === "ENTER_SHORT" || actionRaw === "BUY") bucket = "buy";
+      else if (actionRaw === "CLOSE_LONG" || actionRaw === "CLOSE_SHORT" || actionRaw === "SELL") bucket = "sell";
+      if (!bucket) continue;
+
+      const item = stats.get(symbol) ?? { buy: 0, hold: 0, sell: 0, total: 0 };
+      item[bucket] += 1;
+      item.total += 1;
+      stats.set(symbol, item);
+
+      if (bucket === "hold") {
+        const reasonRaw =
+          (typeof evt.data?.reason === "string" && evt.data.reason) ||
+          (typeof evt.data?.decision_reason === "string" && evt.data.decision_reason) ||
+          (typeof evt.data?.message === "string" && evt.data.message) ||
+          "hold_without_reason";
+        const symbolReasons = holdReasons.get(symbol) ?? new Map<string, number>();
+        symbolReasons.set(reasonRaw, (symbolReasons.get(reasonRaw) ?? 0) + 1);
+        holdReasons.set(symbol, symbolReasons);
+      }
+    }
+
+    return Array.from(stats.entries())
+      .sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
+      .map(([symbol, s]) => ({
+        symbol,
+        ...s,
+        holdReasons: Array.from((holdReasons.get(symbol) ?? new Map<string, number>()).entries())
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 3)
+          .map(([reason, count]) => ({ reason, count })),
+      }));
+  }, [events]);
+  const realtimeMarketSignals = useMemo<RealtimeMarketSignal[]>(() => {
+    const raw = data?.market_signals?.items;
+    if (!raw) return [];
+
+    const list = Array.isArray(raw) ? raw : Object.values(raw);
+    return list
+      .filter((item): item is RealtimeMarketSignal => typeof item?.symbol === "string")
+      .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  }, [data?.market_signals?.items]);
+  const analyticsExchanges = useMemo(
+    () =>
+      (data?.analytics_scores?.exchanges ?? [])
+        .slice()
+        .sort((a, b) => (b.hit_rate ?? 0) - (a.hit_rate ?? 0)),
+    [data?.analytics_scores?.exchanges],
+  );
+  const openPositionsView = useMemo(() => {
+    const marketBySymbol = new Map(realtimeMarketSignals.map((s) => [s.symbol, s]));
+    return positions.map((p) => {
+      const entryPrice = p.entry_price || (p.quantity > 0 ? p.notional_usdt / p.quantity : 0);
+      const signal = marketBySymbol.get(p.symbol);
+      const markPrice = signal?.bybit_price ?? signal?.current_price ?? null;
+      const isLong = p.side.toLowerCase() === "long";
+      const unrealizedPnl =
+        typeof markPrice === "number"
+          ? (isLong ? markPrice - entryPrice : entryPrice - markPrice) * p.quantity
+          : null;
+      const unrealizedPnlPct = p.notional_usdt > 0 && typeof unrealizedPnl === "number" ? unrealizedPnl / p.notional_usdt : null;
+      const markDeltaPct =
+        typeof markPrice === "number" && entryPrice > 0
+          ? (isLong ? (markPrice - entryPrice) / entryPrice : (entryPrice - markPrice) / entryPrice)
+          : null;
+      const trailingLivePrice =
+        p.trailing_stop_activated &&
+        typeof p.trailing_stop_peak_price === "number" &&
+        typeof p.trailing_stop_final_distance_pct === "number"
+          ? isLong
+            ? p.trailing_stop_peak_price * (1 - p.trailing_stop_final_distance_pct)
+            : p.trailing_stop_peak_price * (1 + p.trailing_stop_final_distance_pct)
+          : null;
+      const triggerState =
+        p.trailing_stop_activated && typeof trailingLivePrice === "number"
+          ? `Trail ${num(trailingLivePrice, 6)}`
+          : typeof p.trailing_activation_price === "number"
+            ? `Arm ${num(p.trailing_activation_price, 6)}`
+            : typeof p.fixed_take_profit_price === "number"
+              ? `TP ${num(p.fixed_take_profit_price, 6)}`
+              : "-";
+
+      return {
+        ...p,
+        entryPrice,
+        markPrice,
+        unrealizedPnl,
+        unrealizedPnlPct,
+        markDeltaPct,
+        trailingLivePrice,
+        triggerState,
+      };
+    });
+  }, [positions, realtimeMarketSignals]);
+  const marketSnapshotLabel = data?.market_signals?.updated_at ? new Date(data.market_signals.updated_at).toLocaleTimeString() : "-";
+  const tokenDecisionBoard = useMemo<TokenDecisionCardData[]>(() => {
+    const statsBySymbol = new Map(tokenSignalStats.map((item) => [item.symbol, item]));
+    return realtimeMarketSignals.map((signal) => {
+      const stats = statsBySymbol.get(signal.symbol);
+      const holdBlock = stats?.holdReasons?.[0]?.reason;
+      const consensus = signal.consensus_count ?? 0;
+      const exchanges = signal.exchanges_available ?? 0;
+      let stateLabel = "Watching";
+      let stateTone: TokenDecisionCardData["stateTone"] = "neutral";
+
+      if (signal.regime === "bullish" && consensus >= 2) {
+        stateLabel = "Ready Long";
+        stateTone = "positive";
+      } else if (signal.regime === "bearish" && consensus >= 2) {
+        stateLabel = "Ready Short";
+        stateTone = "negative";
+      } else if (holdBlock) {
+        stateLabel = "Blocked";
+        stateTone = "neutral";
+      }
+
+      return {
+        symbol: signal.symbol,
+        regime: signal.regime ?? "neutral",
+        bybitRegime: signal.bybit_regime ?? "neutral",
+        consensusCount: consensus,
+        exchangesAvailable: exchanges,
+        trendScore: signal.trend_score,
+        stateLabel,
+        stateTone,
+        recentSummary: stats ? `${stats.buy} buy · ${stats.hold} hold · ${stats.sell} sell` : "No recent events",
+        mainBlock: prettifyReason(holdBlock ?? "no clear block"),
+      };
+    });
+  }, [realtimeMarketSignals, tokenSignalStats]);
+  const exchangeLeader = analyticsExchanges[0] ?? null;
 
   const sendControl = useCallback(
     async (kind: ControlKind, payload: Record<string, unknown>) => {
@@ -199,11 +532,17 @@ export default function Home() {
             operatorId,
           }),
         });
-        const body = (await res.json()) as { message?: string; error?: string; source?: string };
+        const raw = await res.text();
+        let body: { message?: string; error?: string; source?: string } | null = null;
+        try {
+          body = raw ? (JSON.parse(raw) as { message?: string; error?: string; source?: string }) : null;
+        } catch {
+          throw new Error(`control response is not JSON (http ${res.status})`);
+        }
         if (!res.ok) {
           throw new Error(body?.message || body?.error || `failed: ${res.status}`);
         }
-        setControlMessage(`Command '${kind}' applied via ${body.source || "backend"}`);
+        setControlMessage(`Command '${kind}' applied via ${body?.source || "backend"}`);
         await fetchDashboard();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -216,381 +555,739 @@ export default function Home() {
   );
 
   return (
-    <main style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", padding: 20, maxWidth: 1400, margin: "0 auto" }}>
-      <h1 style={{ margin: "0 0 8px 0" }}>ViperTrade Dashboard</h1>
-      <p style={{ marginTop: 0, color: "#555" }}>
-        Realtime snapshot every 5s {lastUpdated ? `- updated ${new Date(lastUpdated).toLocaleTimeString()}` : ""}
-      </p>
-
-      {loading && <p>Loading dashboard...</p>}
-      {!!error && <p style={{ color: "#b00020" }}>Error: {error}</p>}
-      {!!data?.partial && (
-        <div style={{ ...panelStyle, borderColor: "#e6b700", background: "#fff9e6", marginBottom: 16 }}>
-          <strong>Partial data mode:</strong>
-          <ul style={{ marginTop: 8, marginBottom: 0 }}>
-            {(data.warnings ?? []).map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {data && (
-        <>
-          <section style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 20 }}>
-            <Card label="Risk Status" value={String(data.status?.risk_status || "-")} />
-            <Card label="Trading Mode/Profile" value={`${data.status?.trading_mode || "-"} / ${data.status?.trading_profile || "-"}`} />
-            <Card label="DB Connected" value={data.status?.db_connected ? "yes" : "no"} />
-            <Card label="Kill Switch" value={data.control_state?.kill_switch?.enabled ? "enabled" : "disabled"} />
-            <Card label="Executor" value={data.control_state?.executor?.enabled ? "running" : "paused"} />
-            <Card label="Critical Recon (15m)" value={String(data.status?.critical_reconciliation_events_15m ?? "-")} />
-          </section>
-
-          <section style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 20 }}>
-            <Card label="Rejected Orders (24h)" value={String(data.risk_kpis?.rejected_orders_24h ?? 0)} />
-            <Card label="Open Exposure (USDT)" value={num(data.risk_kpis?.open_exposure_usdt, 6)} />
-            <Card label="Realized PnL (24h)" value={num(data.risk_kpis?.realized_pnl_24h, 6)} />
-            <Card label="Critical Events (24h)" value={String(data.risk_kpis?.critical_events_24h ?? 0)} />
-            <Card label="Circuit Breakers (24h)" value={String(data.risk_kpis?.circuit_breaker_triggers_24h ?? 0)} />
-            <Card label="Max Drawdown (30d)" value={num(data.performance?.max_drawdown_30d, 6)} />
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Service Health (Realtime)</h2>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <Th>Service</Th>
-                  <Th>Status</Th>
-                  <Th>HTTP</Th>
-                  <Th>Latency ms</Th>
-                  <Th>Endpoint</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {services.map((s) => (
-                  <tr key={s.name}>
-                    <Td>{s.name}</Td>
-                    <Td>{s.ok ? "healthy" : "degraded"}</Td>
-                    <Td>{String(s.status)}</Td>
-                    <Td>{String(s.latency_ms)}</Td>
-                    <Td>{s.url}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Operator Controls</h2>
-            <div style={{ ...panelStyle, marginBottom: 12 }}>
-              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-                <label>
-                  <div style={labelStyle}>Operator Token</div>
-                  <input
-                    style={inputStyle}
-                    type="password"
-                    value={operatorToken}
-                    onChange={(e) => setOperatorToken(e.target.value)}
-                    placeholder="x-operator-token"
-                  />
-                </label>
-                <label>
-                  <div style={labelStyle}>Operator ID</div>
-                  <input
-                    style={inputStyle}
-                    value={operatorId}
-                    onChange={(e) => setOperatorId(e.target.value)}
-                    placeholder="web-operator"
-                  />
-                </label>
-                <label>
-                  <div style={labelStyle}>Reason</div>
-                  <input
-                    style={inputStyle}
-                    value={actionReason}
-                    onChange={(e) => setActionReason(e.target.value)}
-                    placeholder="manual_web_action"
-                  />
-                </label>
+    <main style={shellStyle}>
+        <section style={heroStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span className="viper-pulse" style={{ width: 10, height: 10, borderRadius: "50%", background: online ? "#00e5a8" : "#ff6478", display: "inline-block" }} />
+                <span style={{ color: "#9cc4ff", fontWeight: 600 }}>
+                  {online ? "Realtime online" : "Backend offline"} {lastUpdated ? `- ${new Date(lastUpdated).toLocaleTimeString()}` : ""}
+                </span>
               </div>
-
-              <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                <button
-                  style={btnStyle}
-                  disabled={!operatorToken || !!controlBusy}
-                  onClick={() =>
-                    void sendControl("kill-switch", {
-                      enabled: !(data.control_state?.kill_switch?.enabled ?? false),
-                      reason: actionReason,
-                    })
-                  }
-                >
-                  {controlBusy === "kill-switch"
-                    ? "Applying..."
-                    : data.control_state?.kill_switch?.enabled
-                      ? "Disable Kill Switch"
-                      : "Enable Kill Switch"}
-                </button>
-
-                <button
-                  style={btnStyle}
-                  disabled={!operatorToken || !!controlBusy}
-                  onClick={() =>
-                    void sendControl("executor", {
-                      enabled: !(data.control_state?.executor?.enabled ?? false),
-                      reason: actionReason,
-                    })
-                  }
-                >
-                  {controlBusy === "executor"
-                    ? "Applying..."
-                    : data.control_state?.executor?.enabled
-                      ? "Pause Executor"
-                      : "Resume Executor"}
-                </button>
-              </div>
-
-              <div style={{ marginTop: 14 }}>
-                <h3 style={{ margin: "0 0 8px 0", fontSize: 16 }}>Risk Limits</h3>
-                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                  <label>
-                    <div style={labelStyle}>Max Daily Loss Pct</div>
-                    <input style={inputStyle} value={maxDailyLossPct} onChange={(e) => setMaxDailyLossPct(e.target.value)} />
-                  </label>
-                  <label>
-                    <div style={labelStyle}>Max Leverage</div>
-                    <input style={inputStyle} value={maxLeverage} onChange={(e) => setMaxLeverage(e.target.value)} />
-                  </label>
-                  <label>
-                    <div style={labelStyle}>Risk Per Trade Pct</div>
-                    <input style={inputStyle} value={riskPerTradePct} onChange={(e) => setRiskPerTradePct(e.target.value)} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <button
-                    style={btnStyle}
-                    disabled={!operatorToken || !!controlBusy}
-                    onClick={() =>
-                      void sendControl("risk-limits", {
-                        max_daily_loss_pct: Number(maxDailyLossPct),
-                        max_leverage: Number(maxLeverage),
-                        risk_per_trade_pct: Number(riskPerTradePct),
-                        reason: actionReason,
-                      })
-                    }
-                  >
-                    {controlBusy === "risk-limits" ? "Applying..." : "Apply Risk Limits"}
-                  </button>
-                </div>
-              </div>
-
-              {!!controlMessage && <p style={{ marginTop: 10, color: "#1d4d1d" }}>{controlMessage}</p>}
-            </div>
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Performance</h2>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <Th>Window</Th>
-                  <Th>Total Trades</Th>
-                  <Th>Total PnL</Th>
-                  <Th>Win Rate</Th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <Td>24h</Td>
-                  <Td>{String(data.performance?.last_24h?.total_trades ?? "-")}</Td>
-                  <Td>{num(data.performance?.last_24h?.total_pnl, 6)}</Td>
-                  <Td>{num(data.performance?.last_24h?.win_rate, 6)}</Td>
-                </tr>
-                <tr>
-                  <Td>7d</Td>
-                  <Td>{String(data.performance?.last_7d?.total_trades ?? "-")}</Td>
-                  <Td>{num(data.performance?.last_7d?.total_pnl, 6)}</Td>
-                  <Td>{num(data.performance?.last_7d?.win_rate, 6)}</Td>
-                </tr>
-                <tr>
-                  <Td>30d</Td>
-                  <Td>{String(data.performance?.last_30d?.total_trades ?? "-")}</Td>
-                  <Td>{num(data.performance?.last_30d?.total_pnl, 6)}</Td>
-                  <Td>{num(data.performance?.last_30d?.win_rate, 6)}</Td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Timeline (events/signals/executions)</h2>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <Th>Timestamp</Th>
-                  <Th>Type</Th>
-                  <Th>Severity</Th>
-                  <Th>Category</Th>
-                  <Th>Symbol</Th>
-                  <Th>Data</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.slice(0, 20).map((evt) => (
-                  <tr key={evt.event_id}>
-                    <Td>{new Date(evt.timestamp).toLocaleString()}</Td>
-                    <Td>{evt.event_type}</Td>
-                    <Td>{evt.severity}</Td>
-                    <Td>{evt.category || "-"}</Td>
-                    <Td>{evt.symbol || "-"}</Td>
-                    <Td>
-                      <code style={{ fontSize: 12 }}>{JSON.stringify(evt.data ?? {}).slice(0, 140)}</code>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Open Positions</h2>
-            {positions.length === 0 ? (
-              <p>No open positions.</p>
-            ) : (
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <Th>Symbol</Th>
-                    <Th>Side</Th>
-                    <Th>Quantity</Th>
-                    <Th>Notional USDT</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {positions.map((p) => (
-                    <tr key={`${p.symbol}-${p.side}`}>
-                      <Td>{p.symbol}</Td>
-                      <Td>{p.side}</Td>
-                      <Td>{num(p.quantity, 6)}</Td>
-                      <Td>{num(p.notional_usdt, 6)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Recent Trades (limit 20)</h2>
-            {trades.length === 0 ? (
-              <p>No trades found.</p>
-            ) : (
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <Th>Opened</Th>
-                    <Th>Symbol</Th>
-                    <Th>Side</Th>
-                    <Th>Status</Th>
-                    <Th>Qty</Th>
-                    <Th>Entry</Th>
-                    <Th>Exit</Th>
-                    <Th>PnL</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.map((t) => (
-                    <tr key={t.trade_id}>
-                      <Td>{new Date(t.opened_at).toLocaleString()}</Td>
-                      <Td>{t.symbol}</Td>
-                      <Td>{t.side}</Td>
-                      <Td>{t.status}</Td>
-                      <Td>{num(t.quantity, 6)}</Td>
-                      <Td>{num(t.entry_price, 6)}</Td>
-                      <Td>{num(t.exit_price, 6)}</Td>
-                      <Td>{num(t.pnl, 6)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
-
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ marginBottom: 8 }}>Phase 5 Checklist + Evidence</h2>
-            <div style={panelStyle}>
-              <ul style={{ margin: 0 }}>
-                {checklist.map((item) => (
-                  <li key={item.label} style={{ color: item.ok ? "#1d4d1d" : "#7a1f1f" }}>
-                    [{item.ok ? "OK" : "PENDING"}] {item.label}
-                  </li>
-                ))}
-              </ul>
-              <p style={{ marginTop: 10, marginBottom: 0 }}>
-                Evidence: fetched_at={data.source.fetchedAt}, trades={trades.length}, events={events.length}, services={services.length}
+              <h1 style={{ margin: 0, fontSize: "clamp(2rem, 6vw, 3rem)", letterSpacing: 0.2 }}>ViperTrade Control Center</h1>
+              <p style={{ margin: "10px 0 0", color: "#94acda" }}>
+                {String(data?.status?.trading_mode || "-").toUpperCase()} / {String(data?.status?.trading_profile || "-").toUpperCase()} · Risk {String(data?.status?.risk_status || "-")}
               </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+                <span style={{ ...miniBadgeStyle, ...(executionMode === "live" ? statusTone(false) : statusTone(true)) }}>
+                  {executionMode === "live" ? "LIVE MODE" : "PAPER MODE"}
+                </span>
+                <span
+                  style={{
+                    ...miniBadgeStyle,
+                    ...(executorVisualState === "running"
+                      ? statusTone(true)
+                      : executorVisualState === "paused"
+                        ? { borderColor: "rgba(247,181,0,0.45)", color: "#ffd978", background: "rgba(108,78,8,0.22)" }
+                        : statusTone(false)),
+                  }}
+                >
+                  Executor {executorVisualState.toUpperCase()}
+                </span>
+                <span
+                  style={{
+                    ...miniBadgeStyle,
+                    ...(killSwitchEnabled
+                      ? statusTone(false)
+                      : { borderColor: "rgba(56,249,165,0.38)", color: "#8cf7c6", background: "rgba(8,73,49,0.18)" }),
+                  }}
+                >
+                  Kill Switch {killSwitchEnabled ? "ON" : "OFF"}
+                </span>
+              </div>
             </div>
-          </section>
-        </>
-      )}
+
+            <div style={{ ...pillStyle, ...statusTone(online) }}>{online ? "Backend ONLINE" : "Backend OFFLINE"}</div>
+          </div>
+
+          <div style={heroGridStyle}>
+            <MetricCard label="Realized PnL (24h)" value={num(data?.risk_kpis?.realized_pnl_24h, 6)} accent="var(--accent-2)" />
+            <MetricCard label="Open Exposure (USDT)" value={num(data?.risk_kpis?.open_exposure_usdt, 4)} accent="var(--accent)" />
+            <MetricCard label="Open Positions" value={String(positions.length)} accent="#9e8bff" />
+            <MetricCard label="Recent Trades" value={String(trades.length)} accent="#f7b500" />
+          </div>
+        </section>
+
+        {loading && <Panel title="Loading">Loading dashboard...</Panel>}
+        {!!error && <Panel title="Erro" tone="danger">{error}</Panel>}
+        {!!data?.partial && (
+          <Panel title="Partial data mode" tone="warn">
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {(data.warnings ?? []).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+
+        {data && (
+          <>
+            <section style={stackCardsStyle}>
+              <div style={panelBoxStyle}>
+                <h2 style={h2Style}>Service Flow (Realtime)</h2>
+                <p style={mutedStyle}>Dynamic network map based on live health and latency.</p>
+                <ServiceFlowGraph services={flowServices} executionMode={executionMode} executorVisualState={executorVisualState} />
+              </div>
+
+              <div style={panelBoxStyle}>
+                <h2 style={h2Style}>System State</h2>
+                <div style={miniGridStyle}>
+                  <MetricTiny label="DB" value={data.status?.db_connected ? "connected" : "disconnected"} ok={!!data.status?.db_connected} />
+                  <MetricTiny label="Operator Controls" value={data.control_state?.operator_controls_enabled ? "enabled" : "disabled"} ok={!!data.control_state?.operator_controls_enabled} />
+                  <MetricTiny label="Kill Switch" value={data.control_state?.kill_switch?.enabled ? "enabled" : "disabled"} ok={!data.control_state?.kill_switch?.enabled} />
+                  <MetricTiny label="Executor Controls" value={data.control_state?.executor?.enabled ? "running" : "paused"} ok={!!data.control_state?.executor?.enabled} />
+                  <MetricTiny label="Executor Service" value={executorServiceOk ? "running" : "down"} ok={executorServiceOk} />
+                  <MetricTiny label="Critical Recon (15m)" value={String(data.status?.critical_reconciliation_events_15m ?? "-")} ok={(data.status?.critical_reconciliation_events_15m ?? 0) === 0} />
+                </div>
+              </div>
+            </section>
+
+            <section style={panelBoxStyle}>
+              <h2 style={h2Style}>Token Decision Board</h2>
+              <p style={mutedStyle}>
+                Unified token view with direction, consensus, action state and dominant block ({data.market_signals?.updated_at ? new Date(data.market_signals.updated_at).toLocaleTimeString() : "-"}).
+              </p>
+              {tokenDecisionBoard.length === 0 ? (
+                <p style={mutedStyle}>No token decision data available.</p>
+              ) : (
+                <div style={tokenGridStyle}>
+                  {tokenDecisionBoard.map((item) => (
+                    <TokenDecisionBoardCard key={item.symbol} item={item} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section style={panelBoxStyle}>
+              <h2 style={h2Style}>Exchange Accuracy (Historical)</h2>
+              <p style={mutedStyle}>
+                Horizon {String(data.analytics_scores?.horizon_minutes ?? "-")}m · Lookback {String(data.analytics_scores?.lookback_hours ?? "-")}h
+                {data.analytics_scores?.updated_at ? ` · Updated ${new Date(data.analytics_scores.updated_at).toLocaleTimeString()}` : ""}
+              </p>
+              {analyticsExchanges.length === 0 ? (
+                <p style={mutedStyle}>No exchange score data yet.</p>
+              ) : (
+                <div style={tradeListStyle}>
+                  {analyticsExchanges.map((row) => (
+                    <article key={row.exchange} style={tradeRowStyle}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <strong>{row.exchange.toUpperCase()}</strong>
+                        {exchangeLeader?.exchange === row.exchange && (
+                          <span style={{ ...miniBadgeStyle, ...statusTone(true) }}>leader</span>
+                        )}
+                      </div>
+                      <div style={{ textAlign: "right", color: "#9fb6dc" }}>{row.evaluated} samples</div>
+                      <div style={{ textAlign: "right", color: "#90dcff", fontWeight: 700 }}>{pct(row.hit_rate)} hit</div>
+                      <div style={{ textAlign: "right", color: row.avg_forward_return >= 0 ? "#38f9a5" : "#ff8f8f" }}>
+                        {pct(row.avg_forward_return)} avg
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section style={stackCardsStyle}>
+              <div style={panelBoxStyle}>
+                <h2 style={h2Style}>Open Positions</h2>
+                <p style={mutedStyle}>Bybit prices from latest market snapshot ({marketSnapshotLabel}).</p>
+                {openPositionsView.length === 0 ? (
+                  <p style={mutedStyle}>No open positions.</p>
+                ) : (
+                  <div style={positionListStyle}>
+                    {openPositionsView.map((p) => {
+                      const sideLong = p.side.toLowerCase() === "long";
+                      const pnlColor = (p.unrealizedPnl ?? 0) >= 0 ? "#38f9a5" : "#ff8f8f";
+                      return (
+                        <article key={`${p.symbol}-${p.side}`} style={positionRowStyle}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <strong style={{ minWidth: 86 }}>{p.symbol}</strong>
+                            <span style={{ color: sideLong ? "#38f9a5" : "#ff8f8f", fontWeight: 700, fontSize: 13 }}>
+                              {sideLong ? "LONG" : "SHORT"}
+                            </span>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={positionLabelStyle}>Qty</div>
+                            <div>{num(p.quantity, 6)}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={positionLabelStyle}>Entry</div>
+                            <div>{num(p.entryPrice, 6)}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={positionLabelStyle}>Bybit / Delta</div>
+                            <div>{typeof p.markPrice === "number" ? num(p.markPrice, 6) : "-"}</div>
+                            <div style={{ color: "#8fb7e8", fontSize: 12 }}>
+                              {typeof p.markDeltaPct === "number" ? pct(p.markDeltaPct) : "-"}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={positionLabelStyle}>Trigger</div>
+                            <div style={{ color: p.trailing_stop_activated ? "#38f9a5" : "#90dcff", fontWeight: 700 }}>
+                              {p.triggerState}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={positionLabelStyle}>PnL</div>
+                            <div style={{ color: pnlColor, fontWeight: 700 }}>
+                              {typeof p.unrealizedPnl === "number" ? usdAdaptive(p.unrealizedPnl) : "-"}
+                              {typeof p.unrealizedPnlPct === "number" ? ` (${pct(p.unrealizedPnlPct)})` : ""}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={panelBoxStyle}>
+                <h2 style={h2Style}>Recent Closed Trades</h2>
+                {closedTrades.length === 0 ? (
+                  <p style={mutedStyle}>No closed trades yet. PnL appears after position close.</p>
+                ) : (
+                  <>
+                    <div style={tradeStatsGridStyle}>
+                      <article style={tradeStatCardStyle}>
+                        <div style={tradeStatLabelStyle}>24h Win Rate</div>
+                        <div style={tradeStatValueStyle}>{pct(tradeStats.winRate24h)}</div>
+                      </article>
+                      <article style={tradeStatCardStyle}>
+                        <div style={tradeStatLabelStyle}>7d Win Rate</div>
+                        <div style={tradeStatValueStyle}>{pct(tradeStats.winRate7d)}</div>
+                      </article>
+                      <article style={{ ...tradeStatCardStyle, borderColor: "rgba(56,249,165,0.48)", background: "rgba(10, 52, 45, 0.28)" }}>
+                        <div style={tradeStatLabelStyle}>24h PnL</div>
+                        <div style={{ ...tradeStatValueStyle, color: (tradeStats.pnl24h ?? 0) >= 0 ? "#38f9a5" : "#ff8f8f" }}>
+                          {usd(tradeStats.pnl24h)}
+                        </div>
+                      </article>
+                      <article style={tradeStatCardStyle}>
+                        <div style={tradeStatLabelStyle}>Total Trades</div>
+                        <div style={tradeStatValueStyle}>{String(tradeStats.totalTrades ?? "-")}</div>
+                      </article>
+                    </div>
+
+                    <div style={tradeListStyle}>
+                      {closedTrades.map((t) => {
+                        const sideLong = t.side.toUpperCase() === "LONG";
+                        const notional = t.quantity * t.entry_price;
+                        const pnlPct = notional > 0 ? (t.pnl ?? 0) / notional : null;
+                        const refTs = t.closed_at || t.opened_at;
+                        const closeReason = prettifyReason(t.close_reason ?? "closed");
+                        return (
+                          <article key={t.trade_id} style={tradeRowStyle}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                              <strong style={{ minWidth: 74 }}>{t.symbol.replace("USDT", "")}</strong>
+                              <span style={{ color: sideLong ? "#38f9a5" : "#ff8f8f", fontWeight: 700, fontSize: 13 }}>
+                                {sideLong ? "LONG" : "SHORT"}
+                              </span>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ color: "#9fb6dc" }}>
+                                {num(t.entry_price, 4)} {typeof t.exit_price === "number" ? `→ ${num(t.exit_price, 4)}` : "→ -"}
+                              </div>
+                              <div style={{ color: "#7088b6", fontSize: 12 }}>{usd(notional)}</div>
+                            </div>
+                            <div style={{ color: (pnlPct ?? 0) >= 0 ? "#38f9a5" : "#ff8f8f", textAlign: "right", fontWeight: 700 }}>
+                              {usdAdaptive(t.pnl ?? 0)}
+                              <div style={{ fontSize: 12 }}>{pct(pnlPct)}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ color: "#9fb6dc", fontSize: 12 }}>{closeReason}</div>
+                              <div style={{ color: "#7f95bd" }}>{new Date(refTs).toLocaleTimeString()}</div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+
+          </>
+        )}
     </main>
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Panel({ title, children, tone = "normal" }: { title: string; children: ReactNode; tone?: "normal" | "warn" | "danger" }) {
+  const toneStyle: CSSProperties =
+    tone === "warn"
+      ? { borderColor: "rgba(247, 181, 0, 0.6)", background: "rgba(105, 79, 4, 0.25)", color: "#ffd978" }
+      : tone === "danger"
+        ? { borderColor: "rgba(255, 100, 120, 0.6)", background: "rgba(96, 16, 30, 0.28)", color: "#ff9aa8" }
+        : {};
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, background: "#fafafa" }}>
-      <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontWeight: 700 }}>{value}</div>
+    <section style={{ ...panelBoxStyle, ...toneStyle }}>
+      <h2 style={{ ...h2Style, marginBottom: 8 }}>{title}</h2>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function MetricCard({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <article
+      style={{
+        border: `1px solid ${accent}55`,
+        borderRadius: 14,
+        padding: 14,
+        background: "linear-gradient(180deg, rgba(4,20,43,0.85), rgba(6,14,27,0.9))",
+        boxShadow: `inset 0 0 0 1px ${accent}22`,
+      }}
+    >
+      <div style={{ fontSize: 12, letterSpacing: 0.4, textTransform: "uppercase", color: "#86a7dc", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: accent }}>{value}</div>
+    </article>
+  );
+}
+
+function MetricTiny({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 10, background: "rgba(9, 16, 33, 0.82)" }}>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontWeight: 700, color: ok ? "#38f9a5" : "#ff8f8f" }}>{value}</div>
+    </div>
+  );
+}
+
+function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
+  const tone = regimeTone(item.regime);
+  const stateStyle =
+    item.stateTone === "positive"
+      ? statusTone(true)
+      : item.stateTone === "negative"
+        ? statusTone(false)
+        : { borderColor: "rgba(120,148,205,0.35)", color: "#a7bddf", background: "rgba(33,54,96,0.18)" };
+  return (
+    <article style={tokenCardStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <strong style={{ fontSize: 15 }}>{item.symbol}</strong>
+        <span
+          style={{
+            ...miniBadgeStyle,
+            ...(tone.ok === undefined
+              ? { borderColor: "rgba(120,148,205,0.35)", color: "#a7bddf", background: "rgba(33,54,96,0.18)" }
+              : statusTone(tone.ok)),
+          }}
+        >
+          {tone.label}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+        <span style={{ ...miniBadgeStyle, ...stateStyle }}>{item.stateLabel}</span>
+        <span style={{ color: "#8fb4e4", fontSize: 12 }}>
+          Consensus {item.consensusCount}/{item.exchangesAvailable}
+        </span>
+      </div>
+      <div style={{ color: "#d5e3ff", fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
+        Trend {item.trendScore >= 0 ? "+" : ""}
+        {num(item.trendScore, 3)}
+      </div>
+      <div style={{ color: "#8fb4e4", fontSize: 13, marginBottom: 8 }}>
+        Bybit {item.bybitRegime}
+      </div>
+      <div style={{ color: "#9fb6dc", fontSize: 13, marginBottom: 4 }}>
+        Last 10: {item.recentSummary}
+      </div>
+      <div style={{ color: "#7f99c8", fontSize: 12 }}>
+        Main block: {item.mainBlock}
+      </div>
+    </article>
+  );
+}
+
+function ServiceFlowGraph({
+  services,
+  executionMode,
+  executorVisualState,
+}: {
+  services: DashboardPayload["services"];
+  executionMode: "paper" | "live";
+  executorVisualState: "running" | "paused" | "down";
+}) {
+  const serviceMap = new Map(services.map((svc) => [svc.name, svc]));
+  const nodes = [
+    { name: "bybit", x: 110, y: 140 },
+    { name: "binance", x: 110, y: 280 },
+    { name: "okx", x: 110, y: 420 },
+    { name: "market-data", x: 360, y: 280 },
+    { name: "strategy", x: 610, y: 280 },
+    { name: "executor", x: 820, y: 280 },
+    { name: "api", x: 1080, y: 100 },
+    { name: "monitor", x: 1080, y: 190 },
+    { name: "analytics", x: 1080, y: 280 },
+    { name: "backtest", x: 1080, y: 370 },
+    { name: "bybit-private", x: 1080, y: 460 },
+  ] as const;
+
+  const links = [
+    ["bybit", "market-data", -10],
+    ["binance", "market-data", 0],
+    ["okx", "market-data", 10],
+    ["market-data", "strategy", 0],
+    ["strategy", "executor", 0],
+    ["executor", "api", -18],
+    ["executor", "monitor", -6],
+    ["executor", "analytics", 6],
+    ["executor", "backtest", 18],
+    ["executor", "bybit-private", 28],
+  ] as const;
+
+  const nodeByName = new Map(nodes.map((n) => [n.name, n]));
+  const nodeOk = (name: string) => serviceMap.get(name)?.ok ?? false;
+  const nodeColor = (name: string) => serviceColor(name, nodeOk(name));
+  const nodeLatency = (name: string) => serviceMap.get(name)?.latency_ms ?? 0;
+  const executorStateColor =
+    executorVisualState === "running" ? "#38f9a5" : executorVisualState === "paused" ? "#ffd978" : "#ff8f8f";
+
+  return (
+    <div style={serviceFlowCanvasStyle}>
+      <svg viewBox="0 0 1180 560" style={{ width: "100%", height: "auto", display: "block" }}>
+        <defs>
+          <radialGradient id="viper-hub-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="rgba(0,229,168,0.35)" />
+            <stop offset="100%" stopColor="rgba(0,229,168,0)" />
+          </radialGradient>
+        </defs>
+
+        <rect x={0} y={0} width={1180} height={560} fill="rgba(4,10,20,0.35)" />
+        <circle cx={820} cy={280} r={170} fill="url(#viper-hub-glow)" />
+
+        {links.map(([from, to, curve]) => {
+          const a = nodeByName.get(from);
+          const b = nodeByName.get(to);
+          if (!a || !b) return null;
+          const path = `M ${a.x} ${a.y} C ${a.x + 140} ${a.y + curve}, ${b.x - 140} ${b.y + curve}, ${b.x} ${b.y}`;
+          const active = nodeOk(from) && nodeOk(to);
+          return (
+            <g key={`${from}-${to}`}>
+              <path
+                d={path}
+                fill="none"
+                stroke={active ? "rgba(95,145,255,0.55)" : "rgba(255,100,120,0.25)"}
+                strokeWidth={active ? 1.8 : 1.2}
+                className={active ? "service-flow-link" : undefined}
+              />
+              {active && (
+                <circle r={2.6} fill="#9fc4ff" className="service-flow-dot">
+                  <animateMotion dur="3.8s" repeatCount="indefinite" path={path} />
+                </circle>
+              )}
+            </g>
+          );
+        })}
+
+        {nodes.map((node) => {
+          const ok = nodeOk(node.name);
+          const color = nodeColor(node.name);
+          const latencyLabel = `${nodeLatency(node.name)}ms`;
+          const executorSubLabel =
+            node.name === "executor"
+              ? `${executorVisualState} · ${executionMode}`
+              : "";
+          return (
+            <g key={node.name}>
+              <circle cx={node.x} cy={node.y} r={ok ? 16 : 14} fill="rgba(7,16,30,0.95)" stroke={color} strokeWidth={1.6} />
+              {ok && <circle cx={node.x} cy={node.y} r={26} fill="none" stroke={color} strokeWidth={1} opacity={0.35} className="service-flow-ring" />}
+              <circle cx={node.x} cy={node.y} r={5} fill={color} opacity={0.92} />
+              <text x={node.x} y={node.y - 32} fill="#cadcff" fontSize="12" fontWeight="700" textAnchor="middle">
+                {node.name}
+              </text>
+              <text x={node.x} y={node.y + 40} fill="#8da7d7" fontSize="11" fontWeight="600" textAnchor="middle">
+                {latencyLabel}
+              </text>
+              {executorSubLabel && (
+                <text x={node.x} y={node.y + 56} fill="#8da7d7" fontSize="11" textAnchor="middle">
+                  {executorSubLabel}
+                </text>
+              )}
+              {!ok && node.name !== "executor" && (
+                <text x={node.x} y={node.y + 56} fill="#ff9aa8" fontSize="11" textAnchor="middle">
+                  down
+                </text>
+              )}
+              {node.name === "executor" && (
+                <circle cx={node.x} cy={node.y} r={31} fill="none" stroke={executorStateColor} strokeWidth={1.2} opacity={0.32} />
+              )}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
 
 function Th({ children }: { children: ReactNode }) {
-  return <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: "8px 10px" }}>{children}</th>;
+  return (
+    <th style={{ textAlign: "left", borderBottom: "1px solid var(--line)", padding: "10px 10px", color: "#95b1df", fontWeight: 600, fontSize: 12 }}>
+      {children}
+    </th>
+  );
 }
 
-function Td({ children }: { children: ReactNode }) {
-  return <td style={{ borderBottom: "1px solid #eee", padding: "8px 10px", verticalAlign: "top" }}>{children}</td>;
+function Td({ children, style, colSpan }: { children: ReactNode; style?: CSSProperties; colSpan?: number }) {
+  return (
+    <td
+      colSpan={colSpan}
+      style={{ borderBottom: "1px solid rgba(95,137,203,0.15)", padding: "9px 10px", verticalAlign: "top", fontSize: 13, ...style }}
+    >
+      {children}
+    </td>
+  );
 }
+
+const shellStyle: CSSProperties = {
+  padding: "24px clamp(14px, 3vw, 28px) 32px",
+  maxWidth: 1460,
+  margin: "0 auto",
+  display: "grid",
+  gap: 16,
+};
+
+const heroStyle: CSSProperties = {
+  border: "1px solid rgba(95, 137, 203, 0.35)",
+  borderRadius: 18,
+  padding: "18px clamp(14px, 2vw, 24px)",
+  background:
+    "linear-gradient(130deg, rgba(7,18,37,0.95) 0%, rgba(9,29,60,0.85) 42%, rgba(11,44,62,0.65) 100%)",
+  boxShadow: "0 18px 45px rgba(2, 6, 14, 0.5)",
+};
+
+const heroGridStyle: CSSProperties = {
+  marginTop: 16,
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+};
+
+const splitTwoStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+};
+
+const stackCardsStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "1fr",
+};
+
+const panelBoxStyle: CSSProperties = {
+  border: "1px solid var(--line)",
+  borderRadius: 14,
+  padding: 14,
+  background: "var(--panel)",
+  backdropFilter: "blur(6px)",
+};
+
+const flowWrapStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
+  marginBottom: 14,
+};
+
+const flowNodeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "7px 10px",
+  background: "rgba(6, 15, 30, 0.9)",
+};
+
+const serviceFlowCanvasStyle: CSSProperties = {
+  border: "1px solid rgba(95,137,203,0.2)",
+  borderRadius: 12,
+  overflow: "hidden",
+  minHeight: 560,
+  background:
+    "radial-gradient(circle at 50% 46%, rgba(0,229,168,0.1) 0%, rgba(0,229,168,0) 38%), linear-gradient(180deg, rgba(6,14,27,0.92), rgba(4,10,20,0.92))",
+};
 
 const tableStyle: CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
-  border: "1px solid #ddd",
-  borderRadius: 8,
+  border: "1px solid var(--line)",
+  borderRadius: 12,
   overflow: "hidden",
-  background: "#fff",
+  background: "var(--panel-strong)",
 };
 
-const panelStyle: CSSProperties = {
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  padding: 12,
-  background: "#fafafa",
+const h2Style: CSSProperties = {
+  margin: 0,
+  fontSize: 18,
+};
+
+const h3Style: CSSProperties = {
+  margin: 0,
+  fontSize: 15,
+  color: "#9fb9e5",
+};
+
+const mutedStyle: CSSProperties = {
+  color: "var(--muted)",
+  marginTop: 6,
 };
 
 const labelStyle: CSSProperties = {
   marginBottom: 6,
   fontSize: 12,
-  color: "#444",
+  color: "#9cb8e6",
 };
 
 const inputStyle: CSSProperties = {
   width: "100%",
-  height: 34,
-  border: "1px solid #bbb",
-  borderRadius: 6,
+  height: 36,
+  border: "1px solid var(--line)",
+  borderRadius: 8,
   padding: "0 10px",
   boxSizing: "border-box",
+  background: "rgba(8, 18, 36, 0.9)",
+  color: "#e5eeff",
 };
 
-const btnStyle: CSSProperties = {
-  height: 34,
-  border: "1px solid #444",
-  borderRadius: 6,
-  background: "#fff",
-  padding: "0 12px",
+const btnBase: CSSProperties = {
+  height: 36,
+  border: "1px solid",
+  borderRadius: 8,
+  padding: "0 14px",
   cursor: "pointer",
+  fontWeight: 600,
+};
+
+const btnStylePrimary: CSSProperties = {
+  ...btnBase,
+  borderColor: "rgba(0,229,168,0.8)",
+  background: "rgba(0, 139, 103, 0.24)",
+  color: "#4afac0",
+};
+
+const btnStyleSecondary: CSSProperties = {
+  ...btnBase,
+  borderColor: "rgba(17,196,255,0.8)",
+  background: "rgba(17, 102, 138, 0.24)",
+  color: "#90dcff",
+};
+
+const miniBadgeStyle: CSSProperties = {
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "3px 8px",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const miniGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+};
+
+const tokenGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+};
+
+const tokenCardStyle: CSSProperties = {
+  border: "1px solid var(--line)",
+  borderRadius: 12,
+  padding: 10,
+  background: "rgba(7, 16, 32, 0.78)",
+};
+
+const tokenMetricStyle: CSSProperties = {
+  border: "1px solid rgba(95,137,203,0.18)",
+  borderRadius: 8,
+  padding: "8px 6px",
+  textAlign: "center",
+  background: "rgba(8, 19, 38, 0.8)",
+};
+
+const marketSignalGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+};
+
+const tradeStatsGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  marginBottom: 12,
+};
+
+const tradeStatCardStyle: CSSProperties = {
+  border: "1px solid rgba(95,137,203,0.28)",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "rgba(8, 16, 32, 0.8)",
+};
+
+const tradeStatLabelStyle: CSSProperties = {
+  fontSize: 12,
+  color: "#96afda",
+  marginBottom: 4,
+};
+
+const tradeStatValueStyle: CSSProperties = {
+  fontSize: 22,
+  fontWeight: 700,
+  color: "#dbe8ff",
+  lineHeight: 1.1,
+};
+
+const tradeListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const tradeRowStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  alignItems: "center",
+  gridTemplateColumns: "minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(90px, 0.8fr) minmax(84px, 0.8fr)",
+  border: "1px solid rgba(95,137,203,0.24)",
+  borderRadius: 8,
+  padding: "9px 10px",
+  background: "linear-gradient(180deg, rgba(7,14,28,0.88), rgba(6,12,24,0.92))",
+};
+
+const positionListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const positionRowStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  alignItems: "center",
+  gridTemplateColumns:
+    "minmax(140px, 1.1fr) minmax(88px, 0.72fr) minmax(88px, 0.72fr) minmax(112px, 0.92fr) minmax(138px, 1fr) minmax(132px, 0.92fr)",
+  border: "1px solid rgba(95,137,203,0.24)",
+  borderRadius: 8,
+  padding: "9px 10px",
+  background: "linear-gradient(180deg, rgba(7,14,28,0.88), rgba(6,12,24,0.92))",
+  overflowX: "auto",
+};
+
+const positionLabelStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#92a9d2",
+  marginBottom: 2,
+};
+
+const pillStyle: CSSProperties = {
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "8px 12px",
+  fontSize: 12,
+  fontWeight: 700,
 };

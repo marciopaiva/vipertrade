@@ -8,6 +8,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
 use sqlx::PgPool;
 use std::convert::Infallible;
+use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
 use warp::http::StatusCode;
@@ -25,6 +27,7 @@ struct AppState {
     default_max_daily_loss_pct: f64,
     default_max_leverage: f64,
     default_risk_per_trade_pct: f64,
+    position_config: PositionConfigStore,
 }
 
 #[derive(Serialize)]
@@ -82,15 +85,101 @@ struct RiskLimitsStatus {
 
 #[derive(Serialize)]
 struct PositionItem {
+    trade_id: String,
     symbol: String,
     side: String,
     quantity: f64,
     notional_usdt: f64,
+    entry_price: f64,
+    trailing_stop_activated: bool,
+    trailing_stop_peak_price: Option<f64>,
+    trailing_stop_final_distance_pct: Option<f64>,
+    stop_loss_price: Option<f64>,
+    trailing_activation_price: Option<f64>,
+    fixed_take_profit_price: Option<f64>,
+    break_even_price: Option<f64>,
 }
 
 #[derive(Serialize)]
 struct PositionsResponse {
     items: Vec<PositionItem>,
+}
+
+#[derive(Clone, Default)]
+struct PositionConfigStore {
+    global: GlobalPositionConfig,
+    pairs: HashMap<String, PairPositionConfig>,
+}
+
+#[derive(Clone)]
+struct GlobalPositionConfig {
+    trailing_enabled: bool,
+    trailing_min_move_threshold_pct: f64,
+}
+
+impl Default for GlobalPositionConfig {
+    fn default() -> Self {
+        Self {
+            trailing_enabled: true,
+            trailing_min_move_threshold_pct: 0.002,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PairPositionConfig {
+    stop_loss_pct: f64,
+    take_profit_pct: f64,
+    trailing_by_profile: HashMap<String, TrailingProfileConfig>,
+    trailing_enabled: Option<bool>,
+}
+
+#[derive(Clone)]
+struct TrailingProfileConfig {
+    activate_after_profit_pct: f64,
+    move_to_break_even_at: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairsFile {
+    global: Option<PairsGlobalSection>,
+    #[serde(flatten)]
+    pairs: HashMap<String, PairFileSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairsGlobalSection {
+    trailing_stop: Option<GlobalTrailingSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlobalTrailingSection {
+    enabled: Option<bool>,
+    min_move_threshold_pct: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairFileSection {
+    risk: Option<PairRiskSection>,
+    trailing_stop: Option<PairTrailingSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairRiskSection {
+    stop_loss_pct: Option<f64>,
+    take_profit_pct: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairTrailingSection {
+    enabled: Option<bool>,
+    by_profile: Option<HashMap<String, PairTrailingProfileSection>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairTrailingProfileSection {
+    activate_after_profit_pct: Option<f64>,
+    move_to_break_even_at: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -245,6 +334,143 @@ fn resolve_database_url() -> Option<String> {
         "postgresql://{}:{}@{}:{}/{}",
         user, pass, host, port, db
     ))
+}
+
+fn load_position_config(path: &str) -> PositionConfigStore {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            eprintln!("api: failed to read position config '{}': {}", path, err);
+            return PositionConfigStore::default();
+        }
+    };
+
+    let parsed: PairsFile = match serde_yaml::from_str(&raw) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("api: failed to parse position config '{}': {}", path, err);
+            return PositionConfigStore::default();
+        }
+    };
+
+    let global = GlobalPositionConfig {
+        trailing_enabled: parsed
+            .global
+            .as_ref()
+            .and_then(|g| g.trailing_stop.as_ref())
+            .and_then(|t| t.enabled)
+            .unwrap_or(true),
+        trailing_min_move_threshold_pct: parsed
+            .global
+            .as_ref()
+            .and_then(|g| g.trailing_stop.as_ref())
+            .and_then(|t| t.min_move_threshold_pct)
+            .unwrap_or(0.002),
+    };
+
+    let mut pairs = HashMap::new();
+    for (symbol, pair) in parsed.pairs {
+        let Some(risk) = pair.risk else {
+            continue;
+        };
+        let stop_loss_pct = risk.stop_loss_pct.unwrap_or(0.015);
+        let take_profit_pct = risk.take_profit_pct.unwrap_or(0.03);
+        let trailing_enabled = pair.trailing_stop.as_ref().and_then(|t| t.enabled);
+        let trailing_by_profile = pair
+            .trailing_stop
+            .and_then(|t| t.by_profile)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(profile, cfg)| {
+                (
+                    profile.to_uppercase(),
+                    TrailingProfileConfig {
+                        activate_after_profit_pct: cfg.activate_after_profit_pct.unwrap_or(0.015),
+                        move_to_break_even_at: cfg.move_to_break_even_at.unwrap_or(0.02),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        pairs.insert(
+            symbol.to_uppercase(),
+            PairPositionConfig {
+                stop_loss_pct,
+                take_profit_pct,
+                trailing_by_profile,
+                trailing_enabled,
+            },
+        );
+    }
+
+    PositionConfigStore { global, pairs }
+}
+
+fn default_trailing_profile() -> TrailingProfileConfig {
+    TrailingProfileConfig {
+        activate_after_profit_pct: 0.015,
+        move_to_break_even_at: 0.02,
+    }
+}
+
+fn resolve_position_triggers(
+    state: &AppState,
+    symbol: &str,
+    side: &str,
+    entry_price: f64,
+) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
+    if entry_price <= 0.0 {
+        return (None, None, None, None);
+    }
+
+    let pair_cfg = state.position_config.pairs.get(&symbol.to_uppercase());
+    let stop_loss_pct = pair_cfg.map(|p| p.stop_loss_pct).unwrap_or(0.015);
+    let take_profit_pct = pair_cfg.map(|p| p.take_profit_pct).unwrap_or(0.03);
+    let trailing_enabled = pair_cfg
+        .and_then(|p| p.trailing_enabled)
+        .unwrap_or(state.position_config.global.trailing_enabled);
+    let trailing_profile = pair_cfg
+        .and_then(|p| p.trailing_by_profile.get(&state.trading_profile.to_uppercase()).cloned())
+        .unwrap_or_else(default_trailing_profile);
+
+    let is_long = side.eq_ignore_ascii_case("long");
+    let stop_loss_price = if is_long {
+        entry_price * (1.0 - stop_loss_pct)
+    } else {
+        entry_price * (1.0 + stop_loss_pct)
+    };
+    let fixed_take_profit_price = if is_long {
+        entry_price * (1.0 + take_profit_pct)
+    } else {
+        entry_price * (1.0 - take_profit_pct)
+    };
+
+    let trailing_activation_price = if trailing_enabled {
+        Some(if is_long {
+            entry_price * (1.0 + trailing_profile.activate_after_profit_pct)
+        } else {
+            entry_price * (1.0 - trailing_profile.activate_after_profit_pct)
+        })
+    } else {
+        None
+    };
+
+    let break_even_price = if trailing_enabled {
+        Some(if is_long {
+            entry_price * (1.0 + trailing_profile.move_to_break_even_at)
+        } else {
+            entry_price * (1.0 - trailing_profile.move_to_break_even_at)
+        })
+    } else {
+        None
+    };
+
+    (
+        Some(stop_loss_price),
+        trailing_activation_price,
+        Some(fixed_take_profit_price),
+        break_even_price,
+    )
 }
 
 fn read_non_empty_env(name: &str) -> Option<String> {
@@ -633,16 +859,19 @@ async fn positions_handler(state: Arc<AppState>) -> impl Reply {
         );
     };
 
-    let rows = sqlx::query_as::<_, (String, String, f64, f64)>(
+    let rows = sqlx::query_as::<_, (String, String, String, f64, f64, bool, Option<f64>, Option<f64>)>(
         "SELECT
+             trade_id::text,
              symbol,
              side,
-             COALESCE(SUM(quantity)::double precision, 0),
-             COALESCE(SUM(quantity * entry_price)::double precision, 0)
+             COALESCE(quantity::double precision, 0),
+             COALESCE((quantity * entry_price)::double precision, 0),
+             COALESCE(trailing_stop_activated, false),
+             trailing_stop_peak_price::double precision,
+             trailing_stop_final_distance_pct::double precision
          FROM trades
          WHERE status = 'open'
-         GROUP BY symbol, side
-         ORDER BY symbol, side",
+         ORDER BY opened_at DESC",
     )
     .fetch_all(pool)
     .await;
@@ -651,11 +880,26 @@ async fn positions_handler(state: Arc<AppState>) -> impl Reply {
         Ok(rows) => {
             let items = rows
                 .into_iter()
-                .map(|(symbol, side, quantity, notional_usdt)| PositionItem {
-                    symbol,
-                    side,
-                    quantity,
-                    notional_usdt,
+                .map(|(trade_id, symbol, side, quantity, notional_usdt, trailing_stop_activated, trailing_stop_peak_price, trailing_stop_final_distance_pct)| {
+                    let entry_price = if quantity > 0.0 { notional_usdt / quantity } else { 0.0 };
+                    let (stop_loss_price, trailing_activation_price, fixed_take_profit_price, break_even_price) =
+                        resolve_position_triggers(state.as_ref(), &symbol, &side, entry_price);
+
+                    PositionItem {
+                        trade_id,
+                        symbol,
+                        side,
+                        quantity,
+                        notional_usdt,
+                        entry_price,
+                        trailing_stop_activated,
+                        trailing_stop_peak_price,
+                        trailing_stop_final_distance_pct,
+                        stop_loss_price,
+                        trailing_activation_price,
+                        fixed_take_profit_price,
+                        break_even_price,
+                    }
                 })
                 .collect();
             json_ok(&PositionsResponse { items })
@@ -1505,10 +1749,13 @@ async fn main() {
         operator_auth_mode: std::env::var("OPERATOR_AUTH_MODE")
             .unwrap_or_else(|_| "token".to_string()),
         operator_api_token: read_non_empty_env("OPERATOR_API_TOKEN"),
-        executor_default_enabled: read_bool_env("EXECUTOR_ENABLE_LIVE_ORDERS", false),
+        executor_default_enabled: read_bool_env("EXECUTOR_DEFAULT_ENABLED", true),
         default_max_daily_loss_pct: read_f64_env("MAX_DAILY_LOSS_PCT", 3.0),
         default_max_leverage: read_f64_env("MAX_LEVERAGE", 2.0),
         default_risk_per_trade_pct: read_f64_env("RISK_PER_TRADE_PCT", 1.25),
+        position_config: load_position_config(
+            &std::env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string()),
+        ),
     });
 
     let api_v1 = warp::path("api").and(warp::path("v1"));

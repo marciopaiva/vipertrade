@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "ViperTrade Dashboard",
   description: "Operational dashboard for ViperTrade backend services",

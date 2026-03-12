@@ -2,6 +2,7 @@
 members = [
     "crates/viper-domain",
     "services/market-data",
+    "services/analytics",
     "services/strategy", 
     "services/executor",
     "services/monitor",
