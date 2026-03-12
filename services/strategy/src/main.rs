@@ -1127,6 +1127,7 @@ fn evaluate_open_trade_exit(
     (None, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enforce_entry_guards(
     symbol: &str,
     trend: f64,
