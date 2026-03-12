@@ -7,15 +7,18 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 - Rust microservices (market-data, strategy, executor, monitor, backtest, api)
 - PostgreSQL + Redis
 - Web dashboard (Next.js)
-- Orquestracao com Podman Compose
+- Orquestracao com Docker Compose ou Podman Compose
 
-## Ambiente recomendado (WSL Fedora + Podman)
+## Ambiente recomendado (WSL Fedora + Docker Desktop)
 
 ### Pre-requisitos
 
 - WSL Fedora
-- Podman + podman-compose (via scripts/compose.sh)
+- Docker Desktop no Windows com WSL integration habilitada para a distro Fedora
+- Opcional: Podman + podman-compose como fallback
 - Git
+
+Os scripts detectam automaticamente `docker compose` quando ele estiver disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para Podman.
 
 ### Setup rapido
 
@@ -32,6 +35,13 @@ cp compose/.env.example compose/.env
 
 ```bash
 ./scripts/compose.sh up -d
+```
+
+Forcar engine especifico:
+
+```bash
+COMPOSE_PROVIDER=docker-compose-plugin ./scripts/compose.sh up -d
+CONTAINER_ENGINE=docker ./scripts/build-base-images.sh
 ```
 
 ### Modo host local (fallback de emergencia)
@@ -122,7 +132,7 @@ Workflow: `.github/workflows/ci.yml`
 
 ## Status atual (RC sem tag)
 
-- Infra e servicos sobem com Podman Compose
+- Infra e servicos sobem com Docker Compose e Podman Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
 
