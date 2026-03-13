@@ -2246,7 +2246,7 @@ async fn fetch_bybit_closed_pnl_between(
                 fetch_bybit_closed_pnl_page(chunk_start, chunk_end, page_size, cursor.as_deref())
                     .await;
             if result.status != 200 || result.ret_code != Some(0) {
-                return Err(result.error.or_else(|| result.ret_msg).unwrap_or_else(|| {
+                return Err(result.error.or(result.ret_msg).unwrap_or_else(|| {
                     format!("http={} retCode={:?}", result.status, result.ret_code)
                 }));
             }
@@ -2386,7 +2386,7 @@ async fn fetch_bybit_positions() -> Result<Vec<Value>, String> {
     loop {
         let result = fetch_bybit_position_page("USDT", cursor.as_deref()).await;
         if result.status != 200 || result.ret_code != Some(0) {
-            return Err(result.error.or_else(|| result.ret_msg).unwrap_or_else(|| {
+            return Err(result.error.or(result.ret_msg).unwrap_or_else(|| {
                 format!("http={} retCode={:?}", result.status, result.ret_code)
             }));
         }
