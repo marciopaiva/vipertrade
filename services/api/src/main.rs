@@ -1447,21 +1447,19 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
         error: if ok {
             None
         } else {
-            Some(
-                result.error.unwrap_or_else(|| {
-                    format!(
-                        "retCode={} retMsg={}",
-                        result
-                            .ret_code
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        result
-                            .ret_msg
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string())
-                    )
-                }),
-            )
+            Some(result.error.unwrap_or_else(|| {
+                format!(
+                    "retCode={} retMsg={}",
+                    result
+                        .ret_code
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    result
+                        .ret_msg
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string())
+                )
+            }))
         },
         ret_code: result.ret_code,
         ret_msg: result.ret_msg,

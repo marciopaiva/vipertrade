@@ -182,8 +182,14 @@ fn resolve_bybit_credentials() -> (String, String) {
     };
 
     (
-        scoped.0.or_else(|| from("BYBIT_API_KEY")).unwrap_or_default(),
-        scoped.1.or_else(|| from("BYBIT_API_SECRET")).unwrap_or_default(),
+        scoped
+            .0
+            .or_else(|| from("BYBIT_API_KEY"))
+            .unwrap_or_default(),
+        scoped
+            .1
+            .or_else(|| from("BYBIT_API_SECRET"))
+            .unwrap_or_default(),
     )
 }
 
