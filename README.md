@@ -87,6 +87,27 @@ Para parar:
 ./scripts/compose.sh logs -f api
 ```
 
+### Validar Rust local com a base builder
+
+Depois de gerar as imagens base, voce pode rodar os checks de Rust dentro do
+builder padrao sem depender do toolchain do host:
+
+```bash
+docker run --rm \
+  -e PYO3_PYTHON=/usr/bin/python3 \
+  -v "$PWD":/work \
+  -w /work \
+  vipertrade-base-rust-builder:1.83 \
+  cargo check --locked
+
+docker run --rm \
+  -e PYO3_PYTHON=/usr/bin/python3 \
+  -v "$PWD":/work \
+  -w /work \
+  vipertrade-base-rust-builder:1.83 \
+  cargo clippy --all-targets -- -D warnings
+```
+
 ### Parar ambiente
 
 ```bash
