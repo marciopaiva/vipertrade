@@ -16,7 +16,7 @@ Derived from `VIPERTRADE_SPEC.md` (blocos 0-15), with formal phase gating for ex
 Scope:
 
 - Architecture baseline, contracts, deterministic runtime path.
-- Podman compose hardening and local CI parity.
+- Container runtime hardening and local CI parity.
 - Executor live-control, idempotency, fill persistence, reconciliation safety controls.
 
 Spec mapping:
@@ -26,7 +26,7 @@ Spec mapping:
 
 Done evidence:
 
-- End-to-end flow stable on WSL Fedora + Podman.
+- End-to-end flow stabilized on WSL Fedora in the original validation window.
 - CI and CI Local Parity green on closure commit.
 - Controlled testnet smoke validated and cleaned.
 
