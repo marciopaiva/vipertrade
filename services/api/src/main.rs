@@ -21,6 +21,7 @@ struct AppState {
     db_pool: Option<PgPool>,
     trading_mode: String,
     trading_profile: String,
+    trade_profile_label: String,
     initial_capital_usd: f64,
     operator_auth_mode: String,
     operator_api_token: Option<String>,
@@ -48,6 +49,7 @@ struct StatusResponse {
     service: &'static str,
     trading_mode: String,
     trading_profile: String,
+    trade_profile_label: String,
     db_connected: bool,
     operator_auth_mode: String,
     operator_controls_enabled: bool,
@@ -106,12 +108,6 @@ struct PositionsResponse {
     items: Vec<PositionItem>,
 }
 
-#[derive(Clone, Default)]
-struct PositionConfigStore {
-    global: GlobalPositionConfig,
-    pairs: HashMap<String, PairPositionConfig>,
-}
-
 #[derive(Clone)]
 struct GlobalPositionConfig {
     trailing_enabled: bool,
@@ -141,6 +137,22 @@ struct TrailingProfileConfig {
     move_to_break_even_at: f64,
 }
 
+#[derive(Clone, Default)]
+struct ModePositionConfig {
+    stop_loss_pct: Option<f64>,
+    take_profit_pct: Option<f64>,
+    trailing_enabled: Option<bool>,
+    fixed_take_profit_enabled: Option<bool>,
+    trailing: Option<TrailingProfileConfig>,
+}
+
+#[derive(Clone, Default)]
+struct PositionConfigStore {
+    global: GlobalPositionConfig,
+    pairs: HashMap<String, PairPositionConfig>,
+    mode_profiles: HashMap<String, ModePositionConfig>,
+}
+
 #[derive(Debug, Deserialize)]
 struct PairsFile {
     global: Option<PairsGlobalSection>,
@@ -150,7 +162,23 @@ struct PairsFile {
 
 #[derive(Debug, Deserialize)]
 struct PairsGlobalSection {
+    mode_profiles: Option<HashMap<String, ModeProfileSection>>,
     trailing_stop: Option<GlobalTrailingSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModeProfileSection {
+    stop_loss_pct: Option<f64>,
+    take_profit_pct: Option<f64>,
+    trailing_enabled: Option<bool>,
+    fixed_take_profit_enabled: Option<bool>,
+    trailing_stop: Option<ModeTrailingSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModeTrailingSection {
+    activate_after_profit_pct: Option<f64>,
+    move_to_break_even_at: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,6 +400,13 @@ impl TradingMode {
         }
     }
 
+    fn trade_profile_label(self) -> &'static str {
+        match self {
+            Self::Testnet => "SMOKE",
+            Self::Paper | Self::Mainnet => "STANDARD",
+        }
+    }
+
     fn bybit_env(self) -> &'static str {
         match self {
             Self::Testnet => "testnet",
@@ -492,6 +527,34 @@ fn load_position_config(path: &str) -> PositionConfigStore {
             .unwrap_or(0.002),
     };
 
+    let mode_profiles = parsed
+        .global
+        .as_ref()
+        .and_then(|g| g.mode_profiles.as_ref())
+        .map(|profiles| {
+            profiles
+                .iter()
+                .map(|(mode, cfg)| {
+                    (
+                        mode.to_uppercase(),
+                        ModePositionConfig {
+                            stop_loss_pct: cfg.stop_loss_pct,
+                            take_profit_pct: cfg.take_profit_pct,
+                            trailing_enabled: cfg.trailing_enabled,
+                            fixed_take_profit_enabled: cfg.fixed_take_profit_enabled,
+                            trailing: cfg.trailing_stop.as_ref().map(|ts| TrailingProfileConfig {
+                                activate_after_profit_pct: ts
+                                    .activate_after_profit_pct
+                                    .unwrap_or(0.015),
+                                move_to_break_even_at: ts.move_to_break_even_at.unwrap_or(0.02),
+                            }),
+                        },
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
     let mut pairs = HashMap::new();
     for (symbol, pair) in parsed.pairs {
         let Some(risk) = pair.risk else {
@@ -527,7 +590,11 @@ fn load_position_config(path: &str) -> PositionConfigStore {
         );
     }
 
-    PositionConfigStore { global, pairs }
+    PositionConfigStore {
+        global,
+        pairs,
+        mode_profiles,
+    }
 }
 
 fn default_trailing_profile() -> TrailingProfileConfig {
@@ -548,16 +615,37 @@ fn resolve_position_triggers(
     }
 
     let pair_cfg = state.position_config.pairs.get(&symbol.to_uppercase());
-    let stop_loss_pct = pair_cfg.map(|p| p.stop_loss_pct).unwrap_or(0.015);
-    let take_profit_pct = pair_cfg.map(|p| p.take_profit_pct).unwrap_or(0.03);
-    let trailing_enabled = pair_cfg
-        .and_then(|p| p.trailing_enabled)
-        .unwrap_or(state.position_config.global.trailing_enabled);
-    let trailing_profile = pair_cfg
-        .and_then(|p| {
-            p.trailing_by_profile
-                .get(&state.trading_profile.to_uppercase())
-                .cloned()
+    let mode_cfg = state
+        .position_config
+        .mode_profiles
+        .get(&state.trading_mode.to_uppercase());
+    let stop_loss_pct = mode_cfg
+        .and_then(|cfg| cfg.stop_loss_pct)
+        .or_else(|| pair_cfg.map(|p| p.stop_loss_pct))
+        .unwrap_or(0.015);
+    let take_profit_pct = mode_cfg
+        .and_then(|cfg| cfg.take_profit_pct)
+        .or_else(|| pair_cfg.map(|p| p.take_profit_pct))
+        .unwrap_or(0.03);
+    let trailing_enabled = mode_cfg
+        .and_then(|cfg| cfg.trailing_enabled)
+        .or_else(|| {
+            pair_cfg
+                .and_then(|p| p.trailing_enabled)
+                .or(Some(state.position_config.global.trailing_enabled))
+        })
+        .unwrap_or(true);
+    let fixed_take_profit_enabled = mode_cfg
+        .and_then(|cfg| cfg.fixed_take_profit_enabled)
+        .unwrap_or(true);
+    let trailing_profile = mode_cfg
+        .and_then(|cfg| cfg.trailing.clone())
+        .or_else(|| {
+            pair_cfg.and_then(|p| {
+                p.trailing_by_profile
+                    .get(&state.trading_profile.to_uppercase())
+                    .cloned()
+            })
         })
         .unwrap_or_else(default_trailing_profile);
 
@@ -567,12 +655,15 @@ fn resolve_position_triggers(
     } else {
         entry_price * (1.0 + stop_loss_pct)
     };
-    let fixed_take_profit_price = if is_long {
-        entry_price * (1.0 + take_profit_pct)
+    let fixed_take_profit_price = if fixed_take_profit_enabled {
+        Some(if is_long {
+            entry_price * (1.0 + take_profit_pct)
+        } else {
+            entry_price * (1.0 - take_profit_pct)
+        })
     } else {
-        entry_price * (1.0 - take_profit_pct)
+        None
     };
-
     let trailing_activation_price = if trailing_enabled {
         Some(if is_long {
             entry_price * (1.0 + trailing_profile.activate_after_profit_pct)
@@ -582,7 +673,6 @@ fn resolve_position_triggers(
     } else {
         None
     };
-
     let break_even_price = if trailing_enabled {
         Some(if is_long {
             entry_price * (1.0 + trailing_profile.move_to_break_even_at)
@@ -596,7 +686,7 @@ fn resolve_position_triggers(
     (
         Some(stop_loss_price),
         trailing_activation_price,
-        Some(fixed_take_profit_price),
+        fixed_take_profit_price,
         break_even_price,
     )
 }
@@ -981,6 +1071,7 @@ async fn status_handler(state: Arc<AppState>) -> impl Reply {
         service: "viper-api",
         trading_mode: state.trading_mode.clone(),
         trading_profile: state.trading_profile.clone(),
+        trade_profile_label: state.trade_profile_label.clone(),
         db_connected: state.db_pool.is_some(),
         operator_auth_mode: state.operator_auth_mode.clone(),
         operator_controls_enabled: state.operator_api_token.is_some()
@@ -2899,10 +2990,13 @@ async fn main() {
         None
     };
 
+    let trading_mode = TradingMode::from_env();
+
     let state = Arc::new(AppState {
         db_pool,
-        trading_mode: TradingMode::from_env().as_status_label().to_string(),
+        trading_mode: trading_mode.as_status_label().to_string(),
         trading_profile: std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string()),
+        trade_profile_label: trading_mode.trade_profile_label().to_string(),
         initial_capital_usd: read_f64_env("INITIAL_CAPITAL_USD", 100.0),
         operator_auth_mode: std::env::var("OPERATOR_AUTH_MODE")
             .unwrap_or_else(|_| "token".to_string()),

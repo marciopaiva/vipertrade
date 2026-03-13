@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
 use serde_json::{json, Value};
@@ -20,6 +21,7 @@ use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDe
 #[derive(Debug, Clone)]
 struct StrategyConfig {
     profile: String,
+    trading_mode: String,
     global: Value,
     pairs: HashMap<String, Value>,
     profiles: Value,
@@ -47,6 +49,7 @@ struct OpenTradeSnapshot {
     side: String,
     quantity: f64,
     entry_price: f64,
+    opened_at: DateTime<Utc>,
     trailing_stop_activated: bool,
     trailing_stop_peak_price: f64,
     trailing_stop_final_distance_pct: f64,
@@ -78,6 +81,7 @@ impl StrategyConfig {
         pairs_path: &str,
         profiles_path: &str,
         profile: &str,
+        trading_mode: &str,
     ) -> Result<Self, Box<dyn Error>> {
         let pairs_raw = fs::read_to_string(pairs_path)?;
         let profiles_raw = fs::read_to_string(profiles_path)?;
@@ -104,6 +108,7 @@ impl StrategyConfig {
 
         Ok(Self {
             profile: profile.to_uppercase(),
+            trading_mode: trading_mode.to_uppercase(),
             global,
             pairs,
             profiles: profiles_json,
@@ -116,6 +121,34 @@ impl StrategyConfig {
 
     fn pair_cfg(&self, symbol: &str) -> Option<&Value> {
         self.pairs.get(&symbol.to_uppercase())
+    }
+
+    fn pair_mode_cfg(&self, symbol: &str) -> Option<&Value> {
+        self.pair_cfg(symbol)
+            .and_then(|value| cfg_get(value, &["mode_profiles", self.trading_mode.as_str()]))
+    }
+
+    fn mode_cfg(&self) -> Option<&Value> {
+        cfg_get(&self.global, &["mode_profiles", self.trading_mode.as_str()])
+    }
+
+    fn mode_flag(&self, key: &str, default: bool) -> bool {
+        self.mode_cfg()
+            .and_then(|value| cfg_get(value, &[key]))
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
+    }
+
+    fn mode_f64(&self, key: &str) -> Option<f64> {
+        self.mode_cfg()
+            .and_then(|value| cfg_get(value, &[key]))
+            .and_then(Value::as_f64)
+    }
+
+    fn mode_i64(&self, key: &str) -> Option<i64> {
+        self.mode_cfg()
+            .and_then(|value| cfg_get(value, &[key]))
+            .and_then(Value::as_i64)
     }
 
     fn max_daily_loss_pct(&self) -> f64 {
@@ -158,11 +191,15 @@ impl StrategyConfig {
 
     fn max_position_usdt(&self, symbol: &str) -> f64 {
         let global_max = cfg_f64(&self.global, &["smart_copy", "max_position_usdt"], 30.0);
+        let mode_pair_max = self
+            .pair_mode_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["risk", "max_position_usdt"]))
+            .and_then(Value::as_f64);
         let pair_max = self
             .pair_cfg(symbol)
             .map(|v| cfg_f64(v, &["risk", "max_position_usdt"], global_max))
             .unwrap_or(global_max);
-        pair_max.min(global_max)
+        mode_pair_max.unwrap_or(pair_max).min(global_max)
     }
 
     fn atr_multiplier(&self, symbol: &str) -> f64 {
@@ -172,15 +209,21 @@ impl StrategyConfig {
     }
 
     fn max_spread_pct(&self, symbol: &str) -> f64 {
-        self.pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["liquidity", "max_spread_pct"], 0.001))
-            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "max_spread_pct"], 0.001))
+        self.mode_f64("max_spread_pct").unwrap_or_else(|| {
+            self.pair_cfg(symbol)
+                .map(|v| cfg_f64(v, &["liquidity", "max_spread_pct"], 0.001))
+                .unwrap_or_else(|| {
+                    cfg_f64(&self.global, &["entry_filters", "max_spread_pct"], 0.001)
+                })
+        })
     }
 
     fn max_atr_pct(&self, symbol: &str) -> f64 {
-        self.pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["entry_filters", "max_atr_pct"], 0.05))
-            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "max_atr_pct"], 0.05))
+        self.mode_f64("max_atr_pct").unwrap_or_else(|| {
+            self.pair_cfg(symbol)
+                .map(|v| cfg_f64(v, &["entry_filters", "max_atr_pct"], 0.05))
+                .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "max_atr_pct"], 0.05))
+        })
     }
 
     fn min_trend_score_for_side(&self, symbol: &str, side: &str) -> f64 {
@@ -189,6 +232,10 @@ impl StrategyConfig {
         } else {
             "min_trend_score_long"
         };
+
+        if let Some(value) = self.mode_f64(side_key) {
+            return value;
+        }
 
         self.pair_cfg(symbol)
             .map(|v| {
@@ -242,6 +289,10 @@ impl StrategyConfig {
             "min_signal_confirmation_ticks_long"
         };
 
+        if let Some(value) = self.mode_i64(side_key) {
+            return value.max(1) as usize;
+        }
+
         self.pair_cfg(symbol)
             .and_then(|v| cfg_get(v, &["entry_filters", side_key]))
             .and_then(Value::as_u64)
@@ -260,6 +311,10 @@ impl StrategyConfig {
         } else {
             "stop_loss_cooldown_minutes_long"
         };
+
+        if let Some(value) = self.mode_i64(side_key) {
+            return value.max(0);
+        }
 
         self.pair_cfg(symbol)
             .map(|v| {
@@ -289,6 +344,10 @@ impl StrategyConfig {
             "min_volume_ratio_long"
         };
 
+        if let Some(value) = self.mode_f64(side_key) {
+            return value;
+        }
+
         self.pair_cfg(symbol)
             .map(|v| {
                 cfg_f64(
@@ -312,6 +371,11 @@ impl StrategyConfig {
         } else {
             ("rsi_long_min", "rsi_long_max", 50.0, 68.0)
         };
+
+        if let (Some(min_value), Some(max_value)) = (self.mode_f64(min_key), self.mode_f64(max_key))
+        {
+            return (min_value, max_value);
+        }
 
         let min_value = self
             .pair_cfg(symbol)
@@ -371,26 +435,49 @@ impl StrategyConfig {
     }
 
     fn min_volume_24h_usdt(&self, symbol: &str) -> i64 {
-        self.pair_cfg(symbol)
-            .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
-            .unwrap_or_else(|| {
-                cfg_i64(
-                    &self.global,
-                    &["entry_filters", "min_volume_24h_usdt"],
-                    30_000_000,
-                )
-            })
+        self.mode_i64("min_volume_24h_usdt").unwrap_or_else(|| {
+            self.pair_cfg(symbol)
+                .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
+                .unwrap_or_else(|| {
+                    cfg_i64(
+                        &self.global,
+                        &["entry_filters", "min_volume_24h_usdt"],
+                        30_000_000,
+                    )
+                })
+        })
     }
 
     fn max_funding_rate_pct(&self) -> f64 {
-        cfg_f64(
-            &self.global,
-            &["entry_filters", "max_funding_rate_pct"],
-            0.015,
-        )
+        self.mode_f64("max_funding_rate_pct").unwrap_or_else(|| {
+            cfg_f64(
+                &self.global,
+                &["entry_filters", "max_funding_rate_pct"],
+                0.015,
+            )
+        })
+    }
+
+    fn require_multi_exchange_consensus(&self) -> bool {
+        self.mode_flag("require_multi_exchange_consensus", true)
+    }
+
+    fn require_btc_macro_alignment(&self) -> bool {
+        self.mode_flag("require_btc_macro_alignment", true)
+    }
+
+    fn permissive_entry(&self) -> bool {
+        self.mode_flag("permissive_entry", false)
+    }
+
+    fn min_hold_seconds(&self) -> i64 {
+        self.mode_i64("min_hold_seconds").unwrap_or(0).max(0)
     }
 
     fn stop_loss_pct(&self, symbol: &str) -> f64 {
+        if let Some(value) = self.mode_f64("stop_loss_pct") {
+            return value;
+        }
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "stop_loss_pct"], 0.015);
         }
@@ -401,6 +488,9 @@ impl StrategyConfig {
     }
 
     fn take_profit_pct(&self, symbol: &str) -> f64 {
+        if let Some(value) = self.mode_f64("take_profit_pct") {
+            return value;
+        }
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "take_profit_pct"], 0.03);
         }
@@ -410,6 +500,9 @@ impl StrategyConfig {
         0.03
     }
     fn trailing_config(&self, symbol: &str) -> Value {
+        if let Some(mode_cfg) = self.mode_cfg().and_then(|v| cfg_get(v, &["trailing_stop"])) {
+            return mode_cfg.clone();
+        }
         if let Some(pair) = self.pair_cfg(symbol) {
             if let Some(by_profile) = cfg_get(pair, &["trailing_stop", "by_profile", &self.profile])
             {
@@ -430,6 +523,13 @@ impl StrategyConfig {
     }
 
     fn trailing_enabled(&self, symbol: &str) -> bool {
+        if let Some(enabled) = self
+            .mode_cfg()
+            .and_then(|v| cfg_get(v, &["trailing_enabled"]))
+            .and_then(Value::as_bool)
+        {
+            return enabled;
+        }
         let pair_enabled = self
             .pair_cfg(symbol)
             .and_then(|v| cfg_get(v, &["trailing_stop", "enabled"]))
@@ -439,6 +539,13 @@ impl StrategyConfig {
                 .and_then(Value::as_bool)
                 .unwrap_or(true)
         })
+    }
+
+    fn fixed_take_profit_enabled(&self) -> bool {
+        self.mode_cfg()
+            .and_then(|v| cfg_get(v, &["fixed_take_profit_enabled"]))
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
     }
 
     fn trailing_min_move_threshold_pct(&self) -> f64 {
@@ -577,12 +684,13 @@ async fn fetch_open_trade_for_symbol(
     pool: &PgPool,
     symbol: &str,
 ) -> Result<Option<OpenTradeSnapshot>, sqlx::Error> {
-    let row = sqlx::query_as::<_, (String, String, f64, f64, bool, f64, f64)>(
+    let row = sqlx::query_as::<_, (String, String, f64, f64, DateTime<Utc>, bool, f64, f64)>(
         "SELECT
             trade_id::text,
             side,
             quantity::double precision,
             entry_price::double precision,
+            opened_at,
             COALESCE(trailing_stop_activated, false),
             COALESCE(trailing_stop_peak_price::double precision, entry_price::double precision),
             COALESCE(trailing_stop_final_distance_pct::double precision, 0)
@@ -601,6 +709,7 @@ async fn fetch_open_trade_for_symbol(
             side,
             quantity,
             entry_price,
+            opened_at,
             trailing_stop_activated,
             trailing_stop_peak_price,
             trailing_stop_final_distance_pct,
@@ -609,6 +718,7 @@ async fn fetch_open_trade_for_symbol(
             side,
             quantity,
             entry_price,
+            opened_at,
             trailing_stop_activated,
             trailing_stop_peak_price,
             trailing_stop_final_distance_pct,
@@ -845,26 +955,41 @@ fn execute_strategy_step(
                 "short"
             };
             let (rsi_min, rsi_max) = cfg.rsi_bounds_for_side(&symbol, entry_side);
-            let Some(btc_macro_penalty) = cfg.btc_macro_penalty_for_side(
-                &symbol,
-                entry_side,
-                &btc_regime,
-                btc_trend_score,
-                btc_consensus_count,
-            ) else {
-                return Ok(json!(false));
+            let btc_macro_penalty = if cfg.require_btc_macro_alignment() {
+                let Some(penalty) = cfg.btc_macro_penalty_for_side(
+                    &symbol,
+                    entry_side,
+                    &btc_regime,
+                    btc_trend_score,
+                    btc_consensus_count,
+                ) else {
+                    return Ok(json!(false));
+                };
+                penalty
+            } else {
+                0.0
             };
             let atr_pct = if current_price > 0.0 {
                 atr_14 / current_price
             } else {
                 1.0
             };
+            let consensus_long_ok = if cfg.require_multi_exchange_consensus() {
+                bullish_exchanges >= 2 && bearish_exchanges == 0 && exchanges_available >= 3
+            } else {
+                bybit_regime.eq_ignore_ascii_case("bullish")
+                    || regime.eq_ignore_ascii_case("bullish")
+            };
+            let consensus_short_ok = if cfg.require_multi_exchange_consensus() {
+                bearish_exchanges >= 2 && bullish_exchanges == 0 && exchanges_available >= 3
+            } else {
+                bybit_regime.eq_ignore_ascii_case("bearish")
+                    || regime.eq_ignore_ascii_case("bearish")
+            };
             let strict_long_ok = cfg.allow_long(&symbol)
                 && regime.eq_ignore_ascii_case("bullish")
                 && bybit_regime.eq_ignore_ascii_case("bullish")
-                && bullish_exchanges >= 2
-                && bearish_exchanges == 0
-                && exchanges_available >= 3
+                && consensus_long_ok
                 && trend_slope > 0.0
                 && ema_fast > ema_slow
                 && current_price >= ema_fast
@@ -877,22 +1002,57 @@ fn execute_strategy_step(
                     >= (cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty);
 
             let directional_ok = if raw_trend_score >= 0.0 {
-                cfg.allow_long(&symbol) && strict_long_ok
+                cfg.allow_long(&symbol)
+                    && if cfg.permissive_entry() {
+                        (bybit_regime.eq_ignore_ascii_case("bullish")
+                            || regime.eq_ignore_ascii_case("bullish")
+                            || raw_trend_score >= 0.0)
+                            && trend_slope >= 0.0
+                            && ema_fast >= ema_slow
+                            && current_price > 0.0
+                            && current_price >= ema_slow
+                            && rsi_14 >= rsi_min
+                            && rsi_14 <= rsi_max
+                            && macd_line >= macd_signal
+                            && macd_histogram >= 0.0
+                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && trend_score
+                                >= (cfg.min_trend_score_for_side(&symbol, entry_side)
+                                    + btc_macro_penalty)
+                    } else {
+                        strict_long_ok
+                    }
             } else {
                 cfg.allow_short(&symbol)
-                    && regime.eq_ignore_ascii_case("bearish")
-                    && bybit_regime.eq_ignore_ascii_case("bearish")
-                    && bearish_exchanges >= 2
-                    && bullish_exchanges == 0
-                    && exchanges_available >= 3
-                    && trend_slope < 0.0
-                    && ema_fast < ema_slow
-                    && current_price <= ema_fast
-                    && rsi_14 >= rsi_min
-                    && rsi_14 <= rsi_max
-                    && macd_line < macd_signal
-                    && macd_histogram < 0.0
-                    && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                    && if cfg.permissive_entry() {
+                        (bybit_regime.eq_ignore_ascii_case("bearish")
+                            || regime.eq_ignore_ascii_case("bearish")
+                            || raw_trend_score < 0.0)
+                            && trend_slope <= 0.0
+                            && ema_fast <= ema_slow
+                            && current_price > 0.0
+                            && current_price <= ema_slow
+                            && rsi_14 >= rsi_min
+                            && rsi_14 <= rsi_max
+                            && macd_line <= macd_signal
+                            && macd_histogram <= 0.0
+                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && trend_score
+                                >= (cfg.min_trend_score_for_side(&symbol, entry_side)
+                                    + btc_macro_penalty)
+                    } else {
+                        regime.eq_ignore_ascii_case("bearish")
+                            && bybit_regime.eq_ignore_ascii_case("bearish")
+                            && consensus_short_ok
+                            && trend_slope < 0.0
+                            && ema_fast < ema_slow
+                            && current_price <= ema_fast
+                            && rsi_14 >= rsi_min
+                            && rsi_14 <= rsi_max
+                            && macd_line < macd_signal
+                            && macd_histogram < 0.0
+                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                    }
             };
             Ok(json!(
                 spread_pct <= cfg.max_spread_pct(&symbol)
@@ -1056,6 +1216,23 @@ fn evaluate_open_trade_exit(
         );
     }
 
+    let min_hold_seconds = cfg.min_hold_seconds();
+    if min_hold_seconds > 0 {
+        let held_for = Utc::now()
+            .signed_duration_since(open.opened_at)
+            .num_seconds()
+            .max(0);
+        if held_for < min_hold_seconds {
+            return (
+                Some(create_hold_decision(
+                    symbol,
+                    &format!("min_hold_{}s", min_hold_seconds),
+                )),
+                None,
+            );
+        }
+    }
+
     let side = open.side.as_str();
     let sl_pct = cfg.stop_loss_pct(symbol);
     let hard_stop = if side == "Long" {
@@ -1079,25 +1256,27 @@ fn evaluate_open_trade_exit(
         );
     }
 
-    let tp_pct = cfg.take_profit_pct(symbol);
-    let fixed_take_profit = if side == "Long" {
-        open.entry_price * (1.0 + tp_pct)
-    } else {
-        open.entry_price * (1.0 - tp_pct)
-    };
-    if (side == "Long" && current_price >= fixed_take_profit)
-        || (side == "Short" && current_price <= fixed_take_profit)
-    {
-        return (
-            create_close_decision(
-                symbol,
-                side,
-                open.quantity,
-                current_price,
-                "take_profit_triggered",
-            ),
-            None,
-        );
+    if cfg.fixed_take_profit_enabled() {
+        let tp_pct = cfg.take_profit_pct(symbol);
+        let fixed_take_profit = if side == "Long" {
+            open.entry_price * (1.0 + tp_pct)
+        } else {
+            open.entry_price * (1.0 - tp_pct)
+        };
+        if (side == "Long" && current_price >= fixed_take_profit)
+            || (side == "Short" && current_price <= fixed_take_profit)
+        {
+            return (
+                create_close_decision(
+                    symbol,
+                    side,
+                    open.quantity,
+                    current_price,
+                    "take_profit_triggered",
+                ),
+                None,
+            );
+        }
     }
 
     let trailing_cfg = cfg.trailing_runtime_config(symbol);
@@ -1293,11 +1472,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let profile_config_path = std::env::var("PROFILE_CONFIG")
         .unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
     let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
+    let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
     let cfg = Arc::new(StrategyConfig::from_files(
         &strategy_config_path,
         &profile_config_path,
         &trading_profile,
+        &trading_mode,
     )?);
 
     let execution_plan = load_execution_plan(&pipeline_path)?;
@@ -1305,9 +1486,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime = Runtime::new();
     register_strategy_steps(&runtime, &execution_plan, Arc::clone(&cfg));
     println!(
-        "Loaded in-process plan '{}' with {} step(s) and profile {}",
+        "Loaded in-process plan '{}' with {} step(s) and profile {}/{}",
         execution_plan.name,
         execution_plan.steps.len(),
+        cfg.trading_mode,
         cfg.profile
     );
 

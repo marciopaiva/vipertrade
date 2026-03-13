@@ -3267,6 +3267,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "sqlx",
  "tokio",
@@ -3314,6 +3315,7 @@ dependencies = [
 name = "viper-strategy"
 version = "0.8.0-rc"
 dependencies = [
+ "chrono",
  "futures-util",
  "redis 0.27.6",
  "serde",

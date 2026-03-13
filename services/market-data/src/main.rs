@@ -482,6 +482,17 @@ fn resolve_runtime_bybit_env() -> String {
     }
 }
 
+fn prefer_bybit_for_decisions() -> bool {
+    matches!(
+        std::env::var("TRADING_MODE")
+            .unwrap_or_else(|_| "paper".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "testnet"
+    )
+}
+
 async fn fetch_json<T: for<'de> Deserialize<'de>>(
     http: &reqwest::Client,
     url: &str,
@@ -886,6 +897,7 @@ fn aggregate_signals(
         .find(|s| s.source == "bybit")
         .map(|s| s.current_price)
         .unwrap_or_else(|| median(&mut prices.clone()));
+    let bybit_signal = signals.iter().find(|s| s.source == "bybit");
 
     let mut weighted_sum = 0.0;
     let mut weight_total = 0.0;
@@ -982,15 +994,93 @@ fn aggregate_signals(
         0.0
     };
 
+    let prefer_bybit = prefer_bybit_for_decisions();
+    let current_price = if prefer_bybit {
+        bybit_signal
+            .map(|s| s.current_price)
+            .unwrap_or_else(|| median(&mut prices))
+    } else {
+        median(&mut prices)
+    };
+    let atr_14 = if prefer_bybit {
+        bybit_signal
+            .map(|s| s.atr_14)
+            .unwrap_or_else(|| median(&mut atrs))
+    } else {
+        median(&mut atrs)
+    };
+    let spread_pct = if prefer_bybit {
+        bybit_signal
+            .map(|s| s.spread_pct)
+            .unwrap_or_else(|| median(&mut spreads))
+    } else {
+        median(&mut spreads)
+    };
+    let trend_score = if prefer_bybit {
+        bybit_signal.map(|s| s.trend_score).unwrap_or(trend_score)
+    } else {
+        trend_score
+    };
+    let trend_slope = if prefer_bybit {
+        bybit_signal.map(|s| s.trend_slope).unwrap_or(trend_slope)
+    } else {
+        trend_slope
+    };
+    let ema_fast = if prefer_bybit {
+        bybit_signal.map(|s| s.ema_fast).unwrap_or(ema_fast)
+    } else {
+        ema_fast
+    };
+    let ema_slow = if prefer_bybit {
+        bybit_signal.map(|s| s.ema_slow).unwrap_or(ema_slow)
+    } else {
+        ema_slow
+    };
+    let rsi_14 = if prefer_bybit {
+        bybit_signal.map(|s| s.rsi_14).unwrap_or(rsi_14)
+    } else {
+        rsi_14
+    };
+    let macd_line = if prefer_bybit {
+        bybit_signal.map(|s| s.macd_line).unwrap_or(macd_line)
+    } else {
+        macd_line
+    };
+    let macd_signal = if prefer_bybit {
+        bybit_signal.map(|s| s.macd_signal).unwrap_or(macd_signal)
+    } else {
+        macd_signal
+    };
+    let macd_histogram = if prefer_bybit {
+        bybit_signal
+            .map(|s| s.macd_histogram)
+            .unwrap_or(macd_histogram)
+    } else {
+        macd_histogram
+    };
+    let volume_ratio = if prefer_bybit {
+        bybit_signal.map(|s| s.volume_ratio).unwrap_or(volume_ratio)
+    } else {
+        volume_ratio
+    };
+    let regime = if prefer_bybit {
+        bybit_signal
+            .map(|s| s.regime)
+            .unwrap_or(consensus_side)
+            .to_string()
+    } else {
+        consensus_side.to_string()
+    };
+
     Ok(MarketSignal {
         symbol: symbol.to_string(),
-        current_price: median(&mut prices),
+        current_price,
         bybit_price,
-        atr_14: median(&mut atrs),
+        atr_14,
         volume_24h,
         funding_rate,
         trend_score,
-        spread_pct: median(&mut spreads),
+        spread_pct,
         ema_fast,
         ema_slow,
         rsi_14,
@@ -1002,7 +1092,7 @@ fn aggregate_signals(
         btc_trend_score: 0.0,
         btc_consensus_count: 0,
         btc_volume_ratio: 1.0,
-        regime: consensus_side.to_string(),
+        regime,
         consensus_side: consensus_side.to_string(),
         consensus_count,
         exchanges_available,

@@ -87,10 +87,35 @@ Mode semantics:
 - `TRADING_MODE=testnet`: wallet/positions/trades on Bybit testnet and real testnet orders.
 - `TRADING_MODE=mainnet`: wallet/positions/trades on Bybit mainnet and real mainnet orders.
 
+Trade profile labels:
+
+- `TESTNET / SMOKE`: permissive smoke profile for order-flow validation.
+- `PAPER / STANDARD`: guarded rules with DB-backed simulation.
+- `MAINNET / STANDARD`: guarded rules with real exchange execution.
+
+Current `TESTNET / SMOKE` behavior:
+
+- Bybit is the preferred market/execution source.
+- `DOGEUSDT` uses a reduced `TESTNET`-only size cap of `8 USDT`.
+- Exit controls:
+  - `stop_loss_pct = 3%`
+  - fixed take profit disabled
+  - trailing arm at `+0.30%`
+  - break-even at `+0.40%`
+  - tighter trailing every `+0.10%`
+  - `min_hold_seconds = 45`
+
 Reconciliation behavior:
 
 - `EXECUTOR_RECONCILE_FIX=false` (default): detect/log only.
 - `EXECUTOR_RECONCILE_FIX=true`: applies conservative local reductions when local qty > Bybit qty.
+
+Native Bybit trailing stop:
+
+- After a successful exchange entry, executor attempts to configure Bybit native trailing with `POST /v5/position/trading-stop`.
+- Runtime remains hybrid: local trailing state stays visible in API/web and exchange-native trailing is also configured when Bybit position state is ready.
+- Executor retries short race conditions (`zero position` and validation-window errors) with a short backoff.
+- If Bybit still rejects the trailing setup after retries, local trailing continues to protect the position and logs must be reviewed.
 
 Smoke publish for ENTER order path:
 

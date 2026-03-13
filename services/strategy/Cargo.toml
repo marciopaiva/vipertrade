@@ -9,11 +9,12 @@ tokio = { version = "1", features = ["full", "tracing"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 redis = { workspace = true, features = ["tokio-comp"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
 futures-util = "0.3"
+chrono = { workspace = true }
 tupa-parser = { workspace = true }
 tupa-codegen = { workspace = true }
 tupa-runtime = { workspace = true }

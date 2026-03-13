@@ -23,6 +23,22 @@ Runtime source-of-truth by mode:
 - `TESTNET`: wallet/positions/trades/performance from Bybit testnet APIs.
 - `MAINNET`: wallet/positions/trades/performance from Bybit mainnet APIs.
 
+Operational trade-profile labels:
+
+- `TESTNET / SMOKE`: permissive smoke overlay for buy/sell/reconcile validation.
+- `PAPER / STANDARD`: guarded rules with simulated persistence.
+- `MAINNET / STANDARD`: guarded rules with real exchange persistence/execution.
+
+`TESTNET / SMOKE` keeps a mode-level overlay on top of pair config:
+
+- relaxed entry requirements to increase smoke-cycle coverage
+- `DOGEUSDT` size capped to `8 USDT`
+- `stop_loss_pct = 3%`
+- fixed take profit disabled
+- trailing enabled at `+0.30%` with break-even at `+0.40%`
+- tighter trailing ratchets every `+0.10%`
+- `min_hold_seconds = 45`
+
 ## Tupa Integration Model
 
 ### Control Plane (build/startup)
@@ -61,6 +77,15 @@ Runtime source-of-truth by mode:
   - output hash
   - decision hash
   - execution hash
+
+## Trailing Stop Model
+
+- Strategy maintains local trailing state for observability and deterministic API/web snapshots.
+- Executor also configures Bybit native trailing stop after successful `TESTNET`/`MAINNET` entries.
+- Native trailing setup is retried with short backoff to absorb exchange timing races while the position becomes visible.
+- Current runtime is intentionally hybrid:
+  - local trailing remains the fallback control plane
+  - exchange-native trailing gives direct protection and exchange-side visibility
 
 ## Non-Goals (Phase 1)
 

@@ -7,6 +7,86 @@
 # ═══════════════════════════════════════════════════════════
 
 global:
+  mode_profiles:
+    PAPER:
+      name: "paper_safe"
+      permissive_entry: false
+      require_multi_exchange_consensus: true
+      require_btc_macro_alignment: true
+      min_volume_24h_usdt: 30000000
+      max_spread_pct: 0.001
+      max_atr_pct: 0.05
+      max_funding_rate_pct: 0.015
+      min_trend_score_long: 0.25
+      min_trend_score_short: 0.25
+      min_signal_confirmation_ticks_long: 2
+      min_signal_confirmation_ticks_short: 4
+      min_volume_ratio_long: 0.90
+      min_volume_ratio_short: 0.95
+      rsi_long_min: 50
+      rsi_long_max: 80
+      rsi_short_min: 20
+      rsi_short_max: 50
+      stop_loss_cooldown_minutes_long: 3
+      stop_loss_cooldown_minutes_short: 5
+    TESTNET:
+      name: "testnet_smoke"
+      permissive_entry: true
+      require_multi_exchange_consensus: false
+      require_btc_macro_alignment: false
+      prefer_bybit_for_decisions: true
+      min_volume_24h_usdt: 0
+      max_spread_pct: 0.02
+      max_atr_pct: 1.0
+      max_funding_rate_pct: 1.0
+      stop_loss_pct: 0.03
+      fixed_take_profit_enabled: false
+      take_profit_pct: 0.003
+      trailing_enabled: true
+      trailing_stop:
+        activate_after_profit_pct: 0.003
+        initial_trail_pct: 0.003
+        ratchet_levels:
+          - at_profit_pct: 0.004
+            trail_pct: 0.002
+          - at_profit_pct: 0.005
+            trail_pct: 0.001
+        move_to_break_even_at: 0.004
+      min_hold_seconds: 45
+      min_trend_score_long: 0.0
+      min_trend_score_short: 0.0
+      min_signal_confirmation_ticks_long: 1
+      min_signal_confirmation_ticks_short: 1
+      min_volume_ratio_long: 0.0
+      min_volume_ratio_short: 0.0
+      rsi_long_min: 0
+      rsi_long_max: 100
+      rsi_short_min: 0
+      rsi_short_max: 100
+      stop_loss_cooldown_minutes_long: 0
+      stop_loss_cooldown_minutes_short: 0
+    MAINNET:
+      name: "mainnet_guarded"
+      permissive_entry: false
+      require_multi_exchange_consensus: true
+      require_btc_macro_alignment: true
+      min_volume_24h_usdt: 30000000
+      max_spread_pct: 0.001
+      max_atr_pct: 0.05
+      max_funding_rate_pct: 0.015
+      min_trend_score_long: 0.25
+      min_trend_score_short: 0.25
+      min_signal_confirmation_ticks_long: 2
+      min_signal_confirmation_ticks_short: 4
+      min_volume_ratio_long: 0.90
+      min_volume_ratio_short: 0.95
+      rsi_long_min: 50
+      rsi_long_max: 80
+      rsi_short_min: 20
+      rsi_short_max: 50
+      stop_loss_cooldown_minutes_long: 3
+      stop_loss_cooldown_minutes_short: 5
+
   # Smart Copy constraints
   smart_copy:
     enabled: true
@@ -57,6 +137,10 @@ DOGEUSDT:
   enabled: true
   category: "meme_coin"
   volatility_profile: "high"
+  mode_profiles:
+    TESTNET:
+      risk:
+        max_position_usdt: 8.00
   
   # Bybit-specific settings
   bybit:

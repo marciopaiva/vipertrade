@@ -10,6 +10,7 @@ type DashboardPayload = {
     risk_status?: string;
     trading_mode?: string;
     trading_profile?: string;
+    trade_profile_label?: string;
     db_connected?: boolean;
     operator_controls_enabled?: boolean;
     critical_reconciliation_events_15m?: number;
@@ -307,6 +308,8 @@ export default function Home() {
   const [actionReason, setActionReason] = useState("manual_web_action");
   const [controlMessage, setControlMessage] = useState("");
   const [controlBusy, setControlBusy] = useState<ControlKind | "">("");
+  const [selectedClosedTradesDay, setSelectedClosedTradesDay] = useState<string>("");
+  const [closedTradesPage, setClosedTradesPage] = useState(0);
 
   const [maxDailyLossPct, setMaxDailyLossPct] = useState<string>("3");
   const [maxLeverage, setMaxLeverage] = useState<string>("2");
@@ -369,6 +372,56 @@ export default function Home() {
       return Number.isFinite(referenceTime) && referenceTime >= sevenDaysAgo;
     });
   }, [trades]);
+  const closedTradesByDay = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        items: typeof closedTrades;
+        latestTs: number;
+      }
+    >();
+
+    closedTrades.forEach((trade) => {
+      const referenceTime = Date.parse(trade.closed_at || trade.opened_at);
+      if (!Number.isFinite(referenceTime)) return;
+
+      const soldAt = new Date(referenceTime);
+      const key = soldAt.toISOString().slice(0, 10);
+      const label = soldAt.toLocaleDateString();
+      const current = groups.get(key);
+
+      if (current) {
+        current.items.push(trade);
+        current.latestTs = Math.max(current.latestTs, referenceTime);
+      } else {
+        groups.set(key, { key, label, items: [trade], latestTs: referenceTime });
+      }
+    });
+
+    return Array.from(groups.values()).sort((a, b) => b.latestTs - a.latestTs);
+  }, [closedTrades]);
+  const activeClosedTradesDay = useMemo(() => {
+    if (selectedClosedTradesDay && closedTradesByDay.some((group) => group.key === selectedClosedTradesDay)) {
+      return selectedClosedTradesDay;
+    }
+    return closedTradesByDay[0]?.key ?? "";
+  }, [closedTradesByDay, selectedClosedTradesDay]);
+  const activeClosedTradesGroup = useMemo(
+    () => closedTradesByDay.find((group) => group.key === activeClosedTradesDay) ?? null,
+    [activeClosedTradesDay, closedTradesByDay],
+  );
+  const closedTradesPageSize = 10;
+  const closedTradesTotalPages = useMemo(() => {
+    if (!activeClosedTradesGroup) return 1;
+    return Math.max(1, Math.ceil(activeClosedTradesGroup.items.length / closedTradesPageSize));
+  }, [activeClosedTradesGroup]);
+  const paginatedClosedTrades = useMemo(() => {
+    if (!activeClosedTradesGroup) return [];
+    const start = closedTradesPage * closedTradesPageSize;
+    return activeClosedTradesGroup.items.slice(start, start + closedTradesPageSize);
+  }, [activeClosedTradesGroup, closedTradesPage]);
   const tradeStats = useMemo(() => {
     const avgClosedPnlPct =
       closedTrades.length > 0
@@ -386,6 +439,25 @@ export default function Home() {
       avgClosedPnlPct,
     };
   }, [closedTrades, data]);
+
+  useEffect(() => {
+    if (!closedTradesByDay.length) {
+      if (selectedClosedTradesDay) setSelectedClosedTradesDay("");
+      if (closedTradesPage !== 0) setClosedTradesPage(0);
+      return;
+    }
+
+    if (!selectedClosedTradesDay || !closedTradesByDay.some((group) => group.key === selectedClosedTradesDay)) {
+      setSelectedClosedTradesDay(closedTradesByDay[0].key);
+      setClosedTradesPage(0);
+    }
+  }, [closedTradesByDay, closedTradesPage, selectedClosedTradesDay]);
+
+  useEffect(() => {
+    if (closedTradesPage >= closedTradesTotalPages) {
+      setClosedTradesPage(0);
+    }
+  }, [closedTradesPage, closedTradesTotalPages]);
 
   const executionMode = (() => {
     const mode = String(data?.status?.trading_mode || "").toLowerCase();
@@ -515,6 +587,36 @@ export default function Home() {
             ? p.trailing_stop_peak_price * (1 - p.trailing_stop_final_distance_pct)
             : p.trailing_stop_peak_price * (1 + p.trailing_stop_final_distance_pct)
           : null;
+      const trailingArmedByPrice =
+        !p.trailing_stop_activated &&
+        typeof markPrice === "number" &&
+        typeof p.trailing_activation_price === "number"
+          ? isLong
+            ? markPrice >= p.trailing_activation_price
+            : markPrice <= p.trailing_activation_price
+          : false;
+      const activationMovePct =
+        entryPrice > 0 && typeof p.trailing_activation_price === "number"
+          ? Math.abs((p.trailing_activation_price - entryPrice) / entryPrice)
+          : null;
+      const trailingProgressPct =
+        typeof markDeltaPct === "number" && typeof activationMovePct === "number" && activationMovePct > 0
+          ? Math.max(0, Math.min(1, markDeltaPct / activationMovePct))
+          : null;
+      const trailingState = p.trailing_stop_activated
+        ? {
+            label: "Trailing Active",
+            tone: "active" as const,
+          }
+        : trailingArmedByPrice
+          ? {
+              label: "Ready to Arm",
+              tone: "armed" as const,
+            }
+          : {
+              label: "Waiting",
+              tone: "waiting" as const,
+            };
       const triggerState =
         p.trailing_stop_activated && typeof trailingLivePrice === "number"
           ? `Trail ${num(trailingLivePrice, 6)}`
@@ -532,6 +634,9 @@ export default function Home() {
         unrealizedPnlPct,
         markDeltaPct,
         trailingLivePrice,
+        trailingArmedByPrice,
+        trailingProgressPct,
+        trailingState,
         triggerState,
       };
     });
@@ -752,6 +857,16 @@ export default function Home() {
                         ok={(data.status?.critical_reconciliation_events_15m ?? 0) === 0}
                         icon="recon"
                       />
+                      <StatusPill
+                        label="Trade Profile"
+                        value={
+                          data.status?.trade_profile_label && data.status?.trading_mode
+                            ? `${data.status.trading_mode} / ${data.status.trade_profile_label}`
+                            : data.status?.trade_profile_label || data.status?.trading_profile || "-"
+                        }
+                        ok={!!(data.status?.trade_profile_label || data.status?.trading_profile)}
+                        icon="profile"
+                      />
                       <StatusPill label="DB" value={data.status?.db_connected ? "connected" : "disconnected"} ok={!!data.status?.db_connected} icon="db" />
                       <StatusPill label="Redis" value={redisConnected ? "connected" : "unknown"} ok={redisConnected} icon="redis" />
                       <StatusPill label="Executor" value={executorVisualState} ok={executorVisualState === "running"} icon="executor" />
@@ -891,6 +1006,61 @@ export default function Home() {
                             <div style={{ color: p.trailing_stop_activated ? "#38f9a5" : "#90dcff", fontWeight: 700 }}>
                               {p.triggerState}
                             </div>
+                            <div style={{ marginTop: 6, display: "flex", justifyContent: "flex-end" }}>
+                              <span
+                                style={{
+                                  ...miniBadgeStyle,
+                                  padding: "4px 8px",
+                                  ...(p.trailingState.tone === "active"
+                                    ? statusTone(true)
+                                    : p.trailingState.tone === "armed"
+                                      ? {
+                                          borderColor: "rgba(247,181,0,0.45)",
+                                          color: "#ffd978",
+                                          background: "rgba(108,78,8,0.22)",
+                                        }
+                                      : {
+                                          borderColor: "rgba(84,118,175,0.35)",
+                                          color: "#90a9d4",
+                                          background: "rgba(19,33,58,0.35)",
+                                        }),
+                                }}
+                              >
+                                {p.trailingState.label}
+                              </span>
+                            </div>
+                            {typeof p.trailingProgressPct === "number" && (
+                              <div style={{ marginTop: 8, display: "grid", gap: 4, justifyItems: "end" }}>
+                                <div
+                                  style={{
+                                    width: 120,
+                                    height: 5,
+                                    borderRadius: 999,
+                                    overflow: "hidden",
+                                    background: "rgba(255,255,255,0.06)",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: `${Math.max(8, Math.round(p.trailingProgressPct * 100))}%`,
+                                      height: "100%",
+                                      borderRadius: 999,
+                                      background:
+                                        p.trailingState.tone === "active"
+                                          ? "linear-gradient(90deg, rgba(56,249,165,0.6), rgba(56,249,165,1))"
+                                          : p.trailingState.tone === "armed"
+                                            ? "linear-gradient(90deg, rgba(247,181,0,0.6), rgba(255,217,120,1))"
+                                            : "linear-gradient(90deg, rgba(70,174,255,0.6), rgba(144,220,255,0.95))",
+                                    }}
+                                  />
+                                </div>
+                                <div style={{ color: "#7f95bd", fontSize: 11 }}>
+                                  {p.trailingState.tone === "active"
+                                    ? "Trailing engaged"
+                                    : `${Math.round(p.trailingProgressPct * 100)}% to trailing arm`}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           <div style={{ textAlign: "right" }}>
                             <div style={positionLabelStyle}>PnL</div>
@@ -934,8 +1104,38 @@ export default function Home() {
                       </article>
                     </div>
 
+                    {closedTradesByDay.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+                        {closedTradesByDay.map((group) => {
+                          const active = group.key === activeClosedTradesDay;
+                          return (
+                            <button
+                              key={group.key}
+                              type="button"
+                              onClick={() => {
+                                setSelectedClosedTradesDay(group.key);
+                                setClosedTradesPage(0);
+                              }}
+                              style={{
+                                borderRadius: 999,
+                                border: active ? "1px solid rgba(144,220,255,0.6)" : "1px solid rgba(54,88,139,0.7)",
+                                background: active ? "rgba(26, 57, 96, 0.58)" : "rgba(10, 24, 49, 0.78)",
+                                color: active ? "#dfeaff" : "#8fb7e8",
+                                padding: "8px 12px",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {group.label} · {group.items.length}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     <div style={tradeListStyle}>
-                      {closedTrades.map((t) => {
+                      {paginatedClosedTrades.map((t) => {
                         const sideLong = t.side.toUpperCase() === "LONG";
                         const notional = t.quantity * t.entry_price;
                         const pnlPct = notional > 0 ? (t.pnl ?? 0) / notional : null;
@@ -969,6 +1169,48 @@ export default function Home() {
                         );
                       })}
                     </div>
+                    {activeClosedTradesGroup && activeClosedTradesGroup.items.length > closedTradesPageSize && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          marginTop: 16,
+                        }}
+                      >
+                        <div style={{ color: "#8fb7e8", fontSize: 13 }}>
+                          {activeClosedTradesGroup.label} · {activeClosedTradesGroup.items.length} trades · page {closedTradesPage + 1} of{" "}
+                          {closedTradesTotalPages}
+                        </div>
+                        <div style={{ display: "flex", gap: 10 }}>
+                          <button
+                            type="button"
+                            onClick={() => setClosedTradesPage((current) => Math.max(0, current - 1))}
+                            disabled={closedTradesPage === 0}
+                            style={{
+                              ...tradePaginationButtonStyle,
+                              opacity: closedTradesPage === 0 ? 0.45 : 1,
+                              cursor: closedTradesPage === 0 ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Previous 10
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setClosedTradesPage((current) => Math.min(closedTradesTotalPages - 1, current + 1))}
+                            disabled={closedTradesPage >= closedTradesTotalPages - 1}
+                            style={{
+                              ...tradePaginationButtonStyle,
+                              opacity: closedTradesPage >= closedTradesTotalPages - 1 ? 0.45 : 1,
+                              cursor: closedTradesPage >= closedTradesTotalPages - 1 ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Next 10
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1064,7 +1306,7 @@ function StatusPill({
   label: string;
   value: string;
   ok: boolean;
-  icon: "db" | "redis" | "executor" | "bybit" | "recon";
+  icon: "db" | "redis" | "executor" | "bybit" | "recon" | "profile";
 }) {
   const tone = ok
     ? { color: "#38f9a5", borderColor: "rgba(56,249,165,0.24)", iconBg: "rgba(9, 35, 28, 0.72)" }
@@ -1082,7 +1324,7 @@ function StatusPill({
   );
 }
 
-function renderStatusIcon(icon: "db" | "redis" | "executor" | "bybit" | "recon") {
+function renderStatusIcon(icon: "db" | "redis" | "executor" | "bybit" | "recon" | "profile") {
   const common = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (icon) {
     case "db":
@@ -1121,6 +1363,14 @@ function renderStatusIcon(icon: "db" | "redis" | "executor" | "bybit" | "recon")
         <svg {...common}>
           <path d="M8 2.5 12.5 5v6L8 13.5 3.5 11V5L8 2.5Z" />
           <path d="M6.3 8 7.4 9.1 9.9 6.6" />
+        </svg>
+      );
+    case "profile":
+      return (
+        <svg {...common}>
+          <path d="M8 2.5 12.5 4.4v3.4c0 2.8-1.6 4.8-4.5 5.7-2.9-.9-4.5-2.9-4.5-5.7V4.4L8 2.5Z" />
+          <path d="M8 5.4v4.6" />
+          <path d="M6.2 7.1H9.8" />
         </svg>
       );
   }
@@ -1705,6 +1955,16 @@ const tradeStatCardStyle: CSSProperties = {
   borderRadius: 8,
   padding: "8px 10px",
   background: "rgba(8, 16, 32, 0.8)",
+};
+
+const tradePaginationButtonStyle: CSSProperties = {
+  borderRadius: 10,
+  border: "1px solid rgba(70, 122, 189, 0.65)",
+  background: "rgba(15, 32, 59, 0.86)",
+  color: "#dce8ff",
+  padding: "10px 14px",
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 const tradeStatLabelStyle: CSSProperties = {
