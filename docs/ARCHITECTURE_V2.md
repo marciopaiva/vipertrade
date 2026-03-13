@@ -14,8 +14,14 @@
 - executor: enforces idempotency and sends orders to Bybit.
 - monitor: enforces global risk controls and health supervision.
 - api/web: read/control plane only.
-- postgres: source of truth for positions, decisions and audit trail.
+- postgres: source of truth for decisions, audit trail, and paper-mode wallet/positions/trades.
 - redis: event bus and transient state.
+
+Runtime source-of-truth by mode:
+
+- `PAPER`: public prices from Bybit mainnet, wallet/positions/trades/performance from database simulation.
+- `TESTNET`: wallet/positions/trades/performance from Bybit testnet APIs.
+- `MAINNET`: wallet/positions/trades/performance from Bybit mainnet APIs.
 
 ## Tupa Integration Model
 

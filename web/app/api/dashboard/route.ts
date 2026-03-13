@@ -66,6 +66,20 @@ type WalletSummary = {
   account_mm_rate?: number | null;
 };
 
+type DailyTradesSummary = {
+  ok?: boolean;
+  source?: string;
+  count?: number;
+  window_start_utc?: string;
+  window_end_utc?: string;
+  checked_at?: string;
+  status?: number;
+  url?: string;
+  error?: string | null;
+  ret_code?: number | null;
+  ret_msg?: string | null;
+};
+
 const DEFAULT_BASE_URLS = [
   process.env.BACKEND_API_URL,
   "http://host.containers.internal:8080/api/v1",
@@ -245,10 +259,11 @@ export async function GET() {
       baseUrl,
       (status.data as { trading_mode?: string } | undefined)?.trading_mode,
     );
-    const [performance, positions, trades, events, marketSignals, analyticsScores, riskKpis, controlState, wallet, services] = await Promise.all([
+    const [performance, positions, trades, dailyTradesSummary, events, marketSignals, analyticsScores, riskKpis, controlState, wallet, services] = await Promise.all([
       fetchJson(baseUrl, "/performance"),
       fetchJson(baseUrl, "/positions"),
       fetchJson(baseUrl, "/trades?limit=20"),
+      fetchJson(baseUrl, "/trades/today-summary"),
       fetchJson(baseUrl, "/events?limit=40"),
       fetchMarketSignals(baseUrl),
       fetchAnalyticsScores(baseUrl),
@@ -262,6 +277,7 @@ export async function GET() {
     if (!performance.ok) partialErrors.push(`performance failed: ${performance.error}`);
     if (!positions.ok) partialErrors.push(`positions failed: ${positions.error}`);
     if (!trades.ok) partialErrors.push(`trades failed: ${trades.error}`);
+    if (!dailyTradesSummary.ok) partialErrors.push(`daily_trades_summary failed: ${dailyTradesSummary.error}`);
     if (!events.ok) partialErrors.push(`events failed: ${events.error}`);
     if (!marketSignals.ok) partialErrors.push(`market_signals failed: ${marketSignals.error}`);
     if (!analyticsScores.ok) partialErrors.push(`analytics_scores failed: ${analyticsScores.error}`);
@@ -276,6 +292,14 @@ export async function GET() {
         performance: performance.ok ? performance.data : { error: "unavailable" },
         positions: positions.ok ? positions.data : { items: [] },
         trades: trades.ok ? trades.data : { items: [] },
+        daily_trades_summary: dailyTradesSummary.ok
+          ? dailyTradesSummary.data
+          : ({
+              ok: false,
+              source: "unavailable",
+              count: 0,
+              error: "unavailable",
+            } as DailyTradesSummary),
         events: events.ok ? events.data : { items: [] },
         market_signals: marketSignals.ok ? marketSignals.data : { updated_at: null, items: {} },
         analytics_scores: analyticsScores.ok ? analyticsScores.data : ({ updated_at: null, exchanges: [], by_symbol: [] } as AnalyticsScores),
