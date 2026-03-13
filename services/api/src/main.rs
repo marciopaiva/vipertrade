@@ -1096,7 +1096,9 @@ async fn build_paper_positions_response(state: Arc<AppState>) -> warp::reply::Wi
     }
 }
 
-async fn build_exchange_positions_response(state: Arc<AppState>) -> warp::reply::WithStatus<WarpJson> {
+async fn build_exchange_positions_response(
+    state: Arc<AppState>,
+) -> warp::reply::WithStatus<WarpJson> {
     match fetch_bybit_positions().await {
         Ok(items) => {
             let positions = items
@@ -1121,7 +1123,10 @@ async fn trades_handler(query: TradesQuery, state: Arc<AppState>) -> impl Reply 
     build_exchange_trades_response(query).await
 }
 
-async fn build_paper_trades_response(query: TradesQuery, state: Arc<AppState>) -> warp::reply::WithStatus<WarpJson> {
+async fn build_paper_trades_response(
+    query: TradesQuery,
+    state: Arc<AppState>,
+) -> warp::reply::WithStatus<WarpJson> {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1217,7 +1222,11 @@ async fn build_exchange_trades_response(query: TradesQuery) -> warp::reply::With
                 .into_iter()
                 .filter_map(|item| build_trade_item_from_closed_pnl(&item))
                 .collect::<Vec<_>>();
-            trades.sort_by(|a, b| b.closed_at.unwrap_or(b.opened_at).cmp(&a.closed_at.unwrap_or(a.opened_at)));
+            trades.sort_by(|a, b| {
+                b.closed_at
+                    .unwrap_or(b.opened_at)
+                    .cmp(&a.closed_at.unwrap_or(a.opened_at))
+            });
             trades.truncate(limit);
             json_ok(&TradesResponse { items: trades })
         }
@@ -1234,7 +1243,9 @@ async fn daily_trades_summary_handler(state: Arc<AppState>) -> impl Reply {
     let window_start_utc = start_of_day_utc(window_end_utc);
 
     if TradingMode::from_env().uses_simulated_wallet() {
-        return json_ok(&build_paper_daily_trades_summary(&state, window_start_utc, window_end_utc).await);
+        return json_ok(
+            &build_paper_daily_trades_summary(&state, window_start_utc, window_end_utc).await,
+        );
     }
 
     let result = fetch_bybit_order_history_today(window_start_utc, window_end_utc).await;
@@ -1391,7 +1402,9 @@ async fn performance_handler(state: Arc<AppState>) -> impl Reply {
     build_exchange_performance_response().await
 }
 
-async fn build_paper_performance_response(state: Arc<AppState>) -> warp::reply::WithStatus<WarpJson> {
+async fn build_paper_performance_response(
+    state: Arc<AppState>,
+) -> warp::reply::WithStatus<WarpJson> {
     let Some(pool) = &state.db_pool else {
         return json_err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1505,8 +1518,16 @@ async fn build_exchange_performance_response() -> warp::reply::WithStatus<WarpJs
     };
 
     let payload = PerformanceResponse {
-        last_24h: summarize_closed_pnl_window(&items, window_end_utc - ChronoDuration::hours(24), window_end_utc),
-        last_7d: summarize_closed_pnl_window(&items, window_end_utc - ChronoDuration::days(7), window_end_utc),
+        last_24h: summarize_closed_pnl_window(
+            &items,
+            window_end_utc - ChronoDuration::hours(24),
+            window_end_utc,
+        ),
+        last_7d: summarize_closed_pnl_window(
+            &items,
+            window_end_utc - ChronoDuration::days(7),
+            window_end_utc,
+        ),
         last_30d: summarize_closed_pnl_window(&items, window_start_utc, window_end_utc),
         max_drawdown_30d: None,
     };
@@ -2077,7 +2098,8 @@ fn extract_bybit_today_trade_count(body: &Value) -> i64 {
         .and_then(|result| result.get("list"))
         .and_then(|list| list.as_array())
         .map(|items| {
-            items.iter()
+            items
+                .iter()
                 .filter(|item| {
                     item.get("cumExecQty")
                         .and_then(json_number)
@@ -2085,7 +2107,9 @@ fn extract_bybit_today_trade_count(body: &Value) -> i64 {
                         .unwrap_or_else(|| {
                             item.get("orderStatus")
                                 .and_then(|value| value.as_str())
-                                .map(|status| matches!(status, "Filled" | "PartiallyFilledCanceled"))
+                                .map(|status| {
+                                    matches!(status, "Filled" | "PartiallyFilledCanceled")
+                                })
                                 .unwrap_or(false)
                         })
                 })
@@ -2218,14 +2242,13 @@ async fn fetch_bybit_closed_pnl_between(
         let mut cursor: Option<String> = None;
 
         loop {
-            let result = fetch_bybit_closed_pnl_page(chunk_start, chunk_end, page_size, cursor.as_deref()).await;
+            let result =
+                fetch_bybit_closed_pnl_page(chunk_start, chunk_end, page_size, cursor.as_deref())
+                    .await;
             if result.status != 200 || result.ret_code != Some(0) {
-                return Err(
-                    result
-                        .error
-                        .or_else(|| result.ret_msg)
-                        .unwrap_or_else(|| format!("http={} retCode={:?}", result.status, result.ret_code)),
-                );
+                return Err(result.error.or_else(|| result.ret_msg).unwrap_or_else(|| {
+                    format!("http={} retCode={:?}", result.status, result.ret_code)
+                }));
             }
 
             let items = result
@@ -2256,7 +2279,10 @@ async fn fetch_bybit_closed_pnl_between(
     Ok(combined)
 }
 
-async fn fetch_bybit_position_page(settle_coin: &str, cursor: Option<&str>) -> BybitPositionFetchResult {
+async fn fetch_bybit_position_page(
+    settle_coin: &str,
+    cursor: Option<&str>,
+) -> BybitPositionFetchResult {
     let bybit_url = resolve_bybit_rest_url();
     let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
     let mut query_string = format!("category=linear&settleCoin={}&limit=200", settle_coin);
@@ -2360,12 +2386,9 @@ async fn fetch_bybit_positions() -> Result<Vec<Value>, String> {
     loop {
         let result = fetch_bybit_position_page("USDT", cursor.as_deref()).await;
         if result.status != 200 || result.ret_code != Some(0) {
-            return Err(
-                result
-                    .error
-                    .or_else(|| result.ret_msg)
-                    .unwrap_or_else(|| format!("http={} retCode={:?}", result.status, result.ret_code)),
-            );
+            return Err(result.error.or_else(|| result.ret_msg).unwrap_or_else(|| {
+                format!("http={} retCode={:?}", result.status, result.ret_code)
+            }));
         }
 
         let items = result
@@ -2399,8 +2422,14 @@ fn build_position_item_from_bybit(state: &AppState, item: &Value) -> Option<Posi
         return None;
     }
 
-    let symbol = item.get("symbol").and_then(|value| value.as_str())?.to_string();
-    let raw_side = item.get("side").and_then(|value| value.as_str()).unwrap_or("");
+    let symbol = item
+        .get("symbol")
+        .and_then(|value| value.as_str())?
+        .to_string();
+    let raw_side = item
+        .get("side")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     let side = map_bybit_side(Some(raw_side));
     let entry_price = item.get("avgPrice").and_then(json_number).unwrap_or(0.0);
     let notional_usdt = item
@@ -2409,12 +2438,8 @@ fn build_position_item_from_bybit(state: &AppState, item: &Value) -> Option<Posi
         .or_else(|| item.get("positionIM").and_then(json_number))
         .unwrap_or(quantity * entry_price);
 
-    let (
-        stop_loss_price,
-        trailing_activation_price,
-        fixed_take_profit_price,
-        break_even_price,
-    ) = resolve_position_triggers(state, &symbol, &side, entry_price);
+    let (stop_loss_price, trailing_activation_price, fixed_take_profit_price, break_even_price) =
+        resolve_position_triggers(state, &symbol, &side, entry_price);
 
     Some(PositionItem {
         trade_id: item
@@ -2479,8 +2504,14 @@ fn build_trade_item_from_closed_pnl(item: &Value) -> Option<TradeItem> {
     let closed_at = parse_bybit_timestamp_millis(item.get("updatedTime"))
         .or_else(|| parse_bybit_timestamp_millis(item.get("createdTime")))?;
     let opened_at = parse_bybit_timestamp_millis(item.get("createdTime")).unwrap_or(closed_at);
-    let symbol = item.get("symbol").and_then(|value| value.as_str())?.to_string();
-    let entry_price = item.get("avgEntryPrice").and_then(json_number).unwrap_or(0.0);
+    let symbol = item
+        .get("symbol")
+        .and_then(|value| value.as_str())?
+        .to_string();
+    let entry_price = item
+        .get("avgEntryPrice")
+        .and_then(json_number)
+        .unwrap_or(0.0);
     let exit_price = item.get("avgExitPrice").and_then(json_number);
     let pnl = item.get("closedPnl").and_then(json_number);
     let trade_id = item
