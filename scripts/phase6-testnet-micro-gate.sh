@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 DATE_UTC="$(date -u +%Y-%m-%d)"
 TS_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -55,8 +56,8 @@ fi
 
 ENV_BYBIT="$(awk -F= '/^BYBIT_ENV=/{print $2}' compose/.env | tail -n 1)"
 ENV_LIVE="$(awk -F= '/^EXECUTOR_ENABLE_LIVE_ORDERS=/{print $2}' compose/.env | tail -n 1)"
-RUNTIME_BYBIT="$(podman exec vipertrade-executor env | awk -F= '/^BYBIT_ENV=/{print $2}' | tail -n 1 || true)"
-RUNTIME_LIVE="$(podman exec vipertrade-executor env | awk -F= '/^EXECUTOR_ENABLE_LIVE_ORDERS=/{print $2}' | tail -n 1 || true)"
+RUNTIME_BYBIT="$(container_exec vipertrade-executor env | awk -F= '/^BYBIT_ENV=/{print $2}' | tail -n 1 || true)"
+RUNTIME_LIVE="$(container_exec vipertrade-executor env | awk -F= '/^EXECUTOR_ENABLE_LIVE_ORDERS=/{print $2}' | tail -n 1 || true)"
 
 if [[ "${ENV_BYBIT,,}" == "testnet" && "${RUNTIME_BYBIT,,}" == "testnet" ]]; then
   TESTNET_MODE_OK=true
@@ -95,7 +96,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-CRITICAL_RECON=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
+CRITICAL_RECON=$(container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
   "SELECT COUNT(*)::bigint FROM system_events WHERE event_type='reconciliation_cycle' AND severity='critical' AND timestamp >= NOW() - INTERVAL '${DB_WINDOW_MINUTES} minutes';" 2>/dev/null || echo 999)
 
 if [[ "$CRITICAL_RECON" =~ ^[0-9]+$ ]] && (( CRITICAL_RECON == 0 )); then
@@ -107,7 +108,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-CLOSE_ERRORS=$(podman logs --since "$LOG_WINDOW" vipertrade-executor 2>&1 | grep -Eci 'submitted_close_no_persist|close_reconcile_failed|close request rejected' || true)
+CLOSE_ERRORS=$(container_logs --since "$LOG_WINDOW" vipertrade-executor 2>&1 | grep -Eci 'submitted_close_no_persist|close_reconcile_failed|close request rejected' || true)
 if [[ "$CLOSE_ERRORS" =~ ^[0-9]+$ ]] && (( CLOSE_ERRORS == 0 )); then
   CLOSE_OK=true
   echo -e "${GREEN}OK: no executor close-path errors in ${LOG_WINDOW}${NC}"

@@ -26,10 +26,11 @@ Source: `VIPERTRADE_SPEC.md` (section 2).
 5. Resultado persiste em banco e alimenta monitoramento.
 6. `monitor` executa reconciliacao periodica.
 
-## Deploy Local (WSL + Podman)
+## Deploy Local (WSL + Docker Desktop)
 
 - Compose bridge e padrao.
 - Compose host e fallback.
+- Podman mantido apenas como caminho legado.
 - Health checks por servico.
 
 ## Referencia Original

@@ -14,17 +14,18 @@ echo -e "${GREEN}🗄️  ViperTrade - Database Validation${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 cd "$(dirname "$0")/.."
+. scripts/container-runtime.sh
 
-# Check execution method (psql or podman)
+# Check execution method (psql or container runtime)
 EXEC_CMD=""
 if command -v psql &> /dev/null; then
     EXEC_CMD="psql"
-elif command -v podman &> /dev/null; then
-    EXEC_CMD="podman exec -i vipertrade-postgres psql"
 elif command -v docker &> /dev/null; then
     EXEC_CMD="docker exec -i vipertrade-postgres psql"
+elif command -v podman &> /dev/null; then
+    EXEC_CMD="podman exec -i vipertrade-postgres psql"
 else
-    echo -e "${RED}✗ No psql, podman, or docker found${NC}"
+    echo -e "${RED}✗ No psql, docker, or podman found${NC}"
     exit 1
 fi
 

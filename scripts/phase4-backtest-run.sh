@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 
 WINDOW_START=""
 WINDOW_END=""
@@ -122,7 +123,7 @@ if [[ "$SERVICE_AVAILABLE" != "true" ]]; then
 fi
 
 METRICS_OK=false
-if podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c \
+if container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c \
   "SELECT
      COUNT(*)::bigint,
      COALESCE(ROUND((COUNT(*) FILTER (WHERE COALESCE(pnl,0) > 0)::numeric / NULLIF(COUNT(*),0))::numeric, 6), 0),

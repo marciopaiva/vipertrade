@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 DATE_UTC="$(date -u +%Y-%m-%d)"
 TS_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -74,7 +75,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-RUNTIME_LIVE_FLAG="$(podman exec vipertrade-executor env | awk -F= '/^EXECUTOR_ENABLE_LIVE_ORDERS=/{print $2}' | tail -n 1 || true)"
+RUNTIME_LIVE_FLAG="$(container_exec vipertrade-executor env | awk -F= '/^EXECUTOR_ENABLE_LIVE_ORDERS=/{print $2}' | tail -n 1 || true)"
 if [[ "${RUNTIME_LIVE_FLAG,,}" == "false" || "${RUNTIME_LIVE_FLAG}" == "0" ]]; then
   SAFE_RUNTIME_OK=true
   echo -e "${GREEN}OK: runtime safe posture EXECUTOR_ENABLE_LIVE_ORDERS=${RUNTIME_LIVE_FLAG}${NC}"
@@ -115,7 +116,7 @@ fi
 DR_BACKUP_OK=false
 DR_BACKUP_BYTES=0
 DR_BACKUP_SHA256=""
-if podman exec -i vipertrade-postgres pg_dump -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -s >"${BACKUP_FILE}" 2>/tmp/viper_phase6_backup.log; then
+if container_exec_i vipertrade-postgres pg_dump -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -s >"${BACKUP_FILE}" 2>/tmp/viper_phase6_backup.log; then
   if [[ -s "${BACKUP_FILE}" ]]; then
     DR_BACKUP_OK=true
     DR_BACKUP_BYTES="$(wc -c < "${BACKUP_FILE}")"

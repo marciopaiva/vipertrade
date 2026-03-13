@@ -1571,29 +1571,22 @@ async fn handle_decision_event(
             event.event_id, event.decision.action, event.decision.symbol,
         );
 
-        let mut status = "paper_dry_run";
-        if is_close_action(&event.decision.action) {
+        let status = if is_close_action(&event.decision.action) {
             let close_qty = event.decision.quantity;
             let close_price = event.decision.entry_price;
             match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
-                Ok(CloseReconcileResult::Closed { .. }) => {
-                    status = "paper_close";
-                }
-                Ok(CloseReconcileResult::Partial { .. }) => {
-                    status = "paper_close_partial";
-                }
+                Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
+                Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
                 Ok(CloseReconcileResult::CloseQtyExceedsOpen { .. }) => {
-                    status = "paper_close_qty_exceeds_open";
+                    "paper_close_qty_exceeds_open"
                 }
-                Ok(CloseReconcileResult::NoLocalOpen) => {
-                    status = "paper_close_no_local_open";
-                }
+                Ok(CloseReconcileResult::NoLocalOpen) => "paper_close_no_local_open",
                 Err(e) => {
                     eprintln!(
                         "Failed to reconcile paper close event_id={} err={}",
                         event.event_id, e
                     );
-                    status = "paper_close_no_persist";
+                    "paper_close_no_persist"
                 }
             }
         } else {
@@ -1605,12 +1598,11 @@ async fn handle_decision_event(
 
             match has_open_trade_for_symbol_side(state, &event.decision.symbol, side).await {
                 Ok(true) => {
-                    status = "paper_open_blocked_existing_open";
                     mark_processed(
                         state,
                         &idem_key,
                         &event,
-                        status,
+                        "paper_open_blocked_existing_open",
                         Some(&paper_order_id),
                         None,
                     )
@@ -1623,12 +1615,11 @@ async fn handle_decision_event(
                         "Failed checking open trade for symbol/side event_id={} symbol={} side={} err={}",
                         event.event_id, event.decision.symbol, side, e
                     );
-                    status = "paper_open_guard_error";
                     mark_processed(
                         state,
                         &idem_key,
                         &event,
-                        status,
+                        "paper_open_guard_error",
                         Some(&paper_order_id),
                         Some("paper guard query failed"),
                     )
@@ -1639,12 +1630,11 @@ async fn handle_decision_event(
 
             match count_open_trades(state).await {
                 Ok(open_count) if open_count >= cfg.paper_max_open_positions => {
-                    status = "paper_open_blocked_max_open_positions";
                     mark_processed(
                         state,
                         &idem_key,
                         &event,
-                        status,
+                        "paper_open_blocked_max_open_positions",
                         Some(&paper_order_id),
                         None,
                     )
@@ -1657,12 +1647,11 @@ async fn handle_decision_event(
                         "Failed checking global open trades event_id={} err={}",
                         event.event_id, e
                     );
-                    status = "paper_open_guard_error";
                     mark_processed(
                         state,
                         &idem_key,
                         &event,
-                        status,
+                        "paper_open_guard_error",
                         Some(&paper_order_id),
                         Some("paper max-open guard query failed"),
                     )
@@ -1688,11 +1677,11 @@ async fn handle_decision_event(
                     "Failed to persist paper trade for event_id={} order_id={} err={}",
                     event.event_id, paper_order_id, e
                 );
-                status = "paper_open_no_persist";
+                "paper_open_no_persist"
             } else {
-                status = "paper_open";
+                "paper_open"
             }
-        }
+        };
 
         mark_processed(
             state,

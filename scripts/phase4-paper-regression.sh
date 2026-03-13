@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 DATE_UTC="$(date -u +%Y-%m-%d)"
 TS_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -43,7 +44,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-nums=$(podman exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions 2>/dev/null || true)
+nums=$(container_exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions 2>/dev/null || true)
 MD_SUB=$(echo "$nums" | awk 'NR==2 {print $1}')
 DEC_SUB=$(echo "$nums" | awk 'NR==4 {print $1}')
 
@@ -60,7 +61,7 @@ else
 fi
 
 DB_COUNTS_OK=true
-DB_COUNTS=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c "SELECT
+DB_COUNTS=$(container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades WHERE status = 'open')::bigint,
   (SELECT COUNT(*) FROM trades WHERE status = 'closed')::bigint,
   (SELECT COUNT(*) FROM position_snapshots)::bigint;" 2>/tmp/viper_phase4_paper_db.log) || DB_COUNTS_OK=false

@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+. "$(dirname "$0")/container-runtime.sh"
 
 SYMBOL="${1:-DOGEUSDT}"
 ACTION="${2:-ENTER_LONG}"
@@ -30,5 +31,5 @@ PAYLOAD=$(cat <<JSON
 JSON
 )
 
-podman exec vipertrade-redis redis-cli PUBLISH viper:decisions "${PAYLOAD}"
+container_exec vipertrade-redis redis-cli PUBLISH viper:decisions "${PAYLOAD}"
 echo "Published test decision event_id=${EVT_ID} action=${ACTION} symbol=${SYMBOL}"

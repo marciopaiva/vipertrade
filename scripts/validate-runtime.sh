@@ -9,6 +9,7 @@ NC="\033[0m"
 MODE="${1:-bridge}"
 BUILD="${BUILD:-0}"
 LOG_WINDOW="${LOG_WINDOW:-120s}"
+. "$(dirname "$0")/container-runtime.sh"
 
 case "$MODE" in
   bridge)
@@ -58,7 +59,7 @@ fi
 
 echo -e "${GREEN}OK: health-check passed${NC}"
 
-nums=$(podman exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions)
+nums=$(container_exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions)
 md_sub=$(echo "$nums" | awk 'NR==2 {print $1}')
 dec_sub=$(echo "$nums" | awk 'NR==4 {print $1}')
 
@@ -79,8 +80,8 @@ fi
 
 echo -e "${GREEN}OK: Redis subscribers market_data=${md_sub} decisions=${dec_sub}${NC}"
 
-strategy_events=$(podman logs --since "$LOG_WINDOW" vipertrade-strategy 2>&1 | grep -c "Published decision event" || true)
-executor_events=$(podman logs --since "$LOG_WINDOW" vipertrade-executor 2>&1 | grep -c "Executor received decision event" || true)
+strategy_events=$(container_logs --since "$LOG_WINDOW" vipertrade-strategy 2>&1 | grep -c "Published decision event" || true)
+executor_events=$(container_logs --since "$LOG_WINDOW" vipertrade-executor 2>&1 | grep -c "Executor received decision event" || true)
 
 if (( strategy_events < 1 )); then
   echo -e "${RED}ERROR: strategy produced no decision events${NC}"

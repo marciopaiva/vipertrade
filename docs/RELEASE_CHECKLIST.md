@@ -1,4 +1,4 @@
-# Release Checklist (WSL Fedora + Podman)
+# Release Checklist (WSL Fedora + Docker Desktop)
 
 ## Preflight
 
@@ -13,7 +13,7 @@
 - Start and validate bridge mode:
   - `./scripts/validate-runtime.sh bridge`
 - Confirm subscribers:
-  - `podman exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
+  - `docker exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
 - Confirm strategy/executor activity:
   - `./scripts/compose.sh logs --tail 80 strategy`
   - `./scripts/compose.sh logs --tail 80 executor`
@@ -38,7 +38,7 @@
 - Reapply env and bring stack up in host fallback:
   - `./scripts/compose-host.sh up -d`
   - `./scripts/health-check.sh`
-- If bridge issue persists in WSL:
+- If running in legacy Podman mode and bridge issue persists in WSL:
   - `./scripts/fix-podman-wsl-network.sh`
 
 ## Release Evidence

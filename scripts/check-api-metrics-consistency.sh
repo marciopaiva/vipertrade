@@ -5,6 +5,7 @@ API_URL="${API_URL:-http://localhost:8080}"
 DB_CONTAINER="${DB_CONTAINER:-vipertrade-postgres}"
 DB_USER="${DB_USER:-viper}"
 DB_NAME="${DB_NAME:-vipertrade}"
+. "$(dirname "$0")/container-runtime.sh"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -14,7 +15,6 @@ need_cmd() {
 }
 
 need_cmd curl
-need_cmd podman
 need_cmd python3
 
 PERF_JSON=$(curl -fsS "${API_URL}/api/v1/performance")
@@ -29,7 +29,7 @@ fetch_db_window() {
   local start_utc="$1"
   local end_utc="$2"
 
-  podman exec -i "${DB_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -At -F '|' -c \
+  container_exec_i "${DB_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -At -F '|' -c \
     "SELECT \
        COUNT(*)::bigint, \
        COUNT(*) FILTER (WHERE COALESCE(pnl,0) > 0)::bigint, \
