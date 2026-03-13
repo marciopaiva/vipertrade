@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use redis::AsyncCommands;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
+use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -33,6 +34,8 @@ struct ExecutorConfig {
     live_symbol_allowlist: HashSet<String>,
     reconcile_fix: bool,
     paper_max_open_positions: i64,
+    strategy_config_path: String,
+    trading_profile: String,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -127,6 +130,10 @@ impl ExecutorConfig {
             .and_then(|v| v.parse::<i64>().ok())
             .filter(|v| *v > 0)
             .unwrap_or(2);
+        let strategy_config_path = std::env::var("STRATEGY_CONFIG")
+            .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
+        let trading_profile =
+            std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
 
         Self {
             redis_url,
@@ -142,6 +149,8 @@ impl ExecutorConfig {
             live_symbol_allowlist,
             reconcile_fix,
             paper_max_open_positions,
+            strategy_config_path,
+            trading_profile,
         }
     }
 
@@ -191,6 +200,78 @@ fn resolve_bybit_credentials() -> (String, String) {
             .or_else(|| from("BYBIT_API_SECRET"))
             .unwrap_or_default(),
     )
+}
+
+fn yaml_get<'a>(value: &'a YamlValue, path: &[&str]) -> Option<&'a YamlValue> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    Some(current)
+}
+
+fn yaml_f64(value: &YamlValue, path: &[&str]) -> Option<f64> {
+    yaml_get(value, path).and_then(|v| match v {
+        YamlValue::Number(n) => n.as_f64(),
+        YamlValue::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    })
+}
+
+fn yaml_bool(value: &YamlValue, path: &[&str]) -> Option<bool> {
+    yaml_get(value, path).and_then(|v| match v {
+        YamlValue::Bool(b) => Some(*b),
+        YamlValue::String(s) => match s.to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => Some(true),
+            "false" | "0" | "no" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn load_native_trailing_config(cfg: &ExecutorConfig, symbol: &str) -> Option<NativeTrailingConfig> {
+    let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok()?;
+    let root: YamlValue = serde_yaml::from_str(&raw).ok()?;
+    let mode_key = cfg.trading_mode.as_str();
+    let symbol_key = symbol.to_uppercase();
+    let profile_key = cfg.trading_profile.to_ascii_uppercase();
+
+    let mode_cfg = yaml_get(&root, &["global", "mode_profiles", mode_key]);
+    let pair_mode_cfg = yaml_get(&root, &[&symbol_key, "mode_profiles", mode_key]);
+    let pair_profile_cfg = yaml_get(
+        &root,
+        &[&symbol_key, "trailing_stop", "by_profile", &profile_key],
+    );
+
+    let enabled = pair_mode_cfg
+        .and_then(|v| yaml_bool(v, &["trailing_enabled"]))
+        .or_else(|| mode_cfg.and_then(|v| yaml_bool(v, &["trailing_enabled"])))
+        .or_else(|| pair_mode_cfg.and_then(|v| yaml_bool(v, &["trailing_stop", "enabled"])))
+        .or_else(|| pair_profile_cfg.and_then(|v| yaml_bool(v, &["enabled"])))
+        .unwrap_or(false);
+
+    if !enabled {
+        return None;
+    }
+
+    let activate_after_profit_pct = pair_mode_cfg
+        .and_then(|v| yaml_f64(v, &["trailing_stop", "activate_after_profit_pct"]))
+        .or_else(|| {
+            mode_cfg.and_then(|v| yaml_f64(v, &["trailing_stop", "activate_after_profit_pct"]))
+        })
+        .or_else(|| pair_profile_cfg.and_then(|v| yaml_f64(v, &["activate_after_profit_pct"])))?;
+
+    let initial_trail_pct = pair_mode_cfg
+        .and_then(|v| yaml_f64(v, &["trailing_stop", "initial_trail_pct"]))
+        .or_else(|| mode_cfg.and_then(|v| yaml_f64(v, &["trailing_stop", "initial_trail_pct"])))
+        .or_else(|| pair_profile_cfg.and_then(|v| yaml_f64(v, &["initial_trail_pct"])))?;
+
+    Some(NativeTrailingConfig {
+        enabled,
+        activate_after_profit_pct,
+        initial_trail_pct,
+    })
 }
 
 async fn shutdown_signal() {
@@ -293,6 +374,14 @@ struct BybitSymbolConstraints {
     min_order_qty: f64,
     qty_step: f64,
     min_notional: Option<f64>,
+    tick_size: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeTrailingConfig {
+    enabled: bool,
+    activate_after_profit_pct: f64,
+    initial_trail_pct: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -340,17 +429,7 @@ fn parse_positive_f64(v: Option<&Value>) -> Option<f64> {
 }
 
 fn format_order_qty(qty: f64, qty_step: f64) -> String {
-    let precision = if qty_step >= 1.0 {
-        0
-    } else {
-        let step_repr = format!("{:.12}", qty_step);
-        step_repr
-            .trim_end_matches('0')
-            .split('.')
-            .nth(1)
-            .map(|d| d.len())
-            .unwrap_or(0)
-    };
+    let precision = qty_step_precision(qty_step);
 
     if precision == 0 {
         format!("{:.0}", qty)
@@ -360,19 +439,74 @@ fn format_order_qty(qty: f64, qty_step: f64) -> String {
     }
 }
 
+fn format_price_value(price: f64, tick_size: f64) -> String {
+    let precision = qty_step_precision(tick_size);
+    if precision == 0 {
+        format!("{:.0}", price)
+    } else {
+        let raw = format!("{price:.precision$}");
+        raw.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn snap_price_to_tick(price: f64, tick_size: f64) -> f64 {
+    if tick_size <= 0.0 {
+        return price;
+    }
+    let precision = qty_step_precision(tick_size);
+    let steps = (price / tick_size).round();
+    round_with_precision(steps * tick_size, precision)
+}
+
+fn qty_step_precision(qty_step: f64) -> usize {
+    if qty_step >= 1.0 {
+        0
+    } else {
+        let step_repr = format!("{:.12}", qty_step);
+        step_repr
+            .trim_end_matches('0')
+            .split('.')
+            .nth(1)
+            .map(|d| d.len())
+            .unwrap_or(0)
+    }
+}
+
+fn round_with_precision(value: f64, precision: usize) -> f64 {
+    if precision == 0 {
+        value.round()
+    } else {
+        let factor = 10_f64.powi(precision as i32);
+        (value * factor).round() / factor
+    }
+}
+
 fn normalize_order_quantity(qty: f64, c: BybitSymbolConstraints) -> Result<f64, String> {
     if qty <= 0.0 {
         return Err("quantity must be > 0".to_string());
     }
 
-    let eps = 1e-9_f64;
+    let eps = 1e-8_f64;
     let mut normalized = qty;
+    let precision = qty_step_precision(c.qty_step).max(qty_step_precision(c.min_order_qty));
 
     if c.qty_step > 0.0 {
-        normalized = (qty / c.qty_step).floor() * c.qty_step;
+        let raw_steps = qty / c.qty_step;
+        let rounded_steps = raw_steps.round();
+        let snapped_steps = if (raw_steps - rounded_steps).abs() <= eps {
+            rounded_steps
+        } else {
+            raw_steps.floor()
+        };
+        normalized = snapped_steps.max(0.0) * c.qty_step;
     }
+    normalized = round_with_precision(normalized, precision);
 
     if normalized + eps < c.min_order_qty {
+        let min_order_qty = round_with_precision(c.min_order_qty, precision);
+        if qty + eps >= min_order_qty {
+            return Ok(min_order_qty);
+        }
         return Err(format!(
             "quantity {} below minOrderQty {} after qtyStep normalization",
             normalized, c.min_order_qty
@@ -441,15 +575,18 @@ async fn fetch_symbol_constraints(
     let lot = instrument
         .get("lotSizeFilter")
         .ok_or("missing lotSizeFilter")?;
+    let price_filter = instrument.get("priceFilter").ok_or("missing priceFilter")?;
 
     let min_order_qty = parse_positive_f64(lot.get("minOrderQty")).ok_or("missing minOrderQty")?;
     let qty_step = parse_positive_f64(lot.get("qtyStep")).ok_or("missing qtyStep")?;
     let min_notional = parse_positive_f64(lot.get("minNotionalValue"));
+    let tick_size = parse_positive_f64(price_filter.get("tickSize")).ok_or("missing tickSize")?;
 
     Ok(BybitSymbolConstraints {
         min_order_qty,
         qty_step,
         min_notional,
+        tick_size,
     })
 }
 
@@ -576,6 +713,33 @@ async fn bybit_private_get(
         .header("X-BAPI-SIGN-TYPE", "2")
         .header("X-BAPI-TIMESTAMP", ts)
         .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
+        .send()
+        .await?;
+
+    parse_bybit_json_response(res, "bybit private").await
+}
+
+async fn bybit_private_post(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    path: &str,
+    body: &Value,
+) -> Result<Value, Box<dyn Error>> {
+    let body_str = serde_json::to_string(body)?;
+    let ts = now_ms();
+    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, body_str);
+    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
+
+    let url = format!("{}{}", cfg.bybit_base_url(), path);
+    let res = http
+        .post(url)
+        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
+        .header("X-BAPI-SIGN", sign)
+        .header("X-BAPI-SIGN-TYPE", "2")
+        .header("X-BAPI-TIMESTAMP", ts)
+        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
+        .header(CONTENT_TYPE, "application/json")
+        .body(body_str)
         .send()
         .await?;
 
@@ -1358,6 +1522,133 @@ async fn fetch_bybit_position_qty(
     Ok(qty)
 }
 
+async fn fetch_bybit_last_price(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> Result<f64, Box<dyn Error>> {
+    let path = format!(
+        "/v5/market/tickers?category=linear&symbol={}",
+        symbol.to_uppercase()
+    );
+    let value = bybit_public_get(http, cfg, &path).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
+    }
+
+    let price = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .and_then(|ticker| ticker.get("lastPrice"))
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|p| *p > 0.0)
+        .ok_or("missing result.list[0].lastPrice")?;
+
+    Ok(price)
+}
+
+async fn set_bybit_trailing_stop(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    event: &StrategyDecisionEvent,
+    entry_price: f64,
+) -> Result<(), Box<dyn Error>> {
+    if !matches!(event.decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+        return Ok(());
+    }
+
+    let Some(native_cfg) = load_native_trailing_config(cfg, &event.decision.symbol) else {
+        return Ok(());
+    };
+
+    if !native_cfg.enabled || entry_price <= 0.0 {
+        return Ok(());
+    }
+
+    let constraints = get_symbol_constraints(state, http, cfg, &event.decision.symbol).await?;
+    let is_long = event.decision.action == "ENTER_LONG";
+    let trailing_distance_raw = entry_price * native_cfg.initial_trail_pct;
+    let trailing_distance = snap_price_to_tick(trailing_distance_raw, constraints.tick_size);
+
+    if trailing_distance <= 0.0 {
+        return Err("computed trailing distance is not positive".into());
+    }
+
+    let mut last_error: Option<String> = None;
+
+    for attempt in 1..=4 {
+        let last_price = fetch_bybit_last_price(http, cfg, &event.decision.symbol)
+            .await
+            .unwrap_or(entry_price);
+        let active_price_target = if is_long {
+            (entry_price * (1.0 + native_cfg.activate_after_profit_pct))
+                .max(last_price + constraints.tick_size)
+        } else {
+            (entry_price * (1.0 - native_cfg.activate_after_profit_pct))
+                .min((last_price - constraints.tick_size).max(constraints.tick_size))
+        };
+        let active_price = snap_price_to_tick(active_price_target, constraints.tick_size);
+
+        let body = json!({
+            "category": "linear",
+            "symbol": event.decision.symbol,
+            "tpslMode": "Full",
+            "positionIdx": 0,
+            "activePrice": format_price_value(active_price, constraints.tick_size),
+            "trailingStop": format_price_value(trailing_distance, constraints.tick_size),
+        });
+
+        let value = bybit_private_post(http, cfg, "/v5/position/trading-stop", &body).await?;
+        let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+        if ret_code == 0 {
+            println!(
+                "Configured Bybit trailing stop event_id={} symbol={} active_price={} trailing_distance={} attempt={}",
+                event.event_id,
+                event.decision.symbol,
+                format_price_value(active_price, constraints.tick_size),
+                format_price_value(trailing_distance, constraints.tick_size),
+                attempt,
+            );
+            return Ok(());
+        }
+
+        let ret_msg = value
+            .get("retMsg")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        last_error = Some(format!(
+            "bybit trailing-stop retCode={} retMsg={} body={}",
+            ret_code, ret_msg, value
+        ));
+
+        let retryable_zero_position = ret_msg.contains("zero position");
+        let retryable_active_price = ret_msg.contains("TrailingProfit:")
+            || ret_msg.contains("should greater than")
+            || ret_msg.contains("should be less than");
+
+        if !(retryable_zero_position || retryable_active_price) || attempt == 4 {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(350 * attempt as u64)).await;
+    }
+
+    Err(last_error
+        .unwrap_or_else(|| "unknown trailing-stop error".to_string())
+        .into())
+}
+
 async fn local_open_qty(pool: &PgPool, symbol: &str, side: &str) -> Result<f64, sqlx::Error> {
     let qty: Option<f64> = sqlx::query_scalar(
         "SELECT COALESCE(SUM(quantity)::double precision, 0)
@@ -1910,6 +2201,17 @@ async fn handle_decision_event(
                     );
                     status = "submitted_no_persist";
                 }
+
+                if let Err(e) = set_bybit_trailing_stop(state, http, cfg, &event, entry_price).await
+                {
+                    eprintln!(
+                        "Failed to configure Bybit trailing stop event_id={} order_id={} symbol={} err={}",
+                        event.event_id, order_id, event.decision.symbol, e
+                    );
+                    if status == "submitted" {
+                        status = "submitted_trailing_not_set";
+                    }
+                }
             }
 
             mark_processed(state, &idem_key, &event, status, Some(&order_id), None).await?;
@@ -2141,6 +2443,7 @@ mod tests {
         let c = BybitSymbolConstraints {
             min_order_qty: 1.0,
             qty_step: 0.1,
+            tick_size: 0.0001,
             min_notional: Some(5.0),
         };
         let q = normalize_order_quantity(10.09, c).expect("normalize qty");
@@ -2152,10 +2455,35 @@ mod tests {
         let c = BybitSymbolConstraints {
             min_order_qty: 1.0,
             qty_step: 0.1,
+            tick_size: 0.0001,
             min_notional: Some(5.0),
         };
         let err = normalize_order_quantity(0.95, c).expect_err("should reject");
         assert!(err.contains("below minOrderQty"));
+    }
+
+    #[test]
+    fn snaps_quantity_close_to_step_boundary() {
+        let c = BybitSymbolConstraints {
+            min_order_qty: 0.1,
+            qty_step: 0.1,
+            tick_size: 0.0001,
+            min_notional: Some(5.0),
+        };
+        let q = normalize_order_quantity(0.09999999964, c).expect("normalize qty");
+        assert!((q - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn snaps_quantity_close_to_fractional_step_boundary() {
+        let c = BybitSymbolConstraints {
+            min_order_qty: 0.1,
+            qty_step: 0.1,
+            tick_size: 0.0001,
+            min_notional: Some(5.0),
+        };
+        let q = normalize_order_quantity(8.1999999996, c).expect("normalize qty");
+        assert!((q - 8.2).abs() < 1e-9);
     }
 
     #[test]
@@ -2170,6 +2498,7 @@ mod tests {
         let c = BybitSymbolConstraints {
             min_order_qty: 1.0,
             qty_step: 0.1,
+            tick_size: 0.0001,
             min_notional: Some(5.0),
         };
 

@@ -161,6 +161,8 @@ services:
     ports:
       - "8082:8082"
     environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       PROFILE_CONFIG: /app/config/system/profiles.yaml
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: ${PYO3_USE_ABI3_FORWARD_COMPATIBILITY:-1}
@@ -229,6 +231,8 @@ services:
       BYBIT_WS_PRIVATE: ${BYBIT_WS_PRIVATE:-wss://stream-testnet.bybit.com/v5/private}
       BYBIT_RECV_WINDOW: ${BYBIT_RECV_WINDOW:-5000}
       BYBIT_ACCOUNT_TYPE: ${BYBIT_ACCOUNT_TYPE:-UNIFIED}
+      STRATEGY_CONFIG: /app/config/trading/pairs.yaml
+      TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
       EXECUTOR_ENABLE_LIVE_ORDERS: ${EXECUTOR_ENABLE_LIVE_ORDERS:-false}
       EXECUTOR_LIVE_SYMBOL_ALLOWLIST: ${EXECUTOR_LIVE_SYMBOL_ALLOWLIST:-DOGEUSDT}
       EXECUTOR_RECONCILE_FIX: ${EXECUTOR_RECONCILE_FIX:-false}
@@ -420,6 +424,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
       REDIS_URL: redis://redis:6379
       TRADING_MODE: ${TRADING_MODE:-paper}
+      STRATEGY_CONFIG: /app/config/pairs.yaml
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
       BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
@@ -442,6 +447,7 @@ services:
       retries: 3
     volumes:
       - ../api:/app
+      - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
       - ../logs:/app/logs
     depends_on:
       postgres:

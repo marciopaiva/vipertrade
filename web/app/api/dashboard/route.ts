@@ -262,7 +262,7 @@ export async function GET() {
     const [performance, positions, trades, dailyTradesSummary, events, marketSignals, analyticsScores, riskKpis, controlState, wallet, services] = await Promise.all([
       fetchJson(baseUrl, "/performance"),
       fetchJson(baseUrl, "/positions"),
-      fetchJson(baseUrl, "/trades?limit=20"),
+      fetchJson(baseUrl, "/trades?limit=100"),
       fetchJson(baseUrl, "/trades/today-summary"),
       fetchJson(baseUrl, "/events?limit=40"),
       fetchMarketSignals(baseUrl),

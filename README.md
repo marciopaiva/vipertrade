@@ -167,6 +167,31 @@ Trading mode semantics:
 - `TRADING_MODE=testnet`: wallet/prices/positions on Bybit testnet and real testnet orders
 - `TRADING_MODE=mainnet`: wallet/prices/positions on Bybit mainnet and real mainnet orders
 
+Mode trade profiles:
+
+- `paper`: keeps guarded entry rules for simulation fidelity
+- `testnet`: applies the most permissive entry overlay for smoke-testing buy/sell flows
+- `mainnet`: keeps guarded entry rules for production-style operation
+- Dashboard labels:
+  - `TESTNET / SMOKE`
+  - `PAPER / STANDARD`
+  - `MAINNET / STANDARD`
+
+`TESTNET / SMOKE` runtime specifics:
+
+- Bybit is the preferred decision/execution source in testnet.
+- Entry filters are relaxed to make buy/sell/reconcile flows easier to exercise.
+- `DOGEUSDT` uses a smaller `TESTNET`-only sizing cap (`8 USDT`) to reduce stop-loss impact during smoke cycles.
+- Mode-level exit policy:
+  - `stop_loss_pct = 3%`
+  - fixed take profit disabled
+  - trailing enabled
+  - arm at `+0.30%`
+  - move to break-even at `+0.40%`
+  - ratchet tighter every `+0.10%`
+  - `min_hold_seconds = 45`
+- The dashboard exposes trailing readiness/activation in `Open Positions`.
+
 Public API source semantics:
 
 - `/api/v1/positions`
@@ -181,6 +206,15 @@ Public API source semantics:
   - `paper`: database aggregates
   - `testnet`: Bybit testnet closed-PnL aggregates
   - `mainnet`: Bybit mainnet closed-PnL aggregates
+
+Native Bybit trailing stop:
+
+- The executor now configures Bybit native trailing stop via `POST /v5/position/trading-stop` after successful `TESTNET`/`MAINNET` entries.
+- The local trailing engine remains active for observability and fallback, so runtime is currently hybrid:
+  - local trailing state remains visible in API/web
+  - Bybit native trailing is configured on the exchange when position state is ready
+- Executor retries short-lived `zero position` and trailing validation races with a short backoff before giving up.
+- Bybit's `Trailing Stop` tab only shows exchange-native trailing for positions opened after this rollout.
 
 Execution controls:
 

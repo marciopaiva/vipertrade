@@ -14,10 +14,15 @@ Auth: none.
 
 - `GET /api/v1/status`
   - all modes: runtime/service status from API service + DB-backed control state
+  - includes:
+    - `trading_mode`
+    - internal `trading_profile`
+    - UI-facing `trade_profile_label` (`SMOKE` or `STANDARD`)
 - `GET /api/v1/positions`
   - `PAPER`: database
   - `TESTNET`: Bybit testnet `position/list`
   - `MAINNET`: Bybit mainnet `position/list`
+  - trailing fields in response remain locally derived for API/web observability, even when Bybit native trailing is also configured
 - `GET /api/v1/trades?limit=<n>`
   - `PAPER`: database
   - `TESTNET`: Bybit testnet closed-PnL history
