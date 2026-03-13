@@ -114,14 +114,14 @@ struct PositionConfigStore {
 #[derive(Clone)]
 struct GlobalPositionConfig {
     trailing_enabled: bool,
-    trailing_min_move_threshold_pct: f64,
+    _trailing_min_move_threshold_pct: f64,
 }
 
 impl Default for GlobalPositionConfig {
     fn default() -> Self {
         Self {
             trailing_enabled: true,
-            trailing_min_move_threshold_pct: 0.002,
+            _trailing_min_move_threshold_pct: 0.002,
         }
     }
 }
@@ -360,7 +360,7 @@ fn load_position_config(path: &str) -> PositionConfigStore {
             .and_then(|g| g.trailing_stop.as_ref())
             .and_then(|t| t.enabled)
             .unwrap_or(true),
-        trailing_min_move_threshold_pct: parsed
+        _trailing_min_move_threshold_pct: parsed
             .global
             .as_ref()
             .and_then(|g| g.trailing_stop.as_ref())
