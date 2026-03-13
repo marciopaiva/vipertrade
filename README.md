@@ -18,7 +18,9 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 - Opcional: Podman + podman-compose como fallback legado
 - Git
 
-Os scripts detectam automaticamente `docker compose` quando ele estiver disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para Podman em fluxos legados.
+Os scripts detectam automaticamente `docker compose` quando ele estiver
+disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para
+Podman em fluxos legados.
 
 ### Setup rapido
 
