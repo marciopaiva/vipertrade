@@ -167,6 +167,21 @@ Trading mode semantics:
 - `TRADING_MODE=testnet`: wallet/prices/positions on Bybit testnet and real testnet orders
 - `TRADING_MODE=mainnet`: wallet/prices/positions on Bybit mainnet and real mainnet orders
 
+Public API source semantics:
+
+- `/api/v1/positions`
+  - `paper`: database
+  - `testnet`: Bybit testnet API
+  - `mainnet`: Bybit mainnet API
+- `/api/v1/trades`
+  - `paper`: database
+  - `testnet`: Bybit testnet closed-PnL history
+  - `mainnet`: Bybit mainnet closed-PnL history
+- `/api/v1/performance`
+  - `paper`: database aggregates
+  - `testnet`: Bybit testnet closed-PnL aggregates
+  - `mainnet`: Bybit mainnet closed-PnL aggregates
+
 Execution controls:
 
 - `EXECUTOR_ENABLE_LIVE_ORDERS` is legacy; runtime execution is derived from `TRADING_MODE`

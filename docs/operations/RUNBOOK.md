@@ -68,11 +68,11 @@ Default is safe dry-run (`EXECUTOR_ENABLE_LIVE_ORDERS=false`).
 
 1. Keep live disabled and validate sanity checks/logs.
 2. Set allowlist to one symbol only (example: `DOGEUSDT`).
-3. Enable live orders and restart only executor.
+3. Set runtime mode explicitly and restart only executor.
 
 ```bash
 # compose/.env
-EXECUTOR_ENABLE_LIVE_ORDERS=true
+TRADING_MODE=testnet
 EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT
 BYBIT_ACCOUNT_TYPE=UNIFIED
 EXECUTOR_RECONCILE_FIX=false
@@ -80,6 +80,12 @@ EXECUTOR_RECONCILE_FIX=false
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
 ```
+
+Mode semantics:
+
+- `TRADING_MODE=paper`: public prices from Bybit mainnet, wallet/positions/trades simulated in database, no exchange orders.
+- `TRADING_MODE=testnet`: wallet/positions/trades on Bybit testnet and real testnet orders.
+- `TRADING_MODE=mainnet`: wallet/positions/trades on Bybit mainnet and real mainnet orders.
 
 Reconciliation behavior:
 
@@ -96,7 +102,7 @@ Smoke publish for ENTER order path:
 
 ```bash
 # compose/.env
-EXECUTOR_ENABLE_LIVE_ORDERS=false
+TRADING_MODE=paper
 
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
@@ -118,7 +124,7 @@ Then restart executor in safe mode:
 
 ```bash
 # compose/.env
-EXECUTOR_ENABLE_LIVE_ORDERS=false
+TRADING_MODE=paper
 EXECUTOR_RECONCILE_FIX=false
 
 ./scripts/compose.sh up -d --no-deps executor

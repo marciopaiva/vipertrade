@@ -10,6 +10,23 @@
 
 Auth: none.
 
+## Runtime Source Matrix
+
+- `GET /api/v1/status`
+  - all modes: runtime/service status from API service + DB-backed control state
+- `GET /api/v1/positions`
+  - `PAPER`: database
+  - `TESTNET`: Bybit testnet `position/list`
+  - `MAINNET`: Bybit mainnet `position/list`
+- `GET /api/v1/trades?limit=<n>`
+  - `PAPER`: database
+  - `TESTNET`: Bybit testnet closed-PnL history
+  - `MAINNET`: Bybit mainnet closed-PnL history
+- `GET /api/v1/performance`
+  - `PAPER`: database aggregates
+  - `TESTNET`: Bybit testnet closed-PnL aggregates
+  - `MAINNET`: Bybit mainnet closed-PnL aggregates
+
 ## Operator Endpoints
 
 - `POST /api/v1/control/kill-switch`
