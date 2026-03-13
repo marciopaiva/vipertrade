@@ -461,11 +461,24 @@ fn bybit_base_url() -> String {
         }
     }
 
-    let env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+    let env = resolve_runtime_bybit_env();
     if env.eq_ignore_ascii_case("mainnet") {
         "https://api.bybit.com".to_string()
     } else {
         "https://api-testnet.bybit.com".to_string()
+    }
+}
+
+fn resolve_runtime_bybit_env() -> String {
+    match std::env::var("TRADING_MODE")
+        .unwrap_or_else(|_| "paper".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "testnet" => "testnet".to_string(),
+        "mainnet" | "paper" | "live" => "mainnet".to_string(),
+        _ => std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string()),
     }
 }
 
@@ -1150,7 +1163,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = redis::Client::open(redis_url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
-    let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+    let bybit_env = resolve_runtime_bybit_env();
     let symbols = parse_trading_pairs();
     let base_url = bybit_base_url();
     let analytics_scores_url = std::env::var("ANALYTICS_SCORES_URL")

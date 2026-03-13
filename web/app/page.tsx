@@ -122,6 +122,25 @@ type DashboardPayload = {
       avg_forward_return: number;
     }>;
   };
+  wallet?: {
+    ok?: boolean;
+    status?: number;
+    url?: string;
+    error?: string | null;
+    ret_code?: number | null;
+    ret_msg?: string | null;
+    checked_at?: string;
+    account_type?: string;
+    total_equity?: number | null;
+    wallet_balance?: number | null;
+    margin_balance?: number | null;
+    available_balance?: number | null;
+    unrealized_pnl?: number | null;
+    initial_margin?: number | null;
+    maintenance_margin?: number | null;
+    account_im_rate?: number | null;
+    account_mm_rate?: number | null;
+  };
   risk_kpis: {
     rejected_orders_24h?: number;
     open_exposure_usdt?: number;
@@ -359,7 +378,12 @@ export default function Home() {
     const svc = services.find((item) => item.name === "executor");
     return !!svc?.ok;
   }, [services]);
-  const executionMode = data?.status?.trading_mode === "live" ? "live" : "paper";
+  const executionMode = (() => {
+    const mode = String(data?.status?.trading_mode || "").toLowerCase();
+    if (mode === "testnet") return "testnet" as const;
+    if (mode === "mainnet" || mode === "live") return "mainnet" as const;
+    return "paper" as const;
+  })();
   const executorControlEnabled = !!data?.control_state?.executor?.enabled;
   const killSwitchEnabled = !!data?.control_state?.kill_switch?.enabled;
   const executorVisualState: "running" | "paused" | "down" =
@@ -516,6 +540,36 @@ export default function Home() {
     });
   }, [realtimeMarketSignals, tokenSignalStats]);
   const exchangeLeader = analyticsExchanges[0] ?? null;
+  const wallet = data?.wallet;
+  const walletCards = useMemo(
+    () => [
+      {
+        label: "Total Equity",
+        value: usd(wallet?.total_equity),
+        accent: "#11c4ff",
+        helper: `${wallet?.account_type || "UNIFIED"} account`,
+      },
+      {
+        label: "Margin Balance",
+        value: usd(wallet?.margin_balance),
+        accent: "#90dcff",
+        helper:
+          typeof wallet?.available_balance === "number"
+            ? `Available ${usd(wallet.available_balance)}`
+            : "Available balance unavailable",
+      },
+      {
+        label: "Unrealized PnL",
+        value: usd(wallet?.unrealized_pnl),
+        accent: (wallet?.unrealized_pnl ?? 0) >= 0 ? "#00e5a8" : "#ff6478",
+        helper:
+          typeof wallet?.wallet_balance === "number"
+            ? `Wallet ${usd(wallet.wallet_balance)}`
+            : "Wallet balance unavailable",
+      },
+    ],
+    [wallet],
+  );
 
   const sendControl = useCallback(
     async (kind: ControlKind, payload: Record<string, unknown>) => {
@@ -570,8 +624,17 @@ export default function Home() {
                 {String(data?.status?.trading_mode || "-").toUpperCase()} / {String(data?.status?.trading_profile || "-").toUpperCase()} · Risk {String(data?.status?.risk_status || "-")}
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-                <span style={{ ...miniBadgeStyle, ...(executionMode === "live" ? statusTone(false) : statusTone(true)) }}>
-                  {executionMode === "live" ? "LIVE MODE" : "PAPER MODE"}
+                <span
+                  style={{
+                    ...miniBadgeStyle,
+                    ...(executionMode === "mainnet"
+                      ? { borderColor: "rgba(255,100,120,0.5)", color: "#ff9aa8", background: "rgba(96,16,30,0.22)" }
+                      : executionMode === "testnet"
+                        ? { borderColor: "rgba(247,181,0,0.45)", color: "#ffd978", background: "rgba(108,78,8,0.22)" }
+                        : statusTone(true)),
+                  }}
+                >
+                  {executionMode === "mainnet" ? "MAINNET MODE" : executionMode === "testnet" ? "TESTNET MODE" : "PAPER MODE"}
                 </span>
                 <span
                   style={{
@@ -624,6 +687,55 @@ export default function Home() {
         {data && (
           <>
             <section style={stackCardsStyle}>
+              <div style={panelBoxStyle}>
+                <div style={walletHeaderStyle}>
+                  <div>
+                    <h2 style={h2Style}>Wallet Overview</h2>
+                    <p style={mutedStyle}>
+                      Bybit private wallet snapshot
+                      {wallet?.checked_at ? ` · ${new Date(wallet.checked_at).toLocaleTimeString()}` : ""}
+                    </p>
+                  </div>
+                  <span
+                    style={{
+                      ...miniBadgeStyle,
+                      ...(wallet?.ok
+                        ? statusTone(true)
+                        : { borderColor: "rgba(255,100,120,0.5)", color: "#ff9aa8", background: "rgba(96,16,30,0.22)" }),
+                    }}
+                  >
+                    {wallet?.ok ? "SYNCED" : "UNAVAILABLE"}
+                  </span>
+                </div>
+
+                <div style={walletTopStripStyle}>
+                  <WalletRateCard
+                    label="IM"
+                    amount={wallet?.initial_margin}
+                    rate={wallet?.account_im_rate}
+                    tone={wallet?.ok ? "positive" : "neutral"}
+                  />
+                  <WalletRateCard
+                    label="MM"
+                    amount={wallet?.maintenance_margin}
+                    rate={wallet?.account_mm_rate}
+                    tone={wallet?.ok ? "positive" : "neutral"}
+                  />
+                </div>
+
+                <div style={heroGridStyle}>
+                  {walletCards.map((item) => (
+                    <MetricCard key={item.label} label={item.label} value={item.value} accent={item.accent} helper={item.helper} />
+                  ))}
+                </div>
+
+                {!wallet?.ok && (
+                  <div style={{ marginTop: 12, color: "#ff9aa8", fontSize: 13 }}>
+                    {wallet?.error || wallet?.ret_msg || "Wallet snapshot unavailable."}
+                  </div>
+                )}
+              </div>
+
               <div style={panelBoxStyle}>
                 <h2 style={h2Style}>Service Flow (Realtime)</h2>
                 <p style={mutedStyle}>Dynamic network map based on live health and latency.</p>
@@ -828,7 +940,7 @@ function Panel({ title, children, tone = "normal" }: { title: string; children: 
   );
 }
 
-function MetricCard({ label, value, accent }: { label: string; value: string; accent: string }) {
+function MetricCard({ label, value, accent, helper }: { label: string; value: string; accent: string; helper?: string }) {
   return (
     <article
       style={{
@@ -841,6 +953,40 @@ function MetricCard({ label, value, accent }: { label: string; value: string; ac
     >
       <div style={{ fontSize: 12, letterSpacing: 0.4, textTransform: "uppercase", color: "#86a7dc", marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 700, color: accent }}>{value}</div>
+      {helper && <div style={{ marginTop: 6, fontSize: 12, color: "#89a8d5" }}>{helper}</div>}
+    </article>
+  );
+}
+
+function WalletRateCard({
+  label,
+  amount,
+  rate,
+  tone,
+}: {
+  label: string;
+  amount: number | null | undefined;
+  rate: number | null | undefined;
+  tone: "positive" | "neutral";
+}) {
+  const color = tone === "positive" ? "#38f9a5" : "#9fb6dc";
+  return (
+    <article style={walletRateCardStyle}>
+      <div style={{ fontSize: 13, color: "#90a9d4", minWidth: 22 }}>{label}</div>
+      <div style={{ flex: 1, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div
+          style={{
+            width: `${Math.min(Math.max(((rate ?? 0) * 100) / 5, 8), 100)}%`,
+            height: "100%",
+            borderRadius: 999,
+            background: `linear-gradient(90deg, ${color}55, ${color})`,
+          }}
+        />
+      </div>
+      <div style={{ minWidth: 154, display: "flex", justifyContent: "flex-end", gap: 8, fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ color, fontWeight: 700 }}>{pct(rate)}</span>
+        <span style={{ color: "#d7e4ff", fontWeight: 600 }}>{usd(amount)}</span>
+      </div>
     </article>
   );
 }
@@ -906,7 +1052,7 @@ function ServiceFlowGraph({
   executorVisualState,
 }: {
   services: DashboardPayload["services"];
-  executionMode: "paper" | "live";
+  executionMode: "paper" | "testnet" | "mainnet";
   executorVisualState: "running" | "paused" | "down";
 }) {
   const serviceMap = new Map(services.map((svc) => [svc.name, svc]));
@@ -1062,6 +1208,32 @@ const heroGridStyle: CSSProperties = {
   display: "grid",
   gap: 12,
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+};
+
+const walletHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 12,
+  flexWrap: "wrap",
+  marginBottom: 14,
+};
+
+const walletTopStripStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  marginBottom: 14,
+};
+
+const walletRateCardStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  border: "1px solid rgba(95,137,203,0.22)",
+  borderRadius: 12,
+  padding: "10px 12px",
+  background: "linear-gradient(180deg, rgba(8,18,36,0.86), rgba(6,14,28,0.92))",
 };
 
 const splitTwoStyle: CSSProperties = {

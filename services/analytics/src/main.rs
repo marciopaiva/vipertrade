@@ -104,7 +104,16 @@ fn bybit_base_url() -> String {
         }
     }
 
-    let env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
+    let env = match std::env::var("TRADING_MODE")
+        .unwrap_or_else(|_| "paper".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "testnet" => "testnet".to_string(),
+        "mainnet" | "paper" | "live" => "mainnet".to_string(),
+        _ => std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string()),
+    };
     if env.eq_ignore_ascii_case("mainnet") {
         "https://api.bybit.com".to_string()
     } else {

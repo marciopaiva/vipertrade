@@ -21,6 +21,7 @@ struct AppState {
     db_pool: Option<PgPool>,
     trading_mode: String,
     trading_profile: String,
+    initial_capital_usd: f64,
     operator_auth_mode: String,
     operator_api_token: Option<String>,
     executor_default_enabled: bool,
@@ -268,6 +269,80 @@ struct BybitPrivateHealthResponse {
     checked_at: DateTime<Utc>,
 }
 
+#[derive(Serialize)]
+struct BybitWalletResponse {
+    ok: bool,
+    status: u16,
+    url: String,
+    error: Option<String>,
+    ret_code: Option<i64>,
+    ret_msg: Option<String>,
+    checked_at: DateTime<Utc>,
+    account_type: String,
+    total_equity: Option<f64>,
+    wallet_balance: Option<f64>,
+    margin_balance: Option<f64>,
+    available_balance: Option<f64>,
+    unrealized_pnl: Option<f64>,
+    initial_margin: Option<f64>,
+    maintenance_margin: Option<f64>,
+    account_im_rate: Option<f64>,
+    account_mm_rate: Option<f64>,
+}
+
+struct BybitWalletFetchResult {
+    checked_at: DateTime<Utc>,
+    account_type: String,
+    url: String,
+    status: u16,
+    latency_ms: i64,
+    ret_code: Option<i64>,
+    ret_msg: Option<String>,
+    body: Value,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TradingMode {
+    Paper,
+    Testnet,
+    Mainnet,
+}
+
+impl TradingMode {
+    fn from_env() -> Self {
+        match std::env::var("TRADING_MODE")
+            .unwrap_or_else(|_| "paper".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "testnet" => Self::Testnet,
+            "mainnet" | "live" => Self::Mainnet,
+            _ => Self::Paper,
+        }
+    }
+
+    fn as_status_label(self) -> &'static str {
+        match self {
+            Self::Paper => "PAPER",
+            Self::Testnet => "TESTNET",
+            Self::Mainnet => "MAINNET",
+        }
+    }
+
+    fn bybit_env(self) -> &'static str {
+        match self {
+            Self::Testnet => "testnet",
+            Self::Paper | Self::Mainnet => "mainnet",
+        }
+    }
+
+    fn uses_simulated_wallet(self) -> bool {
+        matches!(self, Self::Paper)
+    }
+}
+
 #[derive(Deserialize)]
 struct KillSwitchRequest {
     enabled: bool,
@@ -484,6 +559,25 @@ fn read_non_empty_env(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn read_bybit_credential(key_name: &str, secret_name: &str) -> (Option<String>, Option<String>) {
+    let mode = TradingMode::from_env();
+    let scoped = match mode {
+        TradingMode::Testnet => (
+            read_non_empty_env("BYBIT_TESTNET_API_KEY"),
+            read_non_empty_env("BYBIT_TESTNET_API_SECRET"),
+        ),
+        TradingMode::Paper | TradingMode::Mainnet => (
+            read_non_empty_env("BYBIT_MAINNET_API_KEY"),
+            read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
+        ),
+    };
+
+    (
+        scoped.0.or_else(|| read_non_empty_env(key_name)),
+        scoped.1.or_else(|| read_non_empty_env(secret_name)),
+    )
+}
+
 fn read_f64_env(name: &str, default_value: f64) -> f64 {
     std::env::var(name)
         .ok()
@@ -507,9 +601,7 @@ fn resolve_bybit_rest_url() -> String {
         return url.trim_end_matches('/').to_string();
     }
 
-    let bybit_env = std::env::var("BYBIT_ENV")
-        .unwrap_or_else(|_| "testnet".to_string())
-        .to_ascii_lowercase();
+    let bybit_env = TradingMode::from_env().bybit_env().to_string();
     if bybit_env == "mainnet" {
         "https://api.bybit.com".to_string()
     } else {
@@ -1326,6 +1418,176 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
 }
 
 async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
+    if TradingMode::from_env().uses_simulated_wallet() {
+        return json_ok(&BybitPrivateHealthResponse {
+            name: "bybit-private",
+            ok: true,
+            status: 200,
+            latency_ms: 0,
+            url: format!(
+                "{}/v5/account/wallet-balance?accountType={}",
+                resolve_bybit_rest_url(),
+                read_non_empty_env("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|| "UNIFIED".to_string())
+            ),
+            error: None,
+            ret_code: Some(0),
+            ret_msg: Some("paper mode: database-simulated wallet".to_string()),
+            checked_at: Utc::now(),
+        });
+    }
+
+    let result = fetch_bybit_wallet_snapshot().await;
+    let ok = result.status == 200 && result.ret_code == Some(0) && result.error.is_none();
+    json_ok(&BybitPrivateHealthResponse {
+        name: "bybit-private",
+        ok,
+        status: result.status,
+        latency_ms: result.latency_ms,
+        url: result.url,
+        error: if ok {
+            None
+        } else {
+            Some(
+                result.error.unwrap_or_else(|| {
+                    format!(
+                        "retCode={} retMsg={}",
+                        result
+                            .ret_code
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        result
+                            .ret_msg
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string())
+                    )
+                }),
+            )
+        },
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        checked_at: result.checked_at,
+    })
+}
+
+async fn bybit_wallet_handler(state: Arc<AppState>) -> impl Reply {
+    if TradingMode::from_env().uses_simulated_wallet() {
+        return json_ok(&build_paper_wallet_response(&state).await);
+    }
+
+    let result = fetch_bybit_wallet_snapshot().await;
+    let wallet = extract_wallet_summary(&result.body);
+    let ok = result.status == 200 && result.ret_code == Some(0) && result.error.is_none();
+
+    json_ok(&BybitWalletResponse {
+        ok,
+        status: result.status,
+        url: result.url,
+        error: result.error,
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        checked_at: result.checked_at,
+        account_type: result.account_type,
+        total_equity: wallet.get("totalEquity").and_then(json_number),
+        wallet_balance: wallet.get("totalWalletBalance").and_then(json_number),
+        margin_balance: wallet.get("totalMarginBalance").and_then(json_number),
+        available_balance: wallet.get("totalAvailableBalance").and_then(json_number),
+        unrealized_pnl: wallet.get("totalPerpUPL").and_then(json_number),
+        initial_margin: wallet.get("totalInitialMargin").and_then(json_number),
+        maintenance_margin: wallet.get("totalMaintenanceMargin").and_then(json_number),
+        account_im_rate: wallet.get("accountIMRate").and_then(json_number),
+        account_mm_rate: wallet.get("accountMMRate").and_then(json_number),
+    })
+}
+
+async fn build_paper_wallet_response(state: &AppState) -> BybitWalletResponse {
+    let checked_at = Utc::now();
+    let url = "paper://database-simulated-wallet".to_string();
+
+    let Some(pool) = &state.db_pool else {
+        return BybitWalletResponse {
+            ok: false,
+            status: 0,
+            url,
+            error: Some("database unavailable for paper wallet simulation".to_string()),
+            ret_code: None,
+            ret_msg: None,
+            checked_at,
+            account_type: "PAPER".to_string(),
+            total_equity: None,
+            wallet_balance: None,
+            margin_balance: None,
+            available_balance: None,
+            unrealized_pnl: None,
+            initial_margin: None,
+            maintenance_margin: None,
+            account_im_rate: None,
+            account_mm_rate: None,
+        };
+    };
+
+    let (realized_pnl, fees, funding_paid) = sqlx::query_as::<_, (f64, f64, f64)>(
+        "SELECT
+            COALESCE(SUM(pnl), 0)::double precision,
+            COALESCE(SUM(fees), 0)::double precision,
+            COALESCE(SUM(funding_paid), 0)::double precision
+         FROM trades
+         WHERE paper_trade = TRUE
+           AND status <> 'open'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or((0.0, 0.0, 0.0));
+
+    let initial_margin = sqlx::query_scalar::<_, f64>(
+        "SELECT
+            COALESCE(SUM((quantity * entry_price) / NULLIF(leverage, 0)), 0)::double precision
+         FROM trades
+         WHERE paper_trade = TRUE
+           AND status = 'open'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0.0);
+
+    let maintenance_margin = initial_margin * 0.5;
+    let unrealized_pnl = 0.0;
+    let wallet_balance = state.initial_capital_usd + realized_pnl - fees - funding_paid;
+    let margin_balance = wallet_balance;
+    let available_balance = (margin_balance - initial_margin).max(0.0);
+    let total_equity = margin_balance + unrealized_pnl;
+    let account_im_rate = if total_equity > 0.0 {
+        Some(round6(initial_margin / total_equity))
+    } else {
+        Some(0.0)
+    };
+    let account_mm_rate = if total_equity > 0.0 {
+        Some(round6(maintenance_margin / total_equity))
+    } else {
+        Some(0.0)
+    };
+
+    BybitWalletResponse {
+        ok: true,
+        status: 200,
+        url,
+        error: None,
+        ret_code: Some(0),
+        ret_msg: Some("paper mode: wallet simulated from database".to_string()),
+        checked_at,
+        account_type: "PAPER".to_string(),
+        total_equity: Some(round6(total_equity)),
+        wallet_balance: Some(round6(wallet_balance)),
+        margin_balance: Some(round6(margin_balance)),
+        available_balance: Some(round6(available_balance)),
+        unrealized_pnl: Some(round6(unrealized_pnl)),
+        initial_margin: Some(round6(initial_margin)),
+        maintenance_margin: Some(round6(maintenance_margin)),
+        account_im_rate,
+        account_mm_rate,
+    }
+}
+
+async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
     let checked_at = Utc::now();
     let bybit_url = resolve_bybit_rest_url();
     let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
@@ -1336,31 +1598,33 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
         bybit_url, account_type
     );
 
-    let Some(api_key) = read_non_empty_env("BYBIT_API_KEY") else {
-        return json_ok(&BybitPrivateHealthResponse {
-            name: "bybit-private",
-            ok: false,
+    let (api_key, api_secret) = read_bybit_credential("BYBIT_API_KEY", "BYBIT_API_SECRET");
+
+    let Some(api_key) = api_key else {
+        return BybitWalletFetchResult {
+            checked_at,
+            account_type,
+            url,
             status: 0,
             latency_ms: 0,
-            url,
+            ret_code: None,
+            ret_msg: None,
+            body: json!({}),
             error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
-            ret_code: None,
-            ret_msg: None,
-            checked_at,
-        });
+        };
     };
-    let Some(api_secret) = read_non_empty_env("BYBIT_API_SECRET") else {
-        return json_ok(&BybitPrivateHealthResponse {
-            name: "bybit-private",
-            ok: false,
+    let Some(api_secret) = api_secret else {
+        return BybitWalletFetchResult {
+            checked_at,
+            account_type,
+            url,
             status: 0,
             latency_ms: 0,
-            url,
-            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
             ret_code: None,
             ret_msg: None,
-            checked_at,
-        });
+            body: json!({}),
+            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
+        };
     };
 
     let timestamp = Utc::now().timestamp_millis().to_string();
@@ -1369,17 +1633,17 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
     let mut mac = match Hmac::<Sha256>::new_from_slice(api_secret.as_bytes()) {
         Ok(v) => v,
         Err(err) => {
-            return json_ok(&BybitPrivateHealthResponse {
-                name: "bybit-private",
-                ok: false,
+            return BybitWalletFetchResult {
+                checked_at,
+                account_type,
+                url,
                 status: 0,
                 latency_ms: 0,
-                url,
-                error: Some(format!("failed to initialize signature: {}", err)),
                 ret_code: None,
                 ret_msg: None,
-                checked_at,
-            });
+                body: json!({}),
+                error: Some(format!("failed to initialize signature: {}", err)),
+            };
         }
     };
     mac.update(payload.as_bytes());
@@ -1391,22 +1655,22 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
     {
         Ok(c) => c,
         Err(err) => {
-            return json_ok(&BybitPrivateHealthResponse {
-                name: "bybit-private",
-                ok: false,
+            return BybitWalletFetchResult {
+                checked_at,
+                account_type,
+                url,
                 status: 0,
                 latency_ms: 0,
-                url,
-                error: Some(format!("failed to build http client: {}", err)),
                 ret_code: None,
                 ret_msg: None,
-                checked_at,
-            });
+                body: json!({}),
+                error: Some(format!("failed to build http client: {}", err)),
+            };
         }
     };
 
     let started = std::time::Instant::now();
-    let response = client
+    match client
         .get(&url)
         .header("X-BAPI-API-KEY", api_key)
         .header("X-BAPI-SIGN", sign)
@@ -1414,54 +1678,54 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
         .header("X-BAPI-TIMESTAMP", timestamp)
         .header("X-BAPI-RECV-WINDOW", recv_window)
         .send()
-        .await;
-
-    let latency_ms = started.elapsed().as_millis() as i64;
-
-    match response {
+        .await
+    {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            let ret_code = parsed.get("retCode").and_then(|v| v.as_i64());
-            let ret_msg = parsed
-                .get("retMsg")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-
-            let ok = status == 200 && ret_code == Some(0);
-            json_ok(&BybitPrivateHealthResponse {
-                name: "bybit-private",
-                ok,
-                status,
-                latency_ms,
-                url,
-                error: if ok {
-                    None
-                } else {
-                    Some(format!(
-                        "retCode={} retMsg={}",
-                        ret_code
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        ret_msg.clone().unwrap_or_else(|| "unknown".to_string())
-                    ))
-                },
-                ret_code,
-                ret_msg,
+            BybitWalletFetchResult {
                 checked_at,
-            })
+                account_type,
+                url,
+                status,
+                latency_ms: started.elapsed().as_millis() as i64,
+                ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
+                ret_msg: parsed
+                    .get("retMsg")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                body: parsed,
+                error: None,
+            }
         }
-        Err(err) => json_ok(&BybitPrivateHealthResponse {
-            name: "bybit-private",
-            ok: false,
-            status: 0,
-            latency_ms,
+        Err(err) => BybitWalletFetchResult {
+            checked_at,
+            account_type,
             url,
-            error: Some(format!("request failed: {}", err)),
+            status: 0,
+            latency_ms: started.elapsed().as_millis() as i64,
             ret_code: None,
             ret_msg: None,
-            checked_at,
-        }),
+            body: json!({}),
+            error: Some(format!("request failed: {}", err)),
+        },
+    }
+}
+
+fn extract_wallet_summary(body: &Value) -> Value {
+    body.get("result")
+        .and_then(|result| result.get("list"))
+        .and_then(|list| list.as_array())
+        .and_then(|items| items.first())
+        .cloned()
+        .unwrap_or_else(|| json!({}))
+}
+
+fn json_number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
     }
 }
 
@@ -1779,8 +2043,9 @@ async fn main() {
 
     let state = Arc::new(AppState {
         db_pool,
-        trading_mode: std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string()),
+        trading_mode: TradingMode::from_env().as_status_label().to_string(),
         trading_profile: std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string()),
+        initial_capital_usd: read_f64_env("INITIAL_CAPITAL_USD", 100.0),
         operator_auth_mode: std::env::var("OPERATOR_AUTH_MODE")
             .unwrap_or_else(|_| "token".to_string()),
         operator_api_token: read_non_empty_env("OPERATOR_API_TOKEN"),
@@ -1849,6 +2114,14 @@ async fn main() {
         .and(with_state(state.clone()))
         .then(bybit_private_health_handler);
 
+    let bybit_wallet = api_v1
+        .and(warp::path("external"))
+        .and(warp::path("bybit-wallet"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .then(bybit_wallet_handler);
+
     let control_state = api_v1
         .and(warp::path("control"))
         .and(warp::path("state"))
@@ -1903,6 +2176,7 @@ async fn main() {
         .or(performance)
         .or(risk_kpis)
         .or(bybit_private_health)
+        .or(bybit_wallet)
         .or(control_state)
         .or(kill_switch)
         .or(executor_control)
