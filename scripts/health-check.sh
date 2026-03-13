@@ -10,6 +10,7 @@ echo -e "${GREEN}ViperTrade - Health Check${NC}"
 echo "================================================"
 
 cd "$(dirname "$0")/.."
+. scripts/container-runtime.sh
 
 if [[ ! -x scripts/compose.sh ]]; then
   echo -e "${RED}ERROR: scripts/compose.sh not found${NC}"
@@ -20,7 +21,7 @@ echo "Container status:"
 ./scripts/compose.sh ps || true
 
 echo "Checking Postgres..."
-if podman exec vipertrade-postgres pg_isready -U "${POSTGRES_USER:-viper}" >/dev/null 2>&1; then
+if container_exec vipertrade-postgres pg_isready -U "${POSTGRES_USER:-viper}" >/dev/null 2>&1; then
   echo -e "${GREEN}OK: database ready${NC}"
 else
   echo -e "${RED}ERROR: database not ready${NC}"
@@ -42,7 +43,7 @@ else
 fi
 
 echo "Checking Web container health..."
-WEB_HEALTH=$(podman inspect -f "{{.State.Health.Status}}" vipertrade-web 2>/dev/null || echo "unknown")
+WEB_HEALTH=$(container_inspect -f "{{.State.Health.Status}}" vipertrade-web 2>/dev/null || echo "unknown")
 if [[ "$WEB_HEALTH" == "healthy" ]]; then
   echo -e "${GREEN}OK: Web container healthy${NC}"
 elif [[ "$WEB_HEALTH" == "unknown" ]]; then

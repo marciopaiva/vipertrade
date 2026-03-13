@@ -10,6 +10,7 @@ DB_CONTAINER="${DB_CONTAINER:-vipertrade-postgres}"
 DB_USER="${DB_USER:-viper}"
 DB_NAME="${DB_NAME:-vipertrade}"
 VERIFY_DB="${VERIFY_DB:-1}"
+. "$(dirname "$0")/container-runtime.sh"
 
 usage() {
   cat <<'USAGE'
@@ -70,10 +71,8 @@ api_set_kill_switch() {
 
 db_verify_latest_event() {
   [[ "${VERIFY_DB}" == "1" ]] || return 0
-  need_cmd podman
-
   echo "[db] latest api_kill_switch_set event:"
-  podman exec -i "${DB_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -At -F '|' -c \
+  container_exec_i "${DB_CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -At -F '|' -c \
     "SELECT event_type,
             severity,
             data->>'enabled',

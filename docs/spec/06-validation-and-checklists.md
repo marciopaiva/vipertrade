@@ -15,7 +15,8 @@ Source: VIPERTRADE_SPEC.md (sections 18-20).
 ## Runbook Commands
 
 - Inicializacao e seguranca: ./scripts/init-secrets.sh, ./scripts/security-check.sh
-- Compose (Podman): cd compose && podman-compose up --build -d, podman-compose ps, podman-compose logs -f, podman-compose down
+- Compose (Docker): ./scripts/compose.sh up -d --build, ./scripts/compose.sh ps, ./scripts/compose.sh logs -f, ./scripts/compose.sh down
+- Compose (fallback legado Podman): cd compose && podman-compose up --build -d, podman-compose ps, podman-compose logs -f, podman-compose down
 - Backtest: ./scripts/run-backtest.sh MEDIUM 2025-02-01 2026-02-28
 - API e operacao: status, posicoes, trades, stats do leader e kill-switch via endpoints HTTP
 - Database: acesso SQL no container postgres para consultas operacionais

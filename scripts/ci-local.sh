@@ -40,7 +40,9 @@ cd "$(dirname "$0")/.."
 command -v cargo >/dev/null 2>&1 || fail "cargo not found"
 
 if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
-  command -v podman >/dev/null 2>&1 || fail "podman not found"
+  if ! docker compose version >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+    fail "docker compose or podman not found"
+  fi
   [[ -x scripts/compose.sh ]] || fail "scripts/compose.sh not found or not executable"
 fi
 
@@ -63,7 +65,7 @@ else
 fi
 
 if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
-  step "Podman compose config validation"
+  step "Compose config validation"
   ./scripts/compose.sh config >/dev/null
 else
   warn "Compose validation skipped (CI_LOCAL_SKIP_COMPOSE=1)"

@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 DATE_UTC="$(date -u +%Y-%m-%d)"
 TS_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -160,7 +161,7 @@ else
 fi
 
 DB_SIGNALS_OK=true
-DB_COUNTS=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c \
+DB_COUNTS=$(container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -F '|' -c \
   "WITH window_trades AS (
      SELECT quantity * entry_price AS notional
      FROM trades

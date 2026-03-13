@@ -7,6 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT_DIR/scripts/container-runtime.sh"
 DATE_UTC="$(date -u +%Y-%m-%d)"
 TS_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -84,7 +85,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-CRITICAL_EVENTS=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
+CRITICAL_EVENTS=$(container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
   "SELECT COUNT(*)::bigint FROM system_events WHERE severity='critical' AND timestamp >= NOW() - INTERVAL '${WINDOW_HOURS} hours';" 2>/dev/null || echo 999)
 
 if [[ "$CRITICAL_EVENTS" =~ ^[0-9]+$ ]] && (( CRITICAL_EVENTS <= MAX_CRITICAL_EVENTS )); then
@@ -96,7 +97,7 @@ else
   ISSUES=$((ISSUES + 1))
 fi
 
-CLOSED_TRADES_WINDOW=$(podman exec -i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
+CLOSED_TRADES_WINDOW=$(container_exec_i vipertrade-postgres psql -U "${POSTGRES_USER:-viper}" -d "${POSTGRES_DB:-vipertrade}" -At -c \
   "SELECT COUNT(*)::bigint FROM trades WHERE status='closed' AND closed_at >= NOW() - INTERVAL '${WINDOW_HOURS} hours';" 2>/dev/null || echo -1)
 
 if [[ "$CLOSED_TRADES_WINDOW" =~ ^[0-9]+$ ]] && (( CLOSED_TRADES_WINDOW >= MIN_CLOSED_TRADES )); then

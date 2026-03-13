@@ -7,7 +7,7 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 - Rust microservices (market-data, strategy, executor, monitor, backtest, api)
 - PostgreSQL + Redis
 - Web dashboard (Next.js)
-- Orquestracao com Docker Compose ou Podman Compose
+- Orquestracao com Docker Compose
 
 ## Ambiente recomendado (WSL Fedora + Docker Desktop)
 
@@ -15,10 +15,10 @@ Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
 
 - WSL Fedora
 - Docker Desktop no Windows com WSL integration habilitada para a distro Fedora
-- Opcional: Podman + podman-compose como fallback
+- Opcional: Podman + podman-compose como fallback legado
 - Git
 
-Os scripts detectam automaticamente `docker compose` quando ele estiver disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para Podman.
+Os scripts detectam automaticamente `docker compose` quando ele estiver disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para Podman em fluxos legados.
 
 ### Setup rapido
 
@@ -57,7 +57,7 @@ Para parar:
 ./scripts/compose-host.sh down
 ```
 
-### Corrigir rede bridge no WSL
+### Fallback legado com Podman no WSL
 
 ```bash
 ./scripts/fix-podman-wsl-network.sh
@@ -132,7 +132,7 @@ Workflow: `.github/workflows/ci.yml`
 
 ## Status atual (RC sem tag)
 
-- Infra e servicos sobem com Docker Compose e Podman Compose
+- Infra e servicos sobem com Docker Compose
 - Health checks principais respondendo
 - Bridge padrao validado no WSL com netavark + iptables
 
@@ -147,7 +147,7 @@ Live testnet controls (executor):
 Quick SQL checks after smoke cycle:
 
 ```bash
-podman exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
 SELECT COUNT(*) AS fills_total FROM bybit_fills;
 SELECT COUNT(*) AS duplicate_source_ids
 FROM (

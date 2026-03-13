@@ -18,6 +18,8 @@ SYMBOL="${1:-DOGEUSDT}"
 INTERVAL="${2:-1}"
 LIMIT="${3:-240}"
 SLEEP_SECONDS="${4:-0.1}"
+. "$(dirname "$0")/container-runtime.sh"
+CONTAINER_ENGINE_BIN="$(detect_container_engine)"
 
 if ! [[ "$LIMIT" =~ ^[0-9]+$ ]] || (( LIMIT < 1 )) || (( LIMIT > 1000 )); then
   echo "ERROR: candles_limit must be an integer between 1 and 1000"
@@ -77,13 +79,13 @@ with open(csv_path, "w", newline="", encoding="utf-8") as f:
 print(f"candles={len(rows)}")
 PY
 
-if ! podman ps --format '{{.Names}}' | rg -qx 'vipertrade-redis'; then
+if ! "$CONTAINER_ENGINE_BIN" ps --format '{{.Names}}' | rg -qx 'vipertrade-redis'; then
   echo "ERROR: vipertrade-redis container is not running"
   exit 1
 fi
 
 echo "[3/5] Replaying candles to Redis channel viper:market_data"
-python3 - "$CSV_FILE" "$SYMBOL" "$SLEEP_SECONDS" <<'PY'
+python3 - "$CSV_FILE" "$SYMBOL" "$SLEEP_SECONDS" "$CONTAINER_ENGINE_BIN" <<'PY'
 import csv
 import json
 import subprocess
@@ -91,7 +93,7 @@ import sys
 import time
 import uuid
 
-csv_path, symbol, sleep_s = sys.argv[1], sys.argv[2], float(sys.argv[3])
+csv_path, symbol, sleep_s, engine = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 published = 0
 
 with open(csv_path, "r", encoding="utf-8") as f:
@@ -121,7 +123,7 @@ with open(csv_path, "r", encoding="utf-8") as f:
         payload = json.dumps(event, separators=(",", ":"))
         subprocess.run(
             [
-                "podman",
+                engine,
                 "exec",
                 "vipertrade-redis",
                 "redis-cli",

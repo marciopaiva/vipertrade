@@ -28,7 +28,7 @@ Expected:
 ## 2) Database Evidence
 
 ```bash
-podman exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
 \x on
 SELECT symbol, reconciled, divergence, divergence_pct, snapshot_at
 FROM position_snapshots
@@ -53,7 +53,7 @@ Expected:
 ## 3) Redis Event Evidence
 
 ```bash
-podman exec -it vipertrade-redis redis-cli SUBSCRIBE viper:reconciliation
+docker exec -it vipertrade-redis redis-cli SUBSCRIBE viper:reconciliation
 ```
 
 Expected payload fields:
