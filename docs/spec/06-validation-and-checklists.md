@@ -16,7 +16,7 @@ Source: VIPERTRADE_SPEC.md (sections 18-20).
 
 - Inicializacao e seguranca: ./scripts/init-secrets.sh, ./scripts/security-check.sh
 - Compose (Docker): ./scripts/compose.sh up -d --build, ./scripts/compose.sh ps, ./scripts/compose.sh logs -f, ./scripts/compose.sh down
-- Compose (fallback legado Podman): cd compose && podman-compose up --build -d, podman-compose ps, podman-compose logs -f, podman-compose down
+- Compose (fallback legado Podman): CONTAINER_ENGINE=podman ./scripts/build-base-images.sh, COMPOSE_PROVIDER=podman-compose ./scripts/compose.sh up -d --build, COMPOSE_PROVIDER=podman-compose ./scripts/compose.sh down
 - Backtest: ./scripts/run-backtest.sh MEDIUM 2025-02-01 2026-02-28
 - API e operacao: status, posicoes, trades, stats do leader e kill-switch via endpoints HTTP
 - Database: acesso SQL no container postgres para consultas operacionais

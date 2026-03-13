@@ -1,4 +1,4 @@
-# ViperTrade Architecture v2 (WSL Fedora + Podman)
+# ViperTrade Architecture v2 (WSL Fedora + Docker Desktop)
 
 ## Goals
 
@@ -37,10 +37,11 @@
 - Decision stream: viper:decisions.
 - Every message must include: event_id, symbol, timestamp, schema_version.
 
-## Podman Standards
+## Container Runtime Standards
 
 - Use `./scripts/compose.sh` as default compose entrypoint (bridge mode).
 - Keep `./scripts/compose-host.sh` only as local WSL fallback.
+- Keep Podman support only as legacy fallback path for environments without Docker.
 - Prefer bridge network over `network_mode: host` for service isolation.
 - Keep volumes explicit for: postgres, redis, audit logs, plan cache.
 - Healthchecks must verify dependencies (DB/Redis/Bybit reachability).
