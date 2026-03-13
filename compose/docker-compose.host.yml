@@ -65,6 +65,7 @@ services:
     container_name: vipertrade-market-data
     network_mode: host
     environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC:-wss://stream-testnet.bybit.com/v5/public/linear}
       TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
@@ -104,6 +105,7 @@ services:
     container_name: vipertrade-analytics
     network_mode: host
     environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       DB_HOST: localhost
@@ -199,7 +201,12 @@ services:
     container_name: vipertrade-executor
     network_mode: host
     environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
+      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
+      BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
+      BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
       BYBIT_API_KEY: ${BYBIT_API_KEY}
       BYBIT_API_SECRET: ${BYBIT_API_SECRET}
       BYBIT_WS_PRIVATE: ${BYBIT_WS_PRIVATE:-wss://stream-testnet.bybit.com/v5/private}
@@ -252,6 +259,15 @@ services:
     container_name: vipertrade-monitor
     network_mode: host
     environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
+      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
+      BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
+      BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
+      BYBIT_API_KEY: ${BYBIT_API_KEY}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET}
+      BYBIT_RECV_WINDOW: ${BYBIT_RECV_WINDOW:-5000}
       DISCORD_WEBHOOK_CRITICAL: ${DISCORD_WEBHOOK_CRITICAL}
       DISCORD_WEBHOOK_WARNING: ${DISCORD_WEBHOOK_WARNING}
       DISCORD_WEBHOOK_INFO: ${DISCORD_WEBHOOK_INFO}
@@ -378,6 +394,15 @@ services:
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ${JWT_SECRET:-generate_me}
       TRADING_MODE: ${TRADING_MODE:-paper}
+      BYBIT_ENV: ${BYBIT_ENV:-testnet}
+      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
+      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
+      BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
+      BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
+      BYBIT_API_KEY: ${BYBIT_API_KEY}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET}
+      BYBIT_RECV_WINDOW: ${BYBIT_RECV_WINDOW:-5000}
+      BYBIT_ACCOUNT_TYPE: ${BYBIT_ACCOUNT_TYPE:-UNIFIED}
       TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
       OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN}
       OPERATOR_AUTH_MODE: ${OPERATOR_AUTH_MODE:-token}

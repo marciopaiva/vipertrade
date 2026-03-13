@@ -161,9 +161,15 @@ Workflow: `.github/workflows/ci.yml`
 
 ## Release Ops (0.8.0-rc)
 
-Live testnet controls (executor):
+Trading mode semantics:
 
-- `EXECUTOR_ENABLE_LIVE_ORDERS=false` by default
+- `TRADING_MODE=paper`: prices from mainnet, wallet/positions simulated in DB, no exchange orders
+- `TRADING_MODE=testnet`: wallet/prices/positions on Bybit testnet and real testnet orders
+- `TRADING_MODE=mainnet`: wallet/prices/positions on Bybit mainnet and real mainnet orders
+
+Execution controls:
+
+- `EXECUTOR_ENABLE_LIVE_ORDERS` is legacy; runtime execution is derived from `TRADING_MODE`
 - `EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT` for gradual rollout
 - `EXECUTOR_RECONCILE_FIX=false` by default (detect/log)
 

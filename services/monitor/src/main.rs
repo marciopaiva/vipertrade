@@ -24,10 +24,44 @@ struct MonitorConfig {
     discord_webhook_critical: Option<String>,
     discord_webhook_warning: Option<String>,
     discord_webhook_info: Option<String>,
+    trading_mode: TradingMode,
     bybit_env: String,
     bybit_api_key: String,
     bybit_api_secret: String,
     bybit_recv_window: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum TradingMode {
+    Paper,
+    Testnet,
+    Mainnet,
+}
+
+impl TradingMode {
+    fn from_env() -> Self {
+        match std::env::var("TRADING_MODE")
+            .unwrap_or_else(|_| "paper".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "testnet" => Self::Testnet,
+            "mainnet" | "live" => Self::Mainnet,
+            _ => Self::Paper,
+        }
+    }
+
+    fn bybit_env(self) -> &'static str {
+        match self {
+            Self::Testnet => "testnet",
+            Self::Paper | Self::Mainnet => "mainnet",
+        }
+    }
+
+    fn uses_simulated_positions(self) -> bool {
+        matches!(self, Self::Paper)
+    }
 }
 
 impl MonitorConfig {
@@ -58,9 +92,9 @@ impl MonitorConfig {
         let discord_webhook_warning = read_non_empty_env("DISCORD_WEBHOOK_WARNING");
         let discord_webhook_info = read_non_empty_env("DISCORD_WEBHOOK_INFO");
 
-        let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
-        let bybit_api_key = std::env::var("BYBIT_API_KEY").unwrap_or_default();
-        let bybit_api_secret = std::env::var("BYBIT_API_SECRET").unwrap_or_default();
+        let trading_mode = TradingMode::from_env();
+        let bybit_env = trading_mode.bybit_env().to_string();
+        let (bybit_api_key, bybit_api_secret) = resolve_bybit_credentials();
         let bybit_recv_window =
             std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
 
@@ -73,6 +107,7 @@ impl MonitorConfig {
             discord_webhook_critical,
             discord_webhook_warning,
             discord_webhook_info,
+            trading_mode,
             bybit_env,
             bybit_api_key,
             bybit_api_secret,
@@ -109,6 +144,30 @@ fn read_non_empty_env(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+fn resolve_bybit_credentials() -> (String, String) {
+    let scoped = match TradingMode::from_env() {
+        TradingMode::Testnet => (
+            read_non_empty_env("BYBIT_TESTNET_API_KEY"),
+            read_non_empty_env("BYBIT_TESTNET_API_SECRET"),
+        ),
+        TradingMode::Paper | TradingMode::Mainnet => (
+            read_non_empty_env("BYBIT_MAINNET_API_KEY"),
+            read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
+        ),
+    };
+
+    (
+        scoped
+            .0
+            .or_else(|| read_non_empty_env("BYBIT_API_KEY"))
+            .unwrap_or_default(),
+        scoped
+            .1
+            .or_else(|| read_non_empty_env("BYBIT_API_SECRET"))
+            .unwrap_or_default(),
+    )
 }
 
 fn read_interval_sec(sec_var: &str, min_var: &str, default_sec: u64) -> u64 {
@@ -318,6 +377,10 @@ async fn resolve_bybit_notional_usdt(
     cfg: &MonitorConfig,
     symbol: &str,
 ) -> Result<f64, Box<dyn Error>> {
+    if cfg.trading_mode.uses_simulated_positions() {
+        return Ok(fetch_local_notional_usdt(pool, symbol).await?);
+    }
+
     if cfg.has_bybit_credentials() {
         match fetch_live_bybit_notional_usdt(http, cfg, symbol).await {
             Ok(v) => return Ok(v),

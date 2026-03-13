@@ -46,6 +46,26 @@ type AnalyticsScores = {
   }>;
 };
 
+type WalletSummary = {
+  ok?: boolean;
+  status?: number;
+  url?: string;
+  error?: string | null;
+  ret_code?: number | null;
+  ret_msg?: string | null;
+  checked_at?: string;
+  account_type?: string;
+  total_equity?: number | null;
+  wallet_balance?: number | null;
+  margin_balance?: number | null;
+  available_balance?: number | null;
+  unrealized_pnl?: number | null;
+  initial_margin?: number | null;
+  maintenance_margin?: number | null;
+  account_im_rate?: number | null;
+  account_mm_rate?: number | null;
+};
+
 const DEFAULT_BASE_URLS = [
   process.env.BACKEND_API_URL,
   "http://host.containers.internal:8080/api/v1",
@@ -61,12 +81,17 @@ function uniqueBaseUrls(baseUrls: string[]): string[] {
   return Array.from(new Set(baseUrls.map((v) => v.replace(/\/+$/, ""))));
 }
 
-function resolveBybitRestUrl(): string {
+function resolveBybitRestUrl(tradingMode?: string): string {
   const explicitUrl = process.env.BYBIT_REST_URL || process.env.NEXT_PUBLIC_BYBIT_REST_URL;
   if (explicitUrl && explicitUrl.trim()) return explicitUrl.trim();
 
-  const envRaw = process.env.BYBIT_ENV || process.env.NEXT_PUBLIC_BYBIT_ENV || "testnet";
-  const env = envRaw.trim().toLowerCase();
+  const mode = (tradingMode || process.env.TRADING_MODE || "").trim().toLowerCase();
+  const env =
+    mode === "testnet"
+      ? "testnet"
+      : mode === "paper" || mode === "mainnet" || mode === "live"
+        ? "mainnet"
+        : (process.env.BYBIT_ENV || process.env.NEXT_PUBLIC_BYBIT_ENV || "testnet").trim().toLowerCase();
   return env === "mainnet" ? "https://api.bybit.com" : "https://api-testnet.bybit.com";
 }
 
@@ -139,11 +164,11 @@ async function checkServiceUrl(url: string): Promise<ServiceHealth> {
   }
 }
 
-async function fetchServices(baseUrl: string): Promise<ServiceHealth[]> {
+async function fetchServices(baseUrl: string, tradingMode?: string): Promise<ServiceHealth[]> {
   const parsed = new URL(baseUrl);
   const host = parsed.hostname;
   const protocol = parsed.protocol;
-  const bybitRestUrl = resolveBybitRestUrl().replace(/\/+$/, "");
+  const bybitRestUrl = resolveBybitRestUrl(tradingMode).replace(/\/+$/, "");
   const binanceRestUrl = (process.env.BINANCE_REST_URL || "https://fapi.binance.com").replace(/\/+$/, "");
   const okxRestUrl = (process.env.OKX_REST_URL || "https://www.okx.com").replace(/\/+$/, "");
 
@@ -216,7 +241,11 @@ export async function GET() {
       continue;
     }
 
-    const [performance, positions, trades, events, marketSignals, analyticsScores, riskKpis, controlState, services] = await Promise.all([
+    const servicesPromise = fetchServices(
+      baseUrl,
+      (status.data as { trading_mode?: string } | undefined)?.trading_mode,
+    );
+    const [performance, positions, trades, events, marketSignals, analyticsScores, riskKpis, controlState, wallet, services] = await Promise.all([
       fetchJson(baseUrl, "/performance"),
       fetchJson(baseUrl, "/positions"),
       fetchJson(baseUrl, "/trades?limit=20"),
@@ -225,7 +254,8 @@ export async function GET() {
       fetchAnalyticsScores(baseUrl),
       fetchJson(baseUrl, "/risk/kpis"),
       fetchJson(baseUrl, "/control/state"),
-      fetchServices(baseUrl),
+      fetchJson(baseUrl, "/external/bybit-wallet"),
+      servicesPromise,
     ]);
 
     const partialErrors: string[] = [];
@@ -237,6 +267,7 @@ export async function GET() {
     if (!analyticsScores.ok) partialErrors.push(`analytics_scores failed: ${analyticsScores.error}`);
     if (!riskKpis.ok) partialErrors.push(`risk_kpis failed: ${riskKpis.error}`);
     if (!controlState.ok) partialErrors.push(`control_state failed: ${controlState.error}`);
+    if (!wallet.ok) partialErrors.push(`wallet failed: ${wallet.error}`);
 
     return NextResponse.json(
       {
@@ -257,6 +288,14 @@ export async function GET() {
               critical_events_24h: 0,
               circuit_breaker_triggers_24h: 0,
             },
+        wallet: wallet.ok
+          ? wallet.data
+          : ({
+              ok: false,
+              status: 0,
+              error: "unavailable",
+              account_type: process.env.BYBIT_ACCOUNT_TYPE || "UNIFIED",
+            } as WalletSummary),
         control_state: controlState.ok
           ? controlState.data
           : {

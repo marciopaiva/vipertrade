@@ -22,6 +22,7 @@ const CONSTRAINTS_CACHE_TTL_SECS: u64 = 60;
 struct ExecutorConfig {
     redis_url: String,
     db_url: String,
+    trading_mode: TradingMode,
     bybit_env: String,
     bybit_api_key: String,
     bybit_api_secret: String,
@@ -32,6 +33,47 @@ struct ExecutorConfig {
     live_symbol_allowlist: HashSet<String>,
     reconcile_fix: bool,
     paper_max_open_positions: i64,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum TradingMode {
+    Paper,
+    Testnet,
+    Mainnet,
+}
+
+impl TradingMode {
+    fn from_env() -> Self {
+        match std::env::var("TRADING_MODE")
+            .unwrap_or_else(|_| "paper".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "testnet" => Self::Testnet,
+            "mainnet" | "live" => Self::Mainnet,
+            _ => Self::Paper,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Paper => "PAPER",
+            Self::Testnet => "TESTNET",
+            Self::Mainnet => "MAINNET",
+        }
+    }
+
+    fn bybit_env(self) -> &'static str {
+        match self {
+            Self::Testnet => "testnet",
+            Self::Paper | Self::Mainnet => "mainnet",
+        }
+    }
+
+    fn executes_exchange_orders(self) -> bool {
+        !matches!(self, Self::Paper)
+    }
 }
 
 #[derive(Clone)]
@@ -62,18 +104,16 @@ impl ExecutorConfig {
             format!("postgres://{}:{}@{}:{}/{}", user, pass, host, port, name)
         });
 
-        let bybit_env = std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string());
-        let bybit_api_key = std::env::var("BYBIT_API_KEY").unwrap_or_default();
-        let bybit_api_secret = std::env::var("BYBIT_API_SECRET").unwrap_or_default();
+        let trading_mode = TradingMode::from_env();
+        let bybit_env = trading_mode.bybit_env().to_string();
+        let (bybit_api_key, bybit_api_secret) = resolve_bybit_credentials();
         let recv_window = std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
         let bybit_account_type =
             std::env::var("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|_| "UNIFIED".to_string());
         let executor_default_enabled = std::env::var("EXECUTOR_DEFAULT_ENABLED")
             .map(|v| !matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO"))
             .unwrap_or(true);
-        let live_orders_enabled = std::env::var("EXECUTOR_ENABLE_LIVE_ORDERS")
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-            .unwrap_or(false);
+        let live_orders_enabled = trading_mode.executes_exchange_orders();
         let live_symbol_allowlist = parse_allowlist(
             std::env::var("EXECUTOR_LIVE_SYMBOL_ALLOWLIST")
                 .unwrap_or_else(|_| "DOGEUSDT".to_string())
@@ -91,6 +131,7 @@ impl ExecutorConfig {
         Self {
             redis_url,
             db_url,
+            trading_mode,
             bybit_env,
             bybit_api_key,
             bybit_api_secret,
@@ -125,6 +166,25 @@ fn parse_allowlist(raw: &str) -> HashSet<String> {
         .map(|s| s.trim().to_uppercase())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn resolve_bybit_credentials() -> (String, String) {
+    let from = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
+    let scoped = match TradingMode::from_env() {
+        TradingMode::Testnet => (
+            from("BYBIT_TESTNET_API_KEY"),
+            from("BYBIT_TESTNET_API_SECRET"),
+        ),
+        TradingMode::Paper | TradingMode::Mainnet => (
+            from("BYBIT_MAINNET_API_KEY"),
+            from("BYBIT_MAINNET_API_SECRET"),
+        ),
+    };
+
+    (
+        scoped.0.or_else(|| from("BYBIT_API_KEY")).unwrap_or_default(),
+        scoped.1.or_else(|| from("BYBIT_API_SECRET")).unwrap_or_default(),
+    )
 }
 
 async fn shutdown_signal() {
@@ -536,6 +596,11 @@ async fn run_bybit_sanity_checks(
     }
 
     println!("Bybit sanity check: market/time OK");
+
+    if matches!(cfg.trading_mode, TradingMode::Paper) {
+        println!("Bybit sanity check: wallet skipped (paper mode uses database simulation)");
+        return Ok(());
+    }
 
     if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
         if cfg.live_orders_enabled {
@@ -1862,7 +1927,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = ExecutorConfig::from_env();
     println!(
-        "Executor mode env={} executor_default_enabled={} live_orders_enabled={} reconcile_fix={} paper_max_open_positions={} base_url={} allowlist={:?}",
+        "Executor mode={} bybit_env={} executor_default_enabled={} live_orders_enabled={} reconcile_fix={} paper_max_open_positions={} base_url={} allowlist={:?}",
+        cfg.trading_mode.as_str(),
         cfg.bybit_env,
         cfg.executor_default_enabled,
         cfg.live_orders_enabled,
