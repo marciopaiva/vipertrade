@@ -384,6 +384,27 @@ export default function Home() {
     if (mode === "mainnet" || mode === "live") return "mainnet" as const;
     return "paper" as const;
   })();
+  const runtimeContext = useMemo(() => {
+    if (executionMode === "mainnet") {
+      return {
+        marketSource: "Bybit mainnet",
+        walletSource: "Bybit mainnet wallet",
+        executionTarget: "Mainnet orders enabled",
+      };
+    }
+    if (executionMode === "testnet") {
+      return {
+        marketSource: "Bybit testnet",
+        walletSource: "Bybit testnet wallet",
+        executionTarget: "Testnet orders enabled",
+      };
+    }
+    return {
+      marketSource: "Bybit mainnet prices",
+      walletSource: "Database-simulated wallet",
+      executionTarget: "Simulated orders in database",
+    };
+  }, [executionMode]);
   const executorControlEnabled = !!data?.control_state?.executor?.enabled;
   const killSwitchEnabled = !!data?.control_state?.kill_switch?.enabled;
   const executorVisualState: "running" | "paused" | "down" =
@@ -636,6 +657,12 @@ export default function Home() {
                 >
                   {executionMode === "mainnet" ? "MAINNET MODE" : executionMode === "testnet" ? "TESTNET MODE" : "PAPER MODE"}
                 </span>
+                <span style={{ ...miniBadgeStyle, borderColor: "rgba(144,220,255,0.25)", color: "#9fd7ff", background: "rgba(17,41,78,0.26)" }}>
+                  Market {runtimeContext.marketSource}
+                </span>
+                <span style={{ ...miniBadgeStyle, borderColor: "rgba(144,220,255,0.25)", color: "#9fd7ff", background: "rgba(17,41,78,0.26)" }}>
+                  Wallet {runtimeContext.walletSource}
+                </span>
                 <span
                   style={{
                     ...miniBadgeStyle,
@@ -727,6 +754,16 @@ export default function Home() {
                   {walletCards.map((item) => (
                     <MetricCard key={item.label} label={item.label} value={item.value} accent={item.accent} helper={item.helper} />
                   ))}
+                </div>
+
+                <div style={{ ...miniGridStyle, marginTop: 14 }}>
+                  <MetricTiny label="Market Source" value={runtimeContext.marketSource} ok />
+                  <MetricTiny label="Wallet Source" value={runtimeContext.walletSource} ok={!!wallet?.ok} />
+                  <MetricTiny
+                    label="Execution"
+                    value={runtimeContext.executionTarget}
+                    ok={executionMode !== "paper" ? !!wallet?.ok : true}
+                  />
                 </div>
 
                 {!wallet?.ok && (
