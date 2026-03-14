@@ -23,6 +23,7 @@ type ServiceHealth = {
   latency_ms: number;
   url: string;
   error?: string;
+  invalid_market_signals_dropped?: number;
 };
 
 type AnalyticsScores = {
@@ -155,6 +156,19 @@ async function checkServiceUrl(url: string): Promise<ServiceHealth> {
       signal: controller.signal,
     });
 
+    const rawBody = await response.text();
+    let invalidDropped: number | undefined;
+    if (rawBody) {
+      try {
+        const parsed = JSON.parse(rawBody) as { invalid_market_signals_dropped?: unknown };
+        if (typeof parsed.invalid_market_signals_dropped === "number") {
+          invalidDropped = parsed.invalid_market_signals_dropped;
+        }
+      } catch {
+        // plain-text health endpoints are still valid
+      }
+    }
+
     return {
       name: "",
       ok: response.ok,
@@ -162,6 +176,7 @@ async function checkServiceUrl(url: string): Promise<ServiceHealth> {
       latency_ms: Date.now() - startedAt,
       url,
       error: response.ok ? undefined : response.statusText,
+      invalid_market_signals_dropped: invalidDropped,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

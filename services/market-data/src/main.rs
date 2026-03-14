@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1201,6 +1202,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut health_shutdown_rx = shutdown_rx.clone();
     let latest_signals_for_health = Arc::clone(&latest_signals);
+    let invalid_signal_count = Arc::new(AtomicU64::new(0));
+    let invalid_signal_count_for_health = Arc::clone(&invalid_signal_count);
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -1210,6 +1213,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 accept_result = listener.accept() => {
                     if let Ok((mut socket, _)) = accept_result {
                         let latest_signals_for_conn = Arc::clone(&latest_signals_for_health);
+                        let invalid_signal_count_for_conn =
+                            Arc::clone(&invalid_signal_count_for_health);
                         tokio::spawn(async move {
                             let mut request_buf = [0_u8; 2048];
                             let bytes_read = socket.read(&mut request_buf).await.unwrap_or(0);
@@ -1231,7 +1236,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     body
                                 )
                             } else if request.starts_with("GET /health") {
-                                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK".to_string()
+                                let body = serde_json::json!({
+                                    "status": "ok",
+                                    "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
+                                })
+                                .to_string();
+                                format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
+                                    body.len(),
+                                    body
+                                )
                             } else {
                                 "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found".to_string()
                             };
@@ -1299,12 +1313,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(btc_signal) = &btc_context {
                         apply_btc_context(&mut signal, btc_signal);
                     }
+                    if let Err(err) = signal.validate() {
+                        invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                        eprintln!(
+                            "{}",
+                            serde_json::json!({
+                                "service": "market-data",
+                                "event": "invalid_market_signal_dropped",
+                                "symbol": symbol,
+                                "stage": "pre_publish_signal",
+                                "reason": err,
+                            })
+                        );
+                        continue;
+                    }
                     latest_signals
                         .write()
                         .await
                         .insert(symbol.clone(), signal.clone());
 
                     let event = MarketSignalEvent::new(signal);
+                    if let Err(err) = event.validate() {
+                        invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                        eprintln!(
+                            "{}",
+                            serde_json::json!({
+                                "service": "market-data",
+                                "event": "invalid_market_signal_dropped",
+                                "symbol": symbol,
+                                "stage": "pre_publish_event",
+                                "reason": err,
+                            })
+                        );
+                        continue;
+                    }
                     let json = serde_json::to_string(&event)?;
                     if let Err(e) = conn.publish::<_, _, ()>("viper:market_data", json).await {
                         eprintln!("Failed to publish market data: {}", e);

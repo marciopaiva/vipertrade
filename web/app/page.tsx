@@ -193,6 +193,7 @@ type DashboardPayload = {
     latency_ms: number;
     url: string;
     error?: string;
+    invalid_market_signals_dropped?: number;
   }>;
   partial?: boolean;
   warnings?: string[];
@@ -480,6 +481,14 @@ export default function Home() {
   const executorServiceOk = useMemo(() => {
     const svc = services.find((item) => item.name === "executor");
     return !!svc?.ok;
+  }, [services]);
+  const marketDataInvalidSignalsDropped = useMemo(() => {
+    const svc = services.find((item) => item.name === "market-data");
+    return svc?.invalid_market_signals_dropped ?? 0;
+  }, [services]);
+  const strategyInvalidSignalsDropped = useMemo(() => {
+    const svc = services.find((item) => item.name === "strategy");
+    return svc?.invalid_market_signals_dropped ?? 0;
   }, [services]);
   const bybitPrivateOk = useMemo(() => {
     const svc = services.find((item) => item.name === "bybit-private");
@@ -866,6 +875,18 @@ export default function Home() {
                         }
                         ok={!!(data.status?.trade_profile_label || data.status?.trading_profile)}
                         icon="profile"
+                      />
+                      <StatusPill
+                        label="MD Signal Guard"
+                        value={`${marketDataInvalidSignalsDropped} dropped`}
+                        ok={marketDataInvalidSignalsDropped === 0}
+                        icon="recon"
+                      />
+                      <StatusPill
+                        label="Strategy Guard"
+                        value={`${strategyInvalidSignalsDropped} dropped`}
+                        ok={strategyInvalidSignalsDropped === 0}
+                        icon="recon"
                       />
                       <StatusPill label="DB" value={data.status?.db_connected ? "connected" : "disconnected"} ok={!!data.status?.db_connected} icon="db" />
                       <StatusPill label="Redis" value={redisConnected ? "connected" : "unknown"} ok={redisConnected} icon="redis" />
@@ -1413,7 +1434,14 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
           </div>
         </div>
       </div>
-      {item.priorityRank > 0 && <div style={tokenFooterStyle}>Block: {item.mainBlock}</div>}
+      <div
+        style={{
+          ...tokenFooterStyle,
+          visibility: item.priorityRank > 0 ? "visible" : "hidden",
+        }}
+      >
+        Block: {item.priorityRank > 0 ? item.mainBlock : "placeholder"}
+      </div>
     </article>
   );
 }
@@ -1447,10 +1475,10 @@ function ServiceFlowGraph({
           { name: "market-data", x: 360, y: 280 },
           { name: "strategy", x: 610, y: 280 },
           { name: "executor", x: 820, y: 280 },
-          { name: "api", x: 1080, y: 100 },
-          { name: "monitor", x: 1080, y: 190 },
-          { name: "analytics", x: 1080, y: 280 },
-          { name: "backtest", x: 1080, y: 370 },
+          { name: "api", x: 1080, y: 118 },
+          { name: "monitor", x: 1080, y: 226 },
+          { name: "analytics", x: 1080, y: 334 },
+          { name: "backtest", x: 1080, y: 442 },
         ] as const);
 
   const links =
@@ -1470,10 +1498,10 @@ function ServiceFlowGraph({
           ["okx", "market-data", 10],
           ["market-data", "strategy", 0],
           ["strategy", "executor", 0],
-          ["executor", "api", -18],
-          ["executor", "monitor", -6],
-          ["executor", "analytics", 6],
-          ["executor", "backtest", 18],
+          ["executor", "api", -22],
+          ["executor", "monitor", -8],
+          ["executor", "analytics", 8],
+          ["executor", "backtest", 22],
         ] as const);
 
   const nodeByName = new Map<string, (typeof nodes)[number]>(
@@ -1530,15 +1558,14 @@ function ServiceFlowGraph({
             node.name === "executor"
               ? `${executorVisualState} · ${executionMode}`
               : "";
-          const isTestnetRightColumn =
-            executionMode === "testnet" &&
-            (node.name === "api" ||
-              node.name === "monitor" ||
-              node.name === "analytics" ||
-              node.name === "backtest");
-          const labelOffsetY = isTestnetRightColumn ? -28 : -32;
-          const latencyOffsetY = isTestnetRightColumn ? 34 : 40;
-          const detailOffsetY = isTestnetRightColumn ? 50 : 56;
+          const isRightColumnNode =
+            node.name === "api" ||
+            node.name === "monitor" ||
+            node.name === "analytics" ||
+            node.name === "backtest";
+          const labelOffsetY = isRightColumnNode ? -28 : -32;
+          const latencyOffsetY = isRightColumnNode ? 34 : 40;
+          const detailOffsetY = isRightColumnNode ? 50 : 56;
           return (
             <g key={node.name}>
               <circle cx={node.x} cy={node.y} r={ok ? 16 : 14} fill="rgba(7,16,30,0.95)" stroke={color} strokeWidth={1.6} />

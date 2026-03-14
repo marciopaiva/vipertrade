@@ -1127,6 +1127,7 @@ async fn build_paper_positions_response(state: Arc<AppState>) -> warp::reply::Wi
              trailing_stop_final_distance_pct::double precision
          FROM trades
          WHERE status = 'open'
+           AND paper_trade = TRUE
          ORDER BY opened_at DESC",
     )
     .fetch_all(pool)
@@ -1255,6 +1256,7 @@ async fn build_paper_trades_response(
              opened_at,
              closed_at
          FROM trades
+         WHERE paper_trade = TRUE
          ORDER BY opened_at DESC
          LIMIT $1",
     )
@@ -1451,6 +1453,7 @@ async fn fetch_window_between(
     pool: &PgPool,
     window_start_utc: DateTime<Utc>,
     window_end_utc: DateTime<Utc>,
+    paper_only: bool,
 ) -> Result<PerformanceWindow, sqlx::Error> {
     let row = sqlx::query_as::<_, (i64, i64, f64)>(
         "SELECT
@@ -1459,12 +1462,14 @@ async fn fetch_window_between(
              COALESCE(SUM(COALESCE(pnl, 0))::double precision, 0)
          FROM trades
          WHERE status = 'closed'
+           AND (NOT $3 OR paper_trade = TRUE)
            AND closed_at IS NOT NULL
            AND closed_at >= $1
            AND closed_at < $2",
     )
     .bind(window_start_utc)
     .bind(window_end_utc)
+    .bind(paper_only)
     .fetch_one(pool)
     .await?;
 
@@ -1519,6 +1524,7 @@ async fn build_paper_performance_response(
         pool,
         window_end_utc - ChronoDuration::hours(24),
         window_end_utc,
+        true,
     )
     .await
     {
@@ -1536,6 +1542,7 @@ async fn build_paper_performance_response(
         pool,
         window_end_utc - ChronoDuration::days(7),
         window_end_utc,
+        true,
     )
     .await
     {
@@ -1553,6 +1560,7 @@ async fn build_paper_performance_response(
         pool,
         window_end_utc - ChronoDuration::days(30),
         window_end_utc,
+        true,
     )
     .await
     {
@@ -1639,6 +1647,7 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
         "SELECT COUNT(*)::bigint
          FROM trades
          WHERE status = 'rejected'
+           AND paper_trade = TRUE
            AND opened_at >= NOW() - INTERVAL '24 hours'",
     )
     .fetch_one(pool)
@@ -1648,7 +1657,8 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
     let open_exposure_usdt = sqlx::query_scalar::<_, Option<f64>>(
         "SELECT COALESCE(SUM(quantity * entry_price)::double precision, 0)
          FROM trades
-         WHERE status = 'open'",
+         WHERE status = 'open'
+           AND paper_trade = TRUE",
     )
     .fetch_one(pool)
     .await
@@ -1660,6 +1670,7 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
         "SELECT COALESCE(SUM(COALESCE(pnl, 0))::double precision, 0)
          FROM trades
          WHERE status = 'closed'
+           AND paper_trade = TRUE
            AND closed_at >= NOW() - INTERVAL '24 hours'",
     )
     .fetch_one(pool)

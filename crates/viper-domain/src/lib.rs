@@ -57,6 +57,85 @@ pub struct MarketSignal {
     pub bearish_exchanges: i64,
 }
 
+impl MarketSignal {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.symbol.trim().is_empty() {
+            return Err("market signal symbol is empty".to_string());
+        }
+        if !(self.current_price.is_finite() && self.current_price > 0.0) {
+            return Err("market signal current_price must be finite and > 0".to_string());
+        }
+        if !(self.bybit_price.is_finite() && self.bybit_price >= 0.0) {
+            return Err("market signal bybit_price must be finite and >= 0".to_string());
+        }
+        if !(self.atr_14.is_finite() && self.atr_14 >= 0.0) {
+            return Err("market signal atr_14 must be finite and >= 0".to_string());
+        }
+        if self.volume_24h < 0 {
+            return Err("market signal volume_24h must be >= 0".to_string());
+        }
+        if !(self.funding_rate.is_finite()) {
+            return Err("market signal funding_rate must be finite".to_string());
+        }
+        if !(self.trend_score.is_finite()) {
+            return Err("market signal trend_score must be finite".to_string());
+        }
+        if !(self.spread_pct.is_finite() && self.spread_pct >= 0.0) {
+            return Err("market signal spread_pct must be finite and >= 0".to_string());
+        }
+        if !(self.ema_fast.is_finite()) {
+            return Err("market signal ema_fast must be finite".to_string());
+        }
+        if !(self.ema_slow.is_finite()) {
+            return Err("market signal ema_slow must be finite".to_string());
+        }
+        if !(self.rsi_14.is_finite() && (0.0..=100.0).contains(&self.rsi_14)) {
+            return Err("market signal rsi_14 must be finite and between 0 and 100".to_string());
+        }
+        if !(self.macd_line.is_finite()) {
+            return Err("market signal macd_line must be finite".to_string());
+        }
+        if !(self.macd_signal.is_finite()) {
+            return Err("market signal macd_signal must be finite".to_string());
+        }
+        if !(self.macd_histogram.is_finite()) {
+            return Err("market signal macd_histogram must be finite".to_string());
+        }
+        if !(self.volume_ratio.is_finite() && self.volume_ratio >= 0.0) {
+            return Err("market signal volume_ratio must be finite and >= 0".to_string());
+        }
+        if !(self.btc_trend_score.is_finite()) {
+            return Err("market signal btc_trend_score must be finite".to_string());
+        }
+        if self.btc_consensus_count < 0 {
+            return Err("market signal btc_consensus_count must be >= 0".to_string());
+        }
+        if !(self.btc_volume_ratio.is_finite() && self.btc_volume_ratio >= 0.0) {
+            return Err("market signal btc_volume_ratio must be finite and >= 0".to_string());
+        }
+        if self.consensus_count < 0 {
+            return Err("market signal consensus_count must be >= 0".to_string());
+        }
+        if self.exchanges_available < 0 {
+            return Err("market signal exchanges_available must be >= 0".to_string());
+        }
+        if !(self.consensus_ratio.is_finite() && self.consensus_ratio >= 0.0) {
+            return Err("market signal consensus_ratio must be finite and >= 0".to_string());
+        }
+        if !(self.trend_slope.is_finite()) {
+            return Err("market signal trend_slope must be finite".to_string());
+        }
+        if self.bullish_exchanges < 0 {
+            return Err("market signal bullish_exchanges must be >= 0".to_string());
+        }
+        if self.bearish_exchanges < 0 {
+            return Err("market signal bearish_exchanges must be >= 0".to_string());
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarketSignalEvent {
     pub schema_version: String,
@@ -85,10 +164,7 @@ impl MarketSignalEvent {
         if self.event_id.trim().is_empty() {
             return Err("market signal event_id is empty".to_string());
         }
-        if self.signal.symbol.trim().is_empty() {
-            return Err("market signal symbol is empty".to_string());
-        }
-        Ok(())
+        self.signal.validate()
     }
 }
 
@@ -238,5 +314,19 @@ mod tests {
         let mut event = StrategyDecisionEvent::new("src-evt-1".to_string(), sample_decision());
         event.schema_version = "2.0".to_string();
         assert!(event.validate().is_err());
+    }
+
+    #[test]
+    fn invalid_market_signal_rsi_is_rejected() {
+        let mut signal = sample_signal();
+        signal.rsi_14 = 101.0;
+        assert!(signal.validate().is_err());
+    }
+
+    #[test]
+    fn invalid_market_signal_price_is_rejected() {
+        let mut signal = sample_signal();
+        signal.current_price = 0.0;
+        assert!(signal.validate().is_err());
     }
 }
