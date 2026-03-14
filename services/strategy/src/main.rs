@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -1444,6 +1445,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let mut health_shutdown_rx = shutdown_rx.clone();
+    let invalid_signal_count = Arc::new(AtomicU64::new(0));
+    let invalid_signal_count_for_health = Arc::clone(&invalid_signal_count);
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -1452,8 +1455,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 accept_result = listener.accept() => {
                     if let Ok((mut socket, _)) = accept_result {
+                        let invalid_signal_count_for_conn =
+                            Arc::clone(&invalid_signal_count_for_health);
                         tokio::spawn(async move {
-                            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                            let body = serde_json::json!({
+                                "status": "ok",
+                                "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
+                            })
+                            .to_string();
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
                             if let Err(e) = socket.write_all(response.as_bytes()).await {
                                 eprintln!("failed to write to socket; err = {:?}", e);
                             }
@@ -1562,6 +1576,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         MarketSignalEvent::new(legacy_signal)
                     }
                 };
+
+                if let Err(err) = signal_event.validate() {
+                    invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "service": "strategy",
+                            "event": "invalid_market_signal_dropped",
+                            "symbol": signal_event.signal.symbol,
+                            "stage": "pre_decision",
+                            "reason": err,
+                        })
+                    );
+                    continue;
+                }
 
                 let symbol = signal_event.signal.symbol.to_uppercase();
                 let trend = signal_event.signal.trend_score;
