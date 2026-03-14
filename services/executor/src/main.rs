@@ -838,35 +838,52 @@ async fn run_bybit_sanity_checks(
     Ok(())
 }
 
-async fn already_processed(
-    state: &ExecutorState,
-    source_event_id: &str,
-) -> Result<bool, sqlx::Error> {
-    if let Some(pool) = &state.db_pool {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS (
-                SELECT 1
-                FROM system_events
-                WHERE event_type = 'executor_event_processed'
-                  AND data->>'source_event_id' = $1
-            )",
-        )
-        .bind(source_event_id)
-        .fetch_one(pool)
-        .await?;
-
-        if exists {
-            return Ok(true);
-        }
-    }
-
-    let seen = state.processed_in_memory.lock().await;
-    Ok(seen.contains(source_event_id))
-}
-
 async fn remember_processed(state: &ExecutorState, source_event_id: &str) {
     let mut seen = state.processed_in_memory.lock().await;
     seen.insert(source_event_id.to_string());
+}
+
+async fn claim_processed_event(
+    state: &ExecutorState,
+    source_event_id: &str,
+    event: &StrategyDecisionEvent,
+) -> Result<bool, sqlx::Error> {
+    if let Some(pool) = &state.db_pool {
+        let data = json!({
+            "source_event_id": source_event_id,
+            "decision_event_id": event.event_id,
+            "action": event.decision.action,
+            "symbol": event.decision.symbol,
+            "status": "claimed",
+            "bybit_order_id": null,
+            "error": null,
+        });
+
+        let result = sqlx::query(
+            "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind("executor_event_processed")
+        .bind("info")
+        .bind("trade")
+        .bind(data)
+        .bind(&event.decision.symbol)
+        .bind(&event.schema_version)
+        .bind(decision_hash(event))
+        .execute(pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        remember_processed(state, source_event_id).await;
+        return Ok(true);
+    }
+
+    let mut seen = state.processed_in_memory.lock().await;
+    Ok(seen.insert(source_event_id.to_string()))
 }
 
 async fn mark_processed(
@@ -891,7 +908,17 @@ async fn mark_processed(
         sqlx::query(
             "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT DO NOTHING",
+             ON CONFLICT (event_type, (data->>'source_event_id'))
+             WHERE event_type = 'executor_event_processed'
+               AND COALESCE(data->>'source_event_id', '') <> ''
+             DO UPDATE SET
+                severity = EXCLUDED.severity,
+                category = EXCLUDED.category,
+                data = EXCLUDED.data,
+                symbol = EXCLUDED.symbol,
+                pipeline_version = EXCLUDED.pipeline_version,
+                decision_hash = EXCLUDED.decision_hash,
+                timestamp = NOW()",
         )
         .bind("executor_event_processed")
         .bind(if status == "error" { "error" } else { "info" })
@@ -1861,7 +1888,7 @@ async fn handle_decision_event(
 
     let idem_key = idempotency_key(&event).to_string();
 
-    if already_processed(state, &idem_key).await? {
+    if !claim_processed_event(state, &idem_key, &event).await? {
         println!(
             "Skipping duplicate decision event_id={} source_event_id={}",
             event.event_id, idem_key
