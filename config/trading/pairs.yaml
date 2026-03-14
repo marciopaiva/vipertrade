@@ -37,7 +37,7 @@ global:
       min_trend_score_short: 0.28
       min_signal_confirmation_ticks_long: 3
       min_signal_confirmation_ticks_short: 5
-      min_volume_ratio_long: 0.55
+      min_volume_ratio_long: 0.25
       min_volume_ratio_short: 0.60
       rsi_long_min: 52
       rsi_long_max: 75
@@ -110,7 +110,7 @@ global:
       min_trend_score_short: 0.28
       min_signal_confirmation_ticks_long: 3
       min_signal_confirmation_ticks_short: 5
-      min_volume_ratio_long: 0.55
+      min_volume_ratio_long: 0.25
       min_volume_ratio_short: 0.60
       rsi_long_min: 52
       rsi_long_max: 75
@@ -172,13 +172,13 @@ DOGEUSDT:
   mode_profiles:
     PAPER:
       risk:
-        max_position_usdt: 8.00
+        max_position_wallet_pct: 0.08
     TESTNET:
       risk:
-        max_position_usdt: 8.00
+        max_position_wallet_pct: 0.0027
     MAINNET:
       risk:
-        max_position_usdt: 8.00
+        max_position_wallet_pct: 0.08
   
   # Bybit-specific settings
   bybit:
@@ -261,10 +261,13 @@ XRPUSDT:
   mode_profiles:
     PAPER:
       risk:
-        max_position_usdt: 12.00
+        max_position_wallet_pct: 0.12
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0041
     MAINNET:
       risk:
-        max_position_usdt: 12.00
+        max_position_wallet_pct: 0.12
   
   bybit:
     price_precision: 4
@@ -344,10 +347,13 @@ ADAUSDT:
   mode_profiles:
     PAPER:
       risk:
-        max_position_usdt: 12.00
+        max_position_wallet_pct: 0.12
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0041
     MAINNET:
       risk:
-        max_position_usdt: 12.00
+        max_position_wallet_pct: 0.12
   
   bybit:
     price_precision: 4
@@ -425,10 +431,13 @@ XLMUSDT:
   mode_profiles:
     PAPER:
       risk:
-        max_position_usdt: 10.00
+        max_position_wallet_pct: 0.10
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0034
     MAINNET:
       risk:
-        max_position_usdt: 10.00
+        max_position_wallet_pct: 0.10
   
   bybit:
     price_precision: 5

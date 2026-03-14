@@ -85,6 +85,14 @@ struct InvalidSignalDrop {
     timestamp: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct WalletSizingResponse {
+    total_equity: Option<f64>,
+    margin_balance: Option<f64>,
+    wallet_balance: Option<f64>,
+    available_balance: Option<f64>,
+}
+
 impl StrategyConfig {
     fn from_files(
         pairs_path: &str,
@@ -211,10 +219,28 @@ impl StrategyConfig {
         mode_pair_max.unwrap_or(pair_max).min(global_max)
     }
 
+    fn max_position_wallet_pct(&self, symbol: &str) -> Option<f64> {
+        let mode_pair_pct = self
+            .pair_mode_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
+            .and_then(Value::as_f64);
+        let pair_pct = self
+            .pair_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
+            .and_then(Value::as_f64);
+        mode_pair_pct.or(pair_pct)
+    }
+
     fn atr_multiplier(&self, symbol: &str) -> f64 {
         self.pair_cfg(symbol)
             .map(|v| cfg_f64(v, &["risk", "atr_multiplier"], 1.0))
             .unwrap_or(1.0)
+    }
+
+    fn max_position_cap_usdt(&self, symbol: &str, equity_usdt: f64) -> f64 {
+        self.max_position_wallet_pct(symbol)
+            .map(|pct| equity_usdt * pct)
+            .unwrap_or_else(|| self.max_position_usdt(symbol))
     }
 
     fn max_spread_pct(&self, symbol: &str) -> f64 {
@@ -689,6 +715,37 @@ fn resolve_database_url() -> Option<String> {
     ))
 }
 
+fn resolve_wallet_api_base_url() -> String {
+    std::env::var("WALLET_API_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://api:8080".to_string())
+}
+
+async fn fetch_account_equity_usdt(
+    http: &reqwest::Client,
+    wallet_api_base_url: &str,
+    fallback_equity_usdt: f64,
+) -> f64 {
+    let url = format!(
+        "{}/api/v1/external/bybit-wallet",
+        wallet_api_base_url.trim_end_matches('/')
+    );
+    match http.get(url).send().await {
+        Ok(response) => match response.json::<WalletSizingResponse>().await {
+            Ok(body) => body
+                .total_equity
+                .or(body.margin_balance)
+                .or(body.wallet_balance)
+                .or(body.available_balance)
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .unwrap_or(fallback_equity_usdt),
+            Err(_) => fallback_equity_usdt,
+        },
+        Err(_) => fallback_equity_usdt,
+    }
+}
+
 async fn fetch_open_trade_for_symbol(
     pool: &PgPool,
     symbol: &str,
@@ -1101,19 +1158,25 @@ fn execute_strategy_step(
             let atr_14 = get_f64(&state, "atr_14", 0.0);
             let volatility_discount =
                 (1.0 - (atr_14 * cfg.atr_multiplier(&symbol) / price)).clamp(0.2, 1.0);
-
-            let desired_usdt = (equity_usdt * cfg.risk_per_trade_fraction() * volatility_discount)
-                .clamp(cfg.min_position_usdt(), cfg.max_position_usdt(&symbol));
+            let stop_loss_pct = cfg.stop_loss_pct(&symbol).max(0.0001);
+            let risk_budget_usdt = equity_usdt * cfg.risk_per_trade_fraction();
+            let risk_sized_notional = (risk_budget_usdt / stop_loss_pct) * volatility_discount;
+            let max_position_usdt = cfg.max_position_cap_usdt(&symbol, equity_usdt);
+            let desired_usdt = risk_sized_notional.clamp(
+                cfg.min_position_usdt(),
+                max_position_usdt.max(cfg.min_position_usdt()),
+            );
 
             Ok(json!(desired_usdt / price))
         }
         "validate_size" => {
             let quantity = get_f64(&state, "calc_smart_size", 0.0);
             let price = get_f64(&state, "current_price", 0.0);
+            let equity_usdt = get_f64(&state, "account_equity_usdt", 1_000.0);
             let position_usdt = quantity * price;
             Ok(json!(
                 position_usdt >= cfg.min_position_usdt()
-                    && position_usdt <= cfg.max_position_usdt(&symbol)
+                    && position_usdt <= cfg.max_position_cap_usdt(&symbol, equity_usdt)
             ))
         }
         "get_trailing_config" => Ok(cfg.trailing_config(&symbol)),
@@ -1559,6 +1622,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut entry_guards = HashMap::<String, EntryGuardState>::new();
     let mut signal_confirmations = HashMap::<String, SignalConfirmationState>::new();
     let default_stop_loss_cooldown_minutes = 3_i64;
+    let wallet_api_base_url = resolve_wallet_api_base_url();
+    let wallet_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()?;
+    let fallback_equity_usdt = std::env::var("INITIAL_CAPITAL_USD")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(1_000.0);
+    let mut cached_account_equity_usdt = fallback_equity_usdt;
+    let mut last_wallet_fetch_at = Instant::now() - Duration::from_secs(60);
 
     let db_pool = match resolve_database_url() {
         Some(database_url) => match PgPoolOptions::new()
@@ -1700,7 +1774,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
 
-                let input = serde_json::to_value(&signal_event.signal)?;
+                if last_wallet_fetch_at.elapsed() >= Duration::from_secs(15) {
+                    cached_account_equity_usdt = fetch_account_equity_usdt(
+                        &wallet_http,
+                        &wallet_api_base_url,
+                        fallback_equity_usdt,
+                    )
+                    .await;
+                    last_wallet_fetch_at = Instant::now();
+                }
+
+                let mut input = serde_json::to_value(&signal_event.signal)?;
+                if let Some(obj) = input.as_object_mut() {
+                    obj.insert(
+                        "account_equity_usdt".to_string(),
+                        json!(cached_account_equity_usdt),
+                    );
+                }
                 let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
                     Ok(v) => v,
                     Err(e) => {
