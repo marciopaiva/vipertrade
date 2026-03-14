@@ -1386,38 +1386,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
             *latest_signals.write().await = cycle_signals.clone();
             for (symbol, signal) in cycle_signals {
                 let event = MarketSignalEvent::new(signal);
-                    if let Err(err) = event.validate() {
-                        invalid_signal_count.fetch_add(1, Ordering::Relaxed);
-                        let drop = InvalidSignalDrop {
-                            symbol: symbol.clone(),
-                            stage: "pre_publish_event".to_string(),
-                            reason: err.clone(),
-                            timestamp: chrono::Utc::now().to_rfc3339(),
-                        };
-                        *last_invalid_signal.write().await = Some(drop.clone());
-                        eprintln!(
-                            "{}",
-                            serde_json::json!({
-                                "service": "market-data",
-                                "event": "invalid_market_signal_dropped",
-                                "symbol": drop.symbol,
-                                "stage": drop.stage,
-                                "reason": drop.reason,
-                                "timestamp": drop.timestamp,
-                            })
-                        );
-                        continue;
-                    }
-                    let json = serde_json::to_string(&event)?;
-                    if let Err(e) = conn.publish::<_, _, ()>("viper:market_data", json).await {
-                        eprintln!("Failed to publish market data: {}", e);
-                        break;
-                    }
-                    println!(
-                        "Published real market event {} for {}",
-                        event.event_id, event.signal.symbol
+                if let Err(err) = event.validate() {
+                    invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                    let drop = InvalidSignalDrop {
+                        symbol: symbol.clone(),
+                        stage: "pre_publish_event".to_string(),
+                        reason: err.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    *last_invalid_signal.write().await = Some(drop.clone());
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "service": "market-data",
+                            "event": "invalid_market_signal_dropped",
+                            "symbol": drop.symbol,
+                            "stage": drop.stage,
+                            "reason": drop.reason,
+                            "timestamp": drop.timestamp,
+                        })
                     );
+                    continue;
                 }
+                let json = serde_json::to_string(&event)?;
+                if let Err(e) = conn.publish::<_, _, ()>("viper:market_data", json).await {
+                    eprintln!("Failed to publish market data: {}", e);
+                    break;
+                }
+                println!(
+                    "Published real market event {} for {}",
+                    event.event_id, event.signal.symbol
+                );
+            }
         }
 
         tokio::select! {
