@@ -491,17 +491,6 @@ fn resolve_runtime_bybit_env() -> String {
     }
 }
 
-fn prefer_bybit_for_decisions() -> bool {
-    matches!(
-        std::env::var("TRADING_MODE")
-            .unwrap_or_else(|_| "paper".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "testnet"
-    )
-}
-
 async fn fetch_json<T: for<'de> Deserialize<'de>>(
     http: &reqwest::Client,
     url: &str,
@@ -890,12 +879,6 @@ fn aggregate_signals(
     let mut prices: Vec<f64> = signals.iter().map(|s| s.current_price).collect();
     let mut atrs: Vec<f64> = signals.iter().map(|s| s.atr_14).collect();
     let mut spreads: Vec<f64> = signals.iter().map(|s| s.spread_pct).collect();
-    let volume_24h = signals.iter().map(|s| s.volume_24h).min().unwrap_or(0);
-    let funding_rate = signals
-        .iter()
-        .find(|s| s.source == "bybit")
-        .map(|s| s.funding_rate)
-        .unwrap_or(0.0);
     let bybit_regime = signals
         .iter()
         .find(|s| s.source == "bybit")
@@ -907,6 +890,16 @@ fn aggregate_signals(
         .map(|s| s.current_price)
         .unwrap_or_else(|| median(&mut prices.clone()));
     let bybit_signal = signals.iter().find(|s| s.source == "bybit");
+    let consensus_volume_24h = signals.iter().map(|s| s.volume_24h).min().unwrap_or(0);
+    let volume_24h = bybit_signal
+        .map(|s| s.volume_24h)
+        .unwrap_or(consensus_volume_24h);
+    let consensus_funding_rate = signals
+        .iter()
+        .find(|s| s.source == "bybit")
+        .map(|s| s.funding_rate)
+        .unwrap_or(0.0);
+    let funding_rate = bybit_signal.map(|s| s.funding_rate).unwrap_or(0.0);
 
     let mut weighted_sum = 0.0;
     let mut weight_total = 0.0;
@@ -943,47 +936,47 @@ fn aggregate_signals(
             bearish_count += 1;
         }
     }
-    let trend_score = if weight_total > 0.0 {
+    let consensus_trend_score = if weight_total > 0.0 {
         (weighted_sum / weight_total).clamp(-1.0, 1.0)
     } else {
         0.0
     };
-    let trend_slope = if weight_total > 0.0 {
+    let consensus_trend_slope = if weight_total > 0.0 {
         slope_sum / weight_total
     } else {
         0.0
     };
-    let ema_fast = if weight_total > 0.0 {
+    let consensus_ema_fast = if weight_total > 0.0 {
         ema_fast_sum / weight_total
     } else {
         0.0
     };
-    let ema_slow = if weight_total > 0.0 {
+    let consensus_ema_slow = if weight_total > 0.0 {
         ema_slow_sum / weight_total
     } else {
         0.0
     };
-    let rsi_14 = if weight_total > 0.0 {
+    let consensus_rsi_14 = if weight_total > 0.0 {
         rsi_sum / weight_total
     } else {
         50.0
     };
-    let macd_line = if weight_total > 0.0 {
+    let consensus_macd_line = if weight_total > 0.0 {
         macd_line_sum / weight_total
     } else {
         0.0
     };
-    let macd_signal = if weight_total > 0.0 {
+    let consensus_macd_signal = if weight_total > 0.0 {
         macd_signal_sum / weight_total
     } else {
         0.0
     };
-    let macd_histogram = if weight_total > 0.0 {
+    let consensus_macd_histogram = if weight_total > 0.0 {
         macd_histogram_sum / weight_total
     } else {
         0.0
     };
-    let volume_ratio = if weight_total > 0.0 {
+    let consensus_volume_ratio = if weight_total > 0.0 {
         volume_ratio_sum / weight_total
     } else {
         1.0
@@ -1002,84 +995,47 @@ fn aggregate_signals(
     } else {
         0.0
     };
+    let consensus_atr_14 = median(&mut atrs);
+    let consensus_spread_pct = median(&mut spreads);
 
-    let prefer_bybit = prefer_bybit_for_decisions();
-    let current_price = if prefer_bybit {
-        bybit_signal
-            .map(|s| s.current_price)
-            .unwrap_or_else(|| median(&mut prices))
-    } else {
-        median(&mut prices)
-    };
-    let atr_14 = if prefer_bybit {
-        bybit_signal
-            .map(|s| s.atr_14)
-            .unwrap_or_else(|| median(&mut atrs))
-    } else {
-        median(&mut atrs)
-    };
-    let spread_pct = if prefer_bybit {
-        bybit_signal
-            .map(|s| s.spread_pct)
-            .unwrap_or_else(|| median(&mut spreads))
-    } else {
-        median(&mut spreads)
-    };
-    let trend_score = if prefer_bybit {
-        bybit_signal.map(|s| s.trend_score).unwrap_or(trend_score)
-    } else {
-        trend_score
-    };
-    let trend_slope = if prefer_bybit {
-        bybit_signal.map(|s| s.trend_slope).unwrap_or(trend_slope)
-    } else {
-        trend_slope
-    };
-    let ema_fast = if prefer_bybit {
-        bybit_signal.map(|s| s.ema_fast).unwrap_or(ema_fast)
-    } else {
-        ema_fast
-    };
-    let ema_slow = if prefer_bybit {
-        bybit_signal.map(|s| s.ema_slow).unwrap_or(ema_slow)
-    } else {
-        ema_slow
-    };
-    let rsi_14 = if prefer_bybit {
-        bybit_signal.map(|s| s.rsi_14).unwrap_or(rsi_14)
-    } else {
-        rsi_14
-    };
-    let macd_line = if prefer_bybit {
-        bybit_signal.map(|s| s.macd_line).unwrap_or(macd_line)
-    } else {
-        macd_line
-    };
-    let macd_signal = if prefer_bybit {
-        bybit_signal.map(|s| s.macd_signal).unwrap_or(macd_signal)
-    } else {
-        macd_signal
-    };
-    let macd_histogram = if prefer_bybit {
-        bybit_signal
-            .map(|s| s.macd_histogram)
-            .unwrap_or(macd_histogram)
-    } else {
-        macd_histogram
-    };
-    let volume_ratio = if prefer_bybit {
-        bybit_signal.map(|s| s.volume_ratio).unwrap_or(volume_ratio)
-    } else {
-        volume_ratio
-    };
-    let regime = if prefer_bybit {
-        bybit_signal
-            .map(|s| s.regime)
-            .unwrap_or(consensus_side)
-            .to_string()
-    } else {
-        consensus_side.to_string()
-    };
+    // `current_price` must stay anchored to Bybit so entry/exit logic and the
+    // displayed price match the execution venue. Other exchanges contribute to
+    // consensus and directional context only.
+    let current_price = bybit_signal
+        .map(|s| s.current_price)
+        .unwrap_or_else(|| median(&mut prices));
+    let atr_14 = bybit_signal
+        .map(|s| s.atr_14)
+        .unwrap_or_else(|| median(&mut atrs));
+    let spread_pct = bybit_signal
+        .map(|s| s.spread_pct)
+        .unwrap_or_else(|| median(&mut spreads));
+    let trend_score = bybit_signal
+        .map(|s| s.trend_score)
+        .unwrap_or(consensus_trend_score);
+    let trend_slope = bybit_signal
+        .map(|s| s.trend_slope)
+        .unwrap_or(consensus_trend_slope);
+    let ema_fast = bybit_signal
+        .map(|s| s.ema_fast)
+        .unwrap_or(consensus_ema_fast);
+    let ema_slow = bybit_signal
+        .map(|s| s.ema_slow)
+        .unwrap_or(consensus_ema_slow);
+    let rsi_14 = bybit_signal.map(|s| s.rsi_14).unwrap_or(consensus_rsi_14);
+    let macd_line = bybit_signal
+        .map(|s| s.macd_line)
+        .unwrap_or(consensus_macd_line);
+    let macd_signal = bybit_signal
+        .map(|s| s.macd_signal)
+        .unwrap_or(consensus_macd_signal);
+    let macd_histogram = bybit_signal
+        .map(|s| s.macd_histogram)
+        .unwrap_or(consensus_macd_histogram);
+    let volume_ratio = bybit_signal
+        .map(|s| s.volume_ratio)
+        .unwrap_or(consensus_volume_ratio);
+    let regime = consensus_side.to_string();
 
     Ok(MarketSignal {
         symbol: symbol.to_string(),
@@ -1090,13 +1046,26 @@ fn aggregate_signals(
         funding_rate,
         trend_score,
         spread_pct,
+        consensus_atr_14,
+        consensus_volume_24h,
+        consensus_funding_rate,
+        consensus_trend_score,
+        consensus_spread_pct,
+        consensus_trend_slope,
         ema_fast,
         ema_slow,
+        consensus_ema_fast,
+        consensus_ema_slow,
         rsi_14,
+        consensus_rsi_14,
         macd_line,
         macd_signal,
         macd_histogram,
+        consensus_macd_line,
+        consensus_macd_signal,
+        consensus_macd_histogram,
         volume_ratio,
+        consensus_volume_ratio,
         btc_regime: "neutral".to_string(),
         btc_trend_score: 0.0,
         btc_consensus_count: 0,
