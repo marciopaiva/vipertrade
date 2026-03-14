@@ -733,7 +733,68 @@ export default function Home() {
           a.symbol.localeCompare(b.symbol),
       );
   }, [realtimeMarketSignals, tokenSignalStats]);
-  const exchangeLeader = analyticsExchanges[0] ?? null;
+  const consensusHealthCards = useMemo(() => {
+    const totalSignals = realtimeMarketSignals.length;
+    const alignedWithBybit = realtimeMarketSignals.filter((signal) => {
+      const consensusSide = signal.consensus_side ?? signal.regime ?? "neutral";
+      const bybitRegime = signal.bybit_regime ?? "neutral";
+      return consensusSide !== "neutral" && bybitRegime === consensusSide;
+    });
+    const fullConsensus = realtimeMarketSignals.filter((signal) => {
+      const consensus = signal.consensus_count ?? 0;
+      const exchanges = signal.exchanges_available ?? 0;
+      return exchanges > 0 && consensus === exchanges;
+    });
+    const divergenceSignals = realtimeMarketSignals.filter((signal) => {
+      const consensus = signal.consensus_count ?? 0;
+      const exchanges = signal.exchanges_available ?? 0;
+      return exchanges > 0 && consensus < exchanges;
+    });
+    const avgConsensusStrength =
+      totalSignals > 0
+        ? realtimeMarketSignals.reduce((acc, signal) => {
+            const exchanges = signal.exchanges_available ?? 0;
+            const consensus = signal.consensus_count ?? 0;
+            if (exchanges <= 0) return acc;
+            return acc + consensus / exchanges;
+          }, 0) / totalSignals
+        : 0;
+    const divergenceLabel =
+      divergenceSignals.length > 0
+        ? divergenceSignals
+            .slice(0, 2)
+            .map((signal) => signal.symbol.replace("USDT", ""))
+            .join(" · ")
+        : "No active split";
+    const historicalLeader = analyticsExchanges[0];
+
+    return [
+      {
+        label: "Bybit Alignment",
+        value: totalSignals > 0 ? pct(alignedWithBybit.length / totalSignals) : "-",
+        secondary: totalSignals > 0 ? `${alignedWithBybit.length}/${totalSignals} tokens aligned` : "No live signals",
+        accent: "#38f9a5",
+        barPct: totalSignals > 0 ? alignedWithBybit.length / totalSignals : 0,
+        helper: historicalLeader ? `Hist leader: ${historicalLeader.exchange.toUpperCase()} ${pct(historicalLeader.hit_rate)}` : "Execution anchored to Bybit",
+      },
+      {
+        label: "Consensus Strength",
+        value: totalSignals > 0 ? pct(avgConsensusStrength) : "-",
+        secondary: totalSignals > 0 ? `${fullConsensus.length}/${totalSignals} tokens at full consensus` : "No live signals",
+        accent: "#90dcff",
+        barPct: avgConsensusStrength,
+        helper: "3-exchange directional confirmation",
+      },
+      {
+        label: "Divergence Watch",
+        value: String(divergenceSignals.length),
+        secondary: divergenceLabel,
+        accent: divergenceSignals.length > 0 ? "#f7b500" : "#8fb7e8",
+        barPct: totalSignals > 0 ? divergenceSignals.length / totalSignals : 0,
+        helper: divergenceSignals.length > 0 ? "Consensus split needs attention" : "No active split across venues",
+      },
+    ];
+  }, [analyticsExchanges, realtimeMarketSignals]);
   const wallet = data?.wallet;
   const walletCards = useMemo(
     () => [
@@ -894,12 +955,6 @@ export default function Home() {
                   <div style={{ display: "grid", gap: 12 }}>
                     <div style={statusPillGridStyle}>
                       <StatusPill
-                        label="Critical Recon (15m)"
-                        value={String(data.status?.critical_reconciliation_events_15m ?? "-")}
-                        ok={(data.status?.critical_reconciliation_events_15m ?? 0) === 0}
-                        icon="recon"
-                      />
-                      <StatusPill
                         label="Trade Profile"
                         value={
                           data.status?.trade_profile_label && data.status?.trading_mode
@@ -908,6 +963,12 @@ export default function Home() {
                         }
                         ok={!!(data.status?.trade_profile_label || data.status?.trading_profile)}
                         icon="profile"
+                      />
+                      <StatusPill
+                        label="Critical Recon (15m)"
+                        value={String(data.status?.critical_reconciliation_events_15m ?? "-")}
+                        ok={(data.status?.critical_reconciliation_events_15m ?? 0) === 0}
+                        icon="recon"
                       />
                       <StatusPill
                         label="MD Signal Guard"
@@ -993,56 +1054,41 @@ export default function Home() {
             </section>
 
             <section style={panelBoxStyle}>
-              <h2 style={h2Style}>Exchange Accuracy (Historical)</h2>
+              <h2 style={h2Style}>Consensus Health</h2>
               <div style={sectionDividerStyle} />
-              {analyticsExchanges.length === 0 ? (
-                <p style={mutedStyle}>No exchange score data yet.</p>
+              {consensusHealthCards.length === 0 ? (
+                <p style={mutedStyle}>No consensus data yet.</p>
               ) : (
                 <div style={exchangeRankGridStyle}>
-                  {analyticsExchanges.map((row) => (
+                  {consensusHealthCards.map((card) => (
                     <article
-                      key={row.exchange}
+                      key={card.label}
                       style={{
                         ...exchangeRankCardStyle,
-                        borderColor:
-                          exchangeLeader?.exchange === row.exchange ? "rgba(56,249,165,0.45)" : "rgba(95,137,203,0.24)",
+                        borderColor: `${card.accent}55`,
+                        boxShadow: `inset 0 0 0 1px ${card.accent}22`,
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <strong style={{ fontSize: 15 }}>{row.exchange.toUpperCase()}</strong>
-                          {exchangeLeader?.exchange === row.exchange && (
-                            <span style={{ ...miniBadgeStyle, ...statusTone(true) }}>leader</span>
-                          )}
-                        </div>
-                        <span style={{ color: "#91abd6", fontSize: 12 }}>{row.evaluated} samples</span>
+                        <strong style={{ fontSize: 15 }}>{card.label}</strong>
+                        <span style={{ color: "#91abd6", fontSize: 12 }}>{card.secondary}</span>
                       </div>
                       <div style={exchangeMetricsRowStyle}>
                         <div>
-                          <div style={exchangeMetricLabelStyle}>Hit Rate</div>
-                          <div style={{ ...exchangeMetricValueStyle, color: "#90dcff" }}>{pct(row.hit_rate)}</div>
+                          <div style={exchangeMetricLabelStyle}>Current</div>
+                          <div style={{ ...exchangeMetricValueStyle, color: card.accent }}>{card.value}</div>
                         </div>
                         <div>
-                          <div style={exchangeMetricLabelStyle}>Avg Return</div>
-                          <div
-                            style={{
-                              ...exchangeMetricValueStyle,
-                              color: row.avg_forward_return >= 0 ? "#38f9a5" : "#ff8f8f",
-                            }}
-                          >
-                            {pct(row.avg_forward_return)}
-                          </div>
+                          <div style={exchangeMetricLabelStyle}>Context</div>
+                          <div style={{ ...exchangeMetricValueStyle, color: "#d6e4ff", fontSize: 15 }}>{card.helper}</div>
                         </div>
                       </div>
                       <div style={exchangeBarTrackStyle}>
                         <div
                           style={{
                             ...exchangeBarFillStyle,
-                            width: `${Math.max(8, Math.min(100, (row.hit_rate ?? 0) * 100))}%`,
-                            background:
-                              exchangeLeader?.exchange === row.exchange
-                                ? "linear-gradient(90deg, rgba(56,249,165,0.78), rgba(116,255,210,0.96))"
-                                : "linear-gradient(90deg, rgba(70,174,255,0.72), rgba(144,220,255,0.92))",
+                            width: `${Math.max(8, Math.min(100, card.barPct * 100))}%`,
+                            background: `linear-gradient(90deg, ${card.accent}bb, ${card.accent})`,
                           }}
                         />
                       </div>
@@ -1533,8 +1579,8 @@ function ServiceFlowGraph({
           { name: "backtest", x: 1092, y: 410 },
         ] as const)
       : ([
-          { name: "bybit", x: 110, y: 140 },
-          { name: "binance", x: 110, y: 280 },
+          { name: "binance", x: 110, y: 140 },
+          { name: "bybit", x: 110, y: 280 },
           { name: "okx", x: 110, y: 420 },
           { name: "market-data", x: 360, y: 280 },
           { name: "strategy", x: 610, y: 280 },
@@ -1557,8 +1603,8 @@ function ServiceFlowGraph({
           ["executor", "backtest", 22],
         ] as const)
       : ([
-          ["bybit", "market-data", -10],
-          ["binance", "market-data", 0],
+          ["binance", "market-data", -10],
+          ["bybit", "market-data", 0],
           ["okx", "market-data", 10],
           ["market-data", "strategy", 0],
           ["strategy", "executor", 0],
