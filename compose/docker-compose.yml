@@ -178,6 +178,7 @@ services:
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      WALLET_API_BASE_URL: ${WALLET_API_BASE_URL:-http://api:8080}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: ${RUST_LOG:-info}
       LD_LIBRARY_PATH: /usr/local/lib

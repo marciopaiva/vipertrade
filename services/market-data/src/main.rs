@@ -208,6 +208,8 @@ fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
     candles
 }
 
+const REQUIRED_CANDLE_COUNT: usize = 200;
+
 fn compute_atr14(candles: &[Candle]) -> f64 {
     if candles.len() < 2 {
         return 0.0;
@@ -321,13 +323,33 @@ fn compute_volume_ratio(candles: &[Candle], lookback: usize) -> Option<f64> {
     Some((last / avg).max(0.0))
 }
 
-fn compute_indicator_bundle(candles: &[Candle]) -> (f64, f64, f64, f64, f64, f64, f64) {
-    let ema_fast = compute_ema(candles, 20).unwrap_or(0.0);
-    let ema_slow = compute_ema(candles, 50).unwrap_or(0.0);
-    let rsi_14 = compute_rsi14(candles).unwrap_or(50.0);
-    let (macd_line, macd_signal, macd_histogram) = compute_macd(candles).unwrap_or((0.0, 0.0, 0.0));
-    let volume_ratio = compute_volume_ratio(candles, 20).unwrap_or(1.0);
-    (
+fn compute_indicator_bundle_complete(
+    source: &str,
+    symbol: &str,
+    candles: &[Candle],
+) -> Result<(f64, f64, f64, f64, f64, f64, f64), String> {
+    if candles.len() < REQUIRED_CANDLE_COUNT {
+        return Err(format!(
+            "{} {} candles incomplete: expected at least {}, got {}",
+            source,
+            symbol,
+            REQUIRED_CANDLE_COUNT,
+            candles.len()
+        ));
+    }
+
+    let ema_fast = compute_ema(candles, 20)
+        .ok_or_else(|| format!("{} {} ema_fast incomplete", source, symbol))?;
+    let ema_slow = compute_ema(candles, 50)
+        .ok_or_else(|| format!("{} {} ema_slow incomplete", source, symbol))?;
+    let rsi_14 =
+        compute_rsi14(candles).ok_or_else(|| format!("{} {} rsi_14 incomplete", source, symbol))?;
+    let (macd_line, macd_signal, macd_histogram) =
+        compute_macd(candles).ok_or_else(|| format!("{} {} macd incomplete", source, symbol))?;
+    let volume_ratio = compute_volume_ratio(candles, 20)
+        .ok_or_else(|| format!("{} {} volume_ratio incomplete", source, symbol))?;
+
+    Ok((
         ema_fast,
         ema_slow,
         rsi_14,
@@ -335,7 +357,7 @@ fn compute_indicator_bundle(candles: &[Candle]) -> (f64, f64, f64, f64, f64, f64
         macd_signal,
         macd_histogram,
         volume_ratio,
-    )
+    ))
 }
 
 fn composite_trend_score(
@@ -567,7 +589,7 @@ async fn fetch_market_signal_bybit(
     let atr_14 = compute_atr14(&candles);
 
     let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle(&candles);
+        compute_indicator_bundle_complete("bybit", symbol, &candles)?;
     let trend_score = composite_trend_score(
         current_price,
         ema_fast,
@@ -693,7 +715,7 @@ async fn fetch_market_signal_binance(
     let current_price = candles.last().map(|c| c.close).unwrap_or(0.0).max(0.0);
     let atr_14 = compute_atr14(&candles);
     let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle(&candles);
+        compute_indicator_bundle_complete("binance", symbol, &candles)?;
     let trend_score = composite_trend_score(
         current_price,
         ema_fast,
@@ -821,7 +843,7 @@ async fn fetch_market_signal_okx(
     let current_price = parse_f64(&ticker.last).unwrap_or(fallback_price).max(0.0);
     let atr_14 = compute_atr14(&candles);
     let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle(&candles);
+        compute_indicator_bundle_complete("okx", symbol, &candles)?;
     let trend_score = composite_trend_score(
         current_price,
         ema_fast,
@@ -1104,8 +1126,20 @@ async fn fetch_market_signal(
         Err(e) => errors.push(format!("okx={}", e)),
     }
 
-    if exchanges.is_empty() {
-        return Err(format!("all sources failed: {}", errors.join(" | ")));
+    if !errors.is_empty() {
+        return Err(format!(
+            "incomplete source set for {}: {}",
+            symbol,
+            errors.join(" | ")
+        ));
+    }
+
+    if exchanges.len() != 3 {
+        return Err(format!(
+            "incomplete source set for {}: expected 3 exchanges, got {}",
+            symbol,
+            exchanges.len()
+        ));
     }
 
     let signal = aggregate_signals(symbol, &exchanges, weights)?;
@@ -1133,9 +1167,9 @@ fn apply_btc_context(signal: &mut MarketSignal, btc_signal: &MarketSignal) {
     }
 
     signal.btc_regime = btc_signal.regime.clone();
-    signal.btc_trend_score = btc_signal.trend_score;
+    signal.btc_trend_score = btc_signal.consensus_trend_score;
     signal.btc_consensus_count = btc_signal.consensus_count;
-    signal.btc_volume_ratio = btc_signal.volume_ratio;
+    signal.btc_volume_ratio = btc_signal.consensus_volume_ratio;
 }
 
 async fn shutdown_signal() {
@@ -1283,19 +1317,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
             fetch_analytics_weights(&http, &analytics_scores_url, analytics_min_evaluated).await;
 
         let btc_context = match fetch_market_signal(&http, &base_url, "BTCUSDT", &weights).await {
-            Ok(signal) => Some(signal),
+            Ok(signal) => signal,
             Err(err) => {
-                eprintln!("Failed to refresh BTC macro context: {}", err);
-                None
+                latest_signals.write().await.clear();
+                eprintln!(
+                    "Failed to refresh BTC macro context; clearing latest signals and skipping cycle: {}",
+                    err
+                );
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        println!("Received shutdown signal, stopping viper-market-data");
+                        break;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                }
+                continue;
             }
         };
+
+        let mut cycle_signals = HashMap::<String, MarketSignal>::new();
+        let mut cycle_failed = false;
 
         for symbol in &symbols {
             match fetch_market_signal(&http, &base_url, symbol, &weights).await {
                 Ok(mut signal) => {
-                    if let Some(btc_signal) = &btc_context {
-                        apply_btc_context(&mut signal, btc_signal);
-                    }
+                    apply_btc_context(&mut signal, &btc_context);
                     if let Err(err) = signal.validate() {
                         invalid_signal_count.fetch_add(1, Ordering::Relaxed);
                         let drop = InvalidSignalDrop {
@@ -1316,14 +1362,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 "timestamp": drop.timestamp,
                             })
                         );
-                        continue;
+                        cycle_failed = true;
+                        break;
                     }
-                    latest_signals
-                        .write()
-                        .await
-                        .insert(symbol.clone(), signal.clone());
+                    cycle_signals.insert(symbol.clone(), signal);
+                }
+                Err(err) => {
+                    cycle_failed = true;
+                    eprintln!("Failed to fetch market data for {}: {}", symbol, err);
+                    break;
+                }
+            }
+        }
 
-                    let event = MarketSignalEvent::new(signal);
+        if cycle_failed || cycle_signals.len() != symbols.len() {
+            latest_signals.write().await.clear();
+            eprintln!(
+                "Skipping market-data publish cycle because signals are incomplete: expected {} complete symbols, got {}",
+                symbols.len(),
+                cycle_signals.len()
+            );
+        } else {
+            *latest_signals.write().await = cycle_signals.clone();
+            for (symbol, signal) in cycle_signals {
+                let event = MarketSignalEvent::new(signal);
                     if let Err(err) = event.validate() {
                         invalid_signal_count.fetch_add(1, Ordering::Relaxed);
                         let drop = InvalidSignalDrop {
@@ -1356,10 +1418,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         event.event_id, event.signal.symbol
                     );
                 }
-                Err(err) => {
-                    eprintln!("Failed to fetch market data for {}: {}", symbol, err);
-                }
-            }
         }
 
         tokio::select! {
