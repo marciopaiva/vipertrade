@@ -219,11 +219,10 @@ type TokenDecisionCardData = {
   trendScore: number;
   stateLabel: string;
   stateTone: "positive" | "negative" | "neutral";
-  recentBuy: number;
-  recentHold: number;
-  recentSell: number;
   mainBlock: string;
   priorityRank: number;
+  bybitAligned: boolean;
+  hasDivergence: boolean;
 };
 type RealtimeMarketSignal = {
   symbol: string;
@@ -714,11 +713,11 @@ export default function Home() {
           trendScore: signal.trend_score,
           stateLabel,
           stateTone,
-          recentBuy: stats?.buy ?? 0,
-          recentHold: stats?.hold ?? 0,
-          recentSell: stats?.sell ?? 0,
           mainBlock: prettifyReason(holdBlock ?? "no clear block"),
           priorityRank,
+          bybitAligned:
+            consensusSide !== "neutral" && (signal.bybit_regime ?? "neutral") === consensusSide,
+          hasDivergence: exchanges > 0 && consensus < exchanges,
         };
       })
       .sort(
@@ -729,79 +728,6 @@ export default function Home() {
           a.symbol.localeCompare(b.symbol),
       );
   }, [realtimeMarketSignals, tokenSignalStats]);
-  const decisionMatrixSummaryCards = useMemo(() => {
-    const totalSignals = realtimeMarketSignals.length;
-    const alignedWithBybit = realtimeMarketSignals.filter((signal) => {
-      const consensusSide = signal.consensus_side ?? signal.regime ?? "neutral";
-      const bybitRegime = signal.bybit_regime ?? "neutral";
-      return consensusSide !== "neutral" && bybitRegime === consensusSide;
-    });
-    const fullConsensus = realtimeMarketSignals.filter((signal) => {
-      const consensus = signal.consensus_count ?? 0;
-      const exchanges = signal.exchanges_available ?? 0;
-      return exchanges > 0 && consensus === exchanges;
-    });
-    const divergenceSignals = realtimeMarketSignals.filter((signal) => {
-      const consensus = signal.consensus_count ?? 0;
-      const exchanges = signal.exchanges_available ?? 0;
-      return exchanges > 0 && consensus < exchanges;
-    });
-    const bullishSignals = realtimeMarketSignals.filter((signal) => (signal.consensus_side ?? signal.regime ?? "neutral") === "bullish");
-    const bearishSignals = realtimeMarketSignals.filter((signal) => (signal.consensus_side ?? signal.regime ?? "neutral") === "bearish");
-    const divergenceLabel =
-      divergenceSignals.length > 0
-        ? divergenceSignals
-            .slice(0, 2)
-            .map((signal) => signal.symbol.replace("USDT", ""))
-            .join(" · ")
-        : "No active split";
-    const marketBias =
-      bullishSignals.length === 0 && bearishSignals.length === 0
-        ? "Neutral"
-        : bullishSignals.length >= bearishSignals.length
-          ? "Bullish"
-          : "Bearish";
-    const marketBiasDetail =
-      totalSignals > 0
-        ? `${bullishSignals.length} bullish · ${bearishSignals.length} bearish`
-        : "No live signals";
-    const fullConsensusPct = totalSignals > 0 ? fullConsensus.length / totalSignals : 0;
-
-    return [
-      {
-        label: "Market Bias",
-        value: marketBias,
-        secondary: marketBiasDetail,
-        accent: marketBias === "Bearish" ? "#ff8f8f" : marketBias === "Bullish" ? "#38f9a5" : "#8fb7e8",
-        barPct: totalSignals > 0 ? Math.max(bullishSignals.length, bearishSignals.length) / totalSignals : 0,
-        helper: totalSignals > 0 ? `${totalSignals} tokens in live matrix` : "Waiting for a full signal cycle",
-      },
-      {
-        label: "Bybit Alignment",
-        value: totalSignals > 0 ? pct(alignedWithBybit.length / totalSignals) : "-",
-        secondary: totalSignals > 0 ? `${alignedWithBybit.length}/${totalSignals} tokens aligned` : "No live signals",
-        accent: "#38f9a5",
-        barPct: totalSignals > 0 ? alignedWithBybit.length / totalSignals : 0,
-        helper: "Execution stays anchored to Bybit",
-      },
-      {
-        label: "Full Consensus",
-        value: totalSignals > 0 ? pct(fullConsensusPct) : "-",
-        secondary: totalSignals > 0 ? `${fullConsensus.length}/${totalSignals} tokens at 3/3` : "No live signals",
-        accent: "#90dcff",
-        barPct: fullConsensusPct,
-        helper: "3-exchange directional confirmation",
-      },
-      {
-        label: "Divergence Watch",
-        value: String(divergenceSignals.length),
-        secondary: divergenceLabel,
-        accent: divergenceSignals.length > 0 ? "#f7b500" : "#8fb7e8",
-        barPct: totalSignals > 0 ? divergenceSignals.length / totalSignals : 0,
-        helper: divergenceSignals.length > 0 ? "Consensus split needs attention" : "No active split across venues",
-      },
-    ];
-  }, [realtimeMarketSignals]);
   const wallet = data?.wallet;
   const walletCards = useMemo(
     () => [
@@ -1049,50 +975,6 @@ export default function Home() {
             <section style={panelBoxStyle}>
               <h2 style={h2Style}>Decision Matrix</h2>
               <div style={sectionDividerStyle} />
-              <p style={{ ...mutedStyle, marginTop: -2, marginBottom: 12 }}>
-                Bybit stays as execution truth while Binance and OKX reinforce directional consensus.
-              </p>
-              {decisionMatrixSummaryCards.length === 0 ? (
-                <p style={mutedStyle}>No live decision data yet.</p>
-              ) : (
-                <div style={decisionSummaryGridStyle}>
-                  {decisionMatrixSummaryCards.map((card) => (
-                    <article
-                      key={card.label}
-                      style={{
-                        ...exchangeRankCardStyle,
-                        borderColor: `${card.accent}55`,
-                        boxShadow: `inset 0 0 0 1px ${card.accent}22`,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                        <strong style={{ fontSize: 15 }}>{card.label}</strong>
-                        <span style={{ color: "#91abd6", fontSize: 12 }}>{card.secondary}</span>
-                      </div>
-                      <div style={exchangeMetricsRowStyle}>
-                        <div>
-                          <div style={exchangeMetricLabelStyle}>Current</div>
-                          <div style={{ ...exchangeMetricValueStyle, color: card.accent }}>{card.value}</div>
-                        </div>
-                        <div>
-                          <div style={exchangeMetricLabelStyle}>Context</div>
-                          <div style={{ ...exchangeMetricValueStyle, color: "#d6e4ff", fontSize: 15 }}>{card.helper}</div>
-                        </div>
-                      </div>
-                      <div style={exchangeBarTrackStyle}>
-                        <div
-                          style={{
-                            ...exchangeBarFillStyle,
-                            width: `${Math.max(8, Math.min(100, card.barPct * 100))}%`,
-                            background: `linear-gradient(90deg, ${card.accent}bb, ${card.accent})`,
-                          }}
-                        />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-              <div style={{ ...sectionDividerStyle, marginTop: 14 }} />
               {tokenDecisionBoard.length === 0 ? (
                 <p style={mutedStyle}>No token decision data available.</p>
               ) : (
@@ -1521,6 +1403,12 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
         ? statusTone(false)
         : { borderColor: "rgba(120,148,205,0.35)", color: "#a7bddf", background: "rgba(33,54,96,0.18)" };
   const trendPositive = item.trendScore >= 0;
+  const alignmentStyle = item.bybitAligned
+    ? { borderColor: "rgba(56,249,165,0.3)", color: "#7ff6c3", background: "rgba(8, 52, 37, 0.28)" }
+    : item.hasDivergence
+      ? { borderColor: "rgba(247,181,0,0.34)", color: "#ffd978", background: "rgba(92, 62, 8, 0.24)" }
+      : { borderColor: "rgba(120,148,205,0.35)", color: "#a7bddf", background: "rgba(33,54,96,0.18)" };
+  const alignmentLabel = item.bybitAligned ? "Aligned" : item.hasDivergence ? "Divergent" : "Watching";
   return (
     <article style={tokenCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1546,21 +1434,15 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
           <div style={tokenMetricValueStyle}>{item.bybitRegime}</div>
         </div>
         <div style={tokenMetricStyle}>
-          <div style={tokenMetricLabelStyle}>Recent</div>
-          <div style={tokenChipRowStyle}>
-            <span style={tokenChipStyle}>B {item.recentBuy}</span>
-            <span style={tokenChipStyle}>H {item.recentHold}</span>
-            <span style={tokenChipStyle}>S {item.recentSell}</span>
+          <div style={tokenMetricLabelStyle}>Context</div>
+          <div style={tokenMetricValueStyle}>{item.priorityRank > 0 ? item.mainBlock : "Setup live"}</div>
+        </div>
+        <div style={tokenMetricStyle}>
+          <div style={tokenMetricLabelStyle}>Alignment</div>
+          <div>
+            <span style={{ ...miniBadgeStyle, ...alignmentStyle }}>{alignmentLabel}</span>
           </div>
         </div>
-      </div>
-      <div
-        style={{
-          ...tokenFooterStyle,
-          visibility: item.priorityRank > 0 ? "visible" : "hidden",
-        }}
-      >
-        Block: {item.priorityRank > 0 ? item.mainBlock : "placeholder"}
       </div>
     </article>
   );
@@ -1963,12 +1845,6 @@ const tokenGridStyle: CSSProperties = {
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
 };
 
-const decisionSummaryGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-};
-
 const tokenCardStyle: CSSProperties = {
   border: "1px solid var(--line)",
   borderRadius: 12,
@@ -2005,21 +1881,6 @@ const tokenDetailGridStyle: CSSProperties = {
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
 };
 
-const tokenChipRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 6,
-  flexWrap: "wrap",
-};
-
-const tokenChipStyle: CSSProperties = {
-  border: "1px solid rgba(95,137,203,0.2)",
-  borderRadius: 999,
-  padding: "2px 7px",
-  fontSize: 11,
-  color: "#cfe0ff",
-  background: "rgba(13, 24, 46, 0.88)",
-};
-
 const tokenMetricLabelStyle: CSSProperties = {
   fontSize: 11,
   color: "#8eaad6",
@@ -2033,62 +1894,6 @@ const tokenMetricValueStyle: CSSProperties = {
   color: "#dbe8ff",
   fontWeight: 600,
   lineHeight: 1.35,
-};
-
-const tokenFooterStyle: CSSProperties = {
-  marginTop: 10,
-  paddingTop: 10,
-  borderTop: "1px solid rgba(95, 137, 203, 0.16)",
-  fontSize: 12,
-  color: "#7f99c8",
-};
-
-const exchangeRankGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-};
-
-const exchangeRankCardStyle: CSSProperties = {
-  border: "1px solid rgba(95,137,203,0.24)",
-  borderRadius: 10,
-  padding: "12px 12px",
-  background: "linear-gradient(180deg, rgba(7,14,28,0.88), rgba(6,12,24,0.92))",
-};
-
-const exchangeMetricsRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 16,
-  margin: "10px 0 12px",
-};
-
-const exchangeMetricLabelStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#8eaad6",
-  textTransform: "uppercase",
-  letterSpacing: 0.35,
-  marginBottom: 3,
-};
-
-const exchangeMetricValueStyle: CSSProperties = {
-  fontSize: 20,
-  fontWeight: 700,
-  lineHeight: 1.05,
-};
-
-const exchangeBarTrackStyle: CSSProperties = {
-  width: "100%",
-  height: 8,
-  borderRadius: 999,
-  background: "rgba(35, 56, 96, 0.32)",
-  overflow: "hidden",
-};
-
-const exchangeBarFillStyle: CSSProperties = {
-  height: "100%",
-  borderRadius: 999,
 };
 
 const tradeStatsGridStyle: CSSProperties = {
