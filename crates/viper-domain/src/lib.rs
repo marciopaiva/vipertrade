@@ -16,11 +16,29 @@ pub struct MarketSignal {
     pub trend_score: f64,
     pub spread_pct: f64,
     #[serde(default)]
+    pub consensus_atr_14: f64,
+    #[serde(default)]
+    pub consensus_volume_24h: i64,
+    #[serde(default)]
+    pub consensus_funding_rate: f64,
+    #[serde(default)]
+    pub consensus_trend_score: f64,
+    #[serde(default)]
+    pub consensus_spread_pct: f64,
+    #[serde(default)]
+    pub consensus_trend_slope: f64,
+    #[serde(default)]
     pub ema_fast: f64,
     #[serde(default)]
     pub ema_slow: f64,
     #[serde(default)]
+    pub consensus_ema_fast: f64,
+    #[serde(default)]
+    pub consensus_ema_slow: f64,
+    #[serde(default)]
     pub rsi_14: f64,
+    #[serde(default)]
+    pub consensus_rsi_14: f64,
     #[serde(default)]
     pub macd_line: f64,
     #[serde(default)]
@@ -28,7 +46,15 @@ pub struct MarketSignal {
     #[serde(default)]
     pub macd_histogram: f64,
     #[serde(default)]
+    pub consensus_macd_line: f64,
+    #[serde(default)]
+    pub consensus_macd_signal: f64,
+    #[serde(default)]
+    pub consensus_macd_histogram: f64,
+    #[serde(default)]
     pub volume_ratio: f64,
+    #[serde(default)]
+    pub consensus_volume_ratio: f64,
     #[serde(default)]
     pub btc_regime: String,
     #[serde(default)]
@@ -83,14 +109,41 @@ impl MarketSignal {
         if !(self.spread_pct.is_finite() && self.spread_pct >= 0.0) {
             return Err("market signal spread_pct must be finite and >= 0".to_string());
         }
+        if !(self.consensus_atr_14.is_finite() && self.consensus_atr_14 >= 0.0) {
+            return Err("market signal consensus_atr_14 must be finite and >= 0".to_string());
+        }
+        if self.consensus_volume_24h < 0 {
+            return Err("market signal consensus_volume_24h must be >= 0".to_string());
+        }
+        if !(self.consensus_funding_rate.is_finite()) {
+            return Err("market signal consensus_funding_rate must be finite".to_string());
+        }
+        if !(self.consensus_trend_score.is_finite()) {
+            return Err("market signal consensus_trend_score must be finite".to_string());
+        }
+        if !(self.consensus_spread_pct.is_finite() && self.consensus_spread_pct >= 0.0) {
+            return Err("market signal consensus_spread_pct must be finite and >= 0".to_string());
+        }
+        if !(self.consensus_trend_slope.is_finite()) {
+            return Err("market signal consensus_trend_slope must be finite".to_string());
+        }
         if !(self.ema_fast.is_finite()) {
             return Err("market signal ema_fast must be finite".to_string());
         }
         if !(self.ema_slow.is_finite()) {
             return Err("market signal ema_slow must be finite".to_string());
         }
+        if !(self.consensus_ema_fast.is_finite()) {
+            return Err("market signal consensus_ema_fast must be finite".to_string());
+        }
+        if !(self.consensus_ema_slow.is_finite()) {
+            return Err("market signal consensus_ema_slow must be finite".to_string());
+        }
         if !(self.rsi_14.is_finite() && (0.0..=100.0).contains(&self.rsi_14)) {
             return Err("market signal rsi_14 must be finite and between 0 and 100".to_string());
+        }
+        if !(self.consensus_rsi_14.is_finite() && (0.0..=100.0).contains(&self.consensus_rsi_14)) {
+            return Err("market signal consensus_rsi_14 must be finite and between 0 and 100".to_string());
         }
         if !(self.macd_line.is_finite()) {
             return Err("market signal macd_line must be finite".to_string());
@@ -101,8 +154,20 @@ impl MarketSignal {
         if !(self.macd_histogram.is_finite()) {
             return Err("market signal macd_histogram must be finite".to_string());
         }
+        if !(self.consensus_macd_line.is_finite()) {
+            return Err("market signal consensus_macd_line must be finite".to_string());
+        }
+        if !(self.consensus_macd_signal.is_finite()) {
+            return Err("market signal consensus_macd_signal must be finite".to_string());
+        }
+        if !(self.consensus_macd_histogram.is_finite()) {
+            return Err("market signal consensus_macd_histogram must be finite".to_string());
+        }
         if !(self.volume_ratio.is_finite() && self.volume_ratio >= 0.0) {
             return Err("market signal volume_ratio must be finite and >= 0".to_string());
+        }
+        if !(self.consensus_volume_ratio.is_finite() && self.consensus_volume_ratio >= 0.0) {
+            return Err("market signal consensus_volume_ratio must be finite and >= 0".to_string());
         }
         if !(self.btc_trend_score.is_finite()) {
             return Err("market signal btc_trend_score must be finite".to_string());
@@ -250,13 +315,26 @@ mod tests {
             funding_rate: 0.001,
             trend_score: 0.7,
             spread_pct: 0.0005,
+            consensus_atr_14: 0.01,
+            consensus_volume_24h: 100_000_000,
+            consensus_funding_rate: 0.001,
+            consensus_trend_score: 0.72,
+            consensus_spread_pct: 0.0006,
+            consensus_trend_slope: 0.0038,
             ema_fast: 0.171,
             ema_slow: 0.168,
+            consensus_ema_fast: 0.1705,
+            consensus_ema_slow: 0.1681,
             rsi_14: 61.0,
+            consensus_rsi_14: 60.5,
             macd_line: 0.002,
             macd_signal: 0.0015,
             macd_histogram: 0.0005,
+            consensus_macd_line: 0.0019,
+            consensus_macd_signal: 0.0014,
+            consensus_macd_histogram: 0.0005,
             volume_ratio: 1.2,
+            consensus_volume_ratio: 1.15,
             btc_regime: "bullish".to_string(),
             btc_trend_score: 0.65,
             btc_consensus_count: 3,

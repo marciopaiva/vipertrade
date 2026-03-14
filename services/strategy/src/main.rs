@@ -939,17 +939,30 @@ fn execute_strategy_step(
             let spread_pct = get_f64(&state, "spread_pct", 1.0);
             let volume_24h = get_i64(&state, "volume_24h", 0);
             let raw_trend_score = get_f64(&state, "trend_score", 0.0);
-            let trend_score = raw_trend_score.abs();
+            let consensus_raw_trend_score =
+                get_f64(&state, "consensus_trend_score", raw_trend_score);
+            let consensus_trend_score = consensus_raw_trend_score.abs();
             let current_price = get_f64(&state, "current_price", 0.0);
             let atr_14 = get_f64(&state, "atr_14", 0.0);
             let trend_slope = get_f64(&state, "trend_slope", 0.0);
+            let consensus_trend_slope = get_f64(&state, "consensus_trend_slope", trend_slope);
             let ema_fast = get_f64(&state, "ema_fast", 0.0);
             let ema_slow = get_f64(&state, "ema_slow", 0.0);
+            let consensus_ema_fast = get_f64(&state, "consensus_ema_fast", ema_fast);
+            let consensus_ema_slow = get_f64(&state, "consensus_ema_slow", ema_slow);
             let rsi_14 = get_f64(&state, "rsi_14", 50.0);
+            let consensus_rsi_14 = get_f64(&state, "consensus_rsi_14", rsi_14);
             let macd_line = get_f64(&state, "macd_line", 0.0);
             let macd_signal = get_f64(&state, "macd_signal", 0.0);
             let macd_histogram = get_f64(&state, "macd_histogram", 0.0);
+            let consensus_macd_line = get_f64(&state, "consensus_macd_line", macd_line);
+            let consensus_macd_signal =
+                get_f64(&state, "consensus_macd_signal", macd_signal);
+            let consensus_macd_histogram =
+                get_f64(&state, "consensus_macd_histogram", macd_histogram);
             let volume_ratio = get_f64(&state, "volume_ratio", 0.0);
+            let consensus_volume_ratio =
+                get_f64(&state, "consensus_volume_ratio", volume_ratio);
             let btc_regime = get_string(&state, "btc_regime", "neutral");
             let btc_trend_score = get_f64(&state, "btc_trend_score", 0.0);
             let btc_consensus_count = get_i64(&state, "btc_consensus_count", 0);
@@ -999,15 +1012,15 @@ fn execute_strategy_step(
                 && regime.eq_ignore_ascii_case("bullish")
                 && bybit_regime.eq_ignore_ascii_case("bullish")
                 && consensus_long_ok
-                && trend_slope > 0.0
-                && ema_fast > ema_slow
+                && consensus_trend_slope > 0.0
+                && consensus_ema_fast > consensus_ema_slow
                 && current_price >= ema_fast
-                && rsi_14 >= rsi_min
-                && rsi_14 <= rsi_max
-                && macd_line > macd_signal
-                && macd_histogram > 0.0
-                && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
-                && trend_score
+                && consensus_rsi_14 >= rsi_min
+                && consensus_rsi_14 <= rsi_max
+                && consensus_macd_line > consensus_macd_signal
+                && consensus_macd_histogram > 0.0
+                && consensus_volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                && consensus_trend_score
                     >= (cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty);
 
             let directional_ok = if raw_trend_score >= 0.0 {
@@ -1015,17 +1028,18 @@ fn execute_strategy_step(
                     && if cfg.permissive_entry() {
                         (bybit_regime.eq_ignore_ascii_case("bullish")
                             || regime.eq_ignore_ascii_case("bullish")
-                            || raw_trend_score >= 0.0)
-                            && trend_slope >= 0.0
-                            && ema_fast >= ema_slow
+                            || consensus_raw_trend_score >= 0.0)
+                            && consensus_trend_slope >= 0.0
+                            && consensus_ema_fast >= consensus_ema_slow
                             && current_price > 0.0
                             && current_price >= ema_slow
-                            && rsi_14 >= rsi_min
-                            && rsi_14 <= rsi_max
-                            && macd_line >= macd_signal
-                            && macd_histogram >= 0.0
-                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
-                            && trend_score
+                            && consensus_rsi_14 >= rsi_min
+                            && consensus_rsi_14 <= rsi_max
+                            && consensus_macd_line >= consensus_macd_signal
+                            && consensus_macd_histogram >= 0.0
+                            && consensus_volume_ratio
+                                >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && consensus_trend_score
                                 >= (cfg.min_trend_score_for_side(&symbol, entry_side)
                                     + btc_macro_penalty)
                     } else {
@@ -1036,31 +1050,36 @@ fn execute_strategy_step(
                     && if cfg.permissive_entry() {
                         (bybit_regime.eq_ignore_ascii_case("bearish")
                             || regime.eq_ignore_ascii_case("bearish")
-                            || raw_trend_score < 0.0)
-                            && trend_slope <= 0.0
-                            && ema_fast <= ema_slow
+                            || consensus_raw_trend_score < 0.0)
+                            && consensus_trend_slope <= 0.0
+                            && consensus_ema_fast <= consensus_ema_slow
                             && current_price > 0.0
                             && current_price <= ema_slow
-                            && rsi_14 >= rsi_min
-                            && rsi_14 <= rsi_max
-                            && macd_line <= macd_signal
-                            && macd_histogram <= 0.0
-                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
-                            && trend_score
+                            && consensus_rsi_14 >= rsi_min
+                            && consensus_rsi_14 <= rsi_max
+                            && consensus_macd_line <= consensus_macd_signal
+                            && consensus_macd_histogram <= 0.0
+                            && consensus_volume_ratio
+                                >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && consensus_trend_score
                                 >= (cfg.min_trend_score_for_side(&symbol, entry_side)
                                     + btc_macro_penalty)
                     } else {
                         regime.eq_ignore_ascii_case("bearish")
                             && bybit_regime.eq_ignore_ascii_case("bearish")
                             && consensus_short_ok
-                            && trend_slope < 0.0
-                            && ema_fast < ema_slow
+                            && consensus_trend_slope < 0.0
+                            && consensus_ema_fast < consensus_ema_slow
                             && current_price <= ema_fast
-                            && rsi_14 >= rsi_min
-                            && rsi_14 <= rsi_max
-                            && macd_line < macd_signal
-                            && macd_histogram < 0.0
-                            && volume_ratio >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && consensus_rsi_14 >= rsi_min
+                            && consensus_rsi_14 <= rsi_max
+                            && consensus_macd_line < consensus_macd_signal
+                            && consensus_macd_histogram < 0.0
+                            && consensus_volume_ratio
+                                >= cfg.min_volume_ratio_for_side(&symbol, entry_side)
+                            && consensus_trend_score
+                                >= (cfg.min_trend_score_for_side(&symbol, entry_side)
+                                    + btc_macro_penalty)
                     }
             };
             Ok(json!(
