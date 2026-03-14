@@ -74,6 +74,8 @@ struct ExchangeSignal {
     trend_slope: f64,
 }
 
+type IndicatorBundle = (f64, f64, f64, f64, f64, f64, f64);
+
 #[derive(Debug, Deserialize)]
 struct AnalyticsScoresResponse {
     exchanges: Vec<AnalyticsExchangeScore>,
@@ -327,7 +329,7 @@ fn compute_indicator_bundle_complete(
     source: &str,
     symbol: &str,
     candles: &[Candle],
-) -> Result<(f64, f64, f64, f64, f64, f64, f64), String> {
+) -> Result<IndicatorBundle, String> {
     if candles.len() < REQUIRED_CANDLE_COUNT {
         return Err(format!(
             "{} {} candles incomplete: expected at least {}, got {}",

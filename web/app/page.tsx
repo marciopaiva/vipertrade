@@ -1411,8 +1411,13 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
   const alignmentLabel = item.bybitAligned ? "Aligned" : item.hasDivergence ? "Divergent" : "Watching";
   return (
     <article style={tokenCardStyle}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <strong style={{ fontSize: 15 }}>{item.symbol}</strong>
+      <div style={tokenCardHeaderStyle}>
+        <div>
+          <strong style={tokenSymbolStyle}>{item.symbol}</strong>
+          <div style={tokenMetaLineStyle}>
+            {item.consensusCount}/{item.exchangesAvailable} consensus
+          </div>
+        </div>
         <span style={{ ...miniBadgeStyle, ...stateStyle }}>{item.stateLabel}</span>
       </div>
       <div style={tokenHeadlineStyle}>
@@ -1420,9 +1425,7 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
           Trend {item.trendScore >= 0 ? "+" : ""}
           {num(item.trendScore, 3)}
         </span>
-        <span style={{ color: "#8fb4e4", fontSize: 13, fontWeight: 600 }}>
-          {item.consensusCount}/{item.exchangesAvailable} consensus
-        </span>
+        <span style={{ color: "#8fb4e4", fontSize: 13, fontWeight: 600 }}>{alignmentLabel}</span>
       </div>
       <div style={tokenDetailGridStyle}>
         <div style={tokenMetricStyle}>
@@ -1848,8 +1851,28 @@ const tokenGridStyle: CSSProperties = {
 const tokenCardStyle: CSSProperties = {
   border: "1px solid var(--line)",
   borderRadius: 12,
-  padding: 12,
+  padding: 14,
   background: "linear-gradient(180deg, rgba(8,18,36,0.86), rgba(6,14,28,0.94))",
+};
+
+const tokenCardHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 10,
+  marginBottom: 12,
+};
+
+const tokenSymbolStyle: CSSProperties = {
+  fontSize: 16,
+  lineHeight: 1.1,
+};
+
+const tokenMetaLineStyle: CSSProperties = {
+  marginTop: 4,
+  fontSize: 12,
+  color: "#88a5d4",
+  fontWeight: 600,
 };
 
 const tokenMetricStyle: CSSProperties = {
@@ -1870,14 +1893,14 @@ const tokenHeadlineStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 10,
-  marginBottom: 10,
+  marginBottom: 12,
   fontSize: 15,
   fontWeight: 700,
 };
 
 const tokenDetailGridStyle: CSSProperties = {
   display: "grid",
-  gap: 8,
+  gap: 10,
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
 };
 
