@@ -212,6 +212,7 @@ type TokenSignalSummary = SignalBucket & { symbol: string; holdReasons: HoldReas
 type TokenDecisionCardData = {
   symbol: string;
   regime: string;
+  consensusSide: string;
   bybitRegime: string;
   consensusCount: number;
   exchangesAvailable: number;
@@ -598,13 +599,6 @@ export default function Home() {
       .filter((item): item is RealtimeMarketSignal => typeof item?.symbol === "string")
       .sort((a, b) => a.symbol.localeCompare(b.symbol));
   }, [data?.market_signals?.items]);
-  const analyticsExchanges = useMemo(
-    () =>
-      (data?.analytics_scores?.exchanges ?? [])
-        .slice()
-        .sort((a, b) => (b.hit_rate ?? 0) - (a.hit_rate ?? 0)),
-    [data?.analytics_scores?.exchanges],
-  );
   const openPositionsView = useMemo(() => {
     const marketBySymbol = new Map(realtimeMarketSignals.map((s) => [s.symbol, s]));
     return positions.map((p) => {
@@ -688,42 +682,44 @@ export default function Home() {
     return realtimeMarketSignals
       .map((signal) => {
         const stats = statsBySymbol.get(signal.symbol);
-      const holdBlock = stats?.holdReasons?.[0]?.reason;
-      const consensus = signal.consensus_count ?? 0;
-      const exchanges = signal.exchanges_available ?? 0;
-      let stateLabel = "Watching";
-      let stateTone: TokenDecisionCardData["stateTone"] = "neutral";
-      let priorityRank = 2;
+        const holdBlock = stats?.holdReasons?.[0]?.reason;
+        const consensus = signal.consensus_count ?? 0;
+        const exchanges = signal.exchanges_available ?? 0;
+        const consensusSide = signal.consensus_side ?? signal.regime ?? "neutral";
+        let stateLabel = "Watching";
+        let stateTone: TokenDecisionCardData["stateTone"] = "neutral";
+        let priorityRank = 2;
 
-      if (signal.regime === "bullish" && consensus >= 2) {
-        stateLabel = "Ready Long";
-        stateTone = "positive";
-        priorityRank = 0;
-      } else if (signal.regime === "bearish" && consensus >= 2) {
-        stateLabel = "Ready Short";
-        stateTone = "negative";
-        priorityRank = 0;
-      } else if (holdBlock) {
-        stateLabel = "Blocked";
-        stateTone = "neutral";
-        priorityRank = 3;
-      }
+        if (consensusSide === "bullish" && consensus >= 2) {
+          stateLabel = "Ready Long";
+          stateTone = "positive";
+          priorityRank = 0;
+        } else if (consensusSide === "bearish" && consensus >= 2) {
+          stateLabel = "Ready Short";
+          stateTone = "negative";
+          priorityRank = 0;
+        } else if (holdBlock) {
+          stateLabel = "Blocked";
+          stateTone = "neutral";
+          priorityRank = 3;
+        }
 
-      return {
-        symbol: signal.symbol,
-        regime: signal.regime ?? "neutral",
-        bybitRegime: signal.bybit_regime ?? "neutral",
-        consensusCount: consensus,
-        exchangesAvailable: exchanges,
-        trendScore: signal.trend_score,
-        stateLabel,
-        stateTone,
-        recentBuy: stats?.buy ?? 0,
-        recentHold: stats?.hold ?? 0,
-        recentSell: stats?.sell ?? 0,
-        mainBlock: prettifyReason(holdBlock ?? "no clear block"),
-        priorityRank,
-      };
+        return {
+          symbol: signal.symbol,
+          regime: signal.regime ?? "neutral",
+          consensusSide,
+          bybitRegime: signal.bybit_regime ?? "neutral",
+          consensusCount: consensus,
+          exchangesAvailable: exchanges,
+          trendScore: signal.trend_score,
+          stateLabel,
+          stateTone,
+          recentBuy: stats?.buy ?? 0,
+          recentHold: stats?.hold ?? 0,
+          recentSell: stats?.sell ?? 0,
+          mainBlock: prettifyReason(holdBlock ?? "no clear block"),
+          priorityRank,
+        };
       })
       .sort(
         (a, b) =>
@@ -733,7 +729,7 @@ export default function Home() {
           a.symbol.localeCompare(b.symbol),
       );
   }, [realtimeMarketSignals, tokenSignalStats]);
-  const consensusHealthCards = useMemo(() => {
+  const decisionMatrixSummaryCards = useMemo(() => {
     const totalSignals = realtimeMarketSignals.length;
     const alignedWithBybit = realtimeMarketSignals.filter((signal) => {
       const consensusSide = signal.consensus_side ?? signal.regime ?? "neutral";
@@ -750,15 +746,8 @@ export default function Home() {
       const exchanges = signal.exchanges_available ?? 0;
       return exchanges > 0 && consensus < exchanges;
     });
-    const avgConsensusStrength =
-      totalSignals > 0
-        ? realtimeMarketSignals.reduce((acc, signal) => {
-            const exchanges = signal.exchanges_available ?? 0;
-            const consensus = signal.consensus_count ?? 0;
-            if (exchanges <= 0) return acc;
-            return acc + consensus / exchanges;
-          }, 0) / totalSignals
-        : 0;
+    const bullishSignals = realtimeMarketSignals.filter((signal) => (signal.consensus_side ?? signal.regime ?? "neutral") === "bullish");
+    const bearishSignals = realtimeMarketSignals.filter((signal) => (signal.consensus_side ?? signal.regime ?? "neutral") === "bearish");
     const divergenceLabel =
       divergenceSignals.length > 0
         ? divergenceSignals
@@ -766,23 +755,41 @@ export default function Home() {
             .map((signal) => signal.symbol.replace("USDT", ""))
             .join(" · ")
         : "No active split";
-    const historicalLeader = analyticsExchanges[0];
+    const marketBias =
+      bullishSignals.length === 0 && bearishSignals.length === 0
+        ? "Neutral"
+        : bullishSignals.length >= bearishSignals.length
+          ? "Bullish"
+          : "Bearish";
+    const marketBiasDetail =
+      totalSignals > 0
+        ? `${bullishSignals.length} bullish · ${bearishSignals.length} bearish`
+        : "No live signals";
+    const fullConsensusPct = totalSignals > 0 ? fullConsensus.length / totalSignals : 0;
 
     return [
+      {
+        label: "Market Bias",
+        value: marketBias,
+        secondary: marketBiasDetail,
+        accent: marketBias === "Bearish" ? "#ff8f8f" : marketBias === "Bullish" ? "#38f9a5" : "#8fb7e8",
+        barPct: totalSignals > 0 ? Math.max(bullishSignals.length, bearishSignals.length) / totalSignals : 0,
+        helper: totalSignals > 0 ? `${totalSignals} tokens in live matrix` : "Waiting for a full signal cycle",
+      },
       {
         label: "Bybit Alignment",
         value: totalSignals > 0 ? pct(alignedWithBybit.length / totalSignals) : "-",
         secondary: totalSignals > 0 ? `${alignedWithBybit.length}/${totalSignals} tokens aligned` : "No live signals",
         accent: "#38f9a5",
         barPct: totalSignals > 0 ? alignedWithBybit.length / totalSignals : 0,
-        helper: historicalLeader ? `Hist leader: ${historicalLeader.exchange.toUpperCase()} ${pct(historicalLeader.hit_rate)}` : "Execution anchored to Bybit",
+        helper: "Execution stays anchored to Bybit",
       },
       {
-        label: "Consensus Strength",
-        value: totalSignals > 0 ? pct(avgConsensusStrength) : "-",
-        secondary: totalSignals > 0 ? `${fullConsensus.length}/${totalSignals} tokens at full consensus` : "No live signals",
+        label: "Full Consensus",
+        value: totalSignals > 0 ? pct(fullConsensusPct) : "-",
+        secondary: totalSignals > 0 ? `${fullConsensus.length}/${totalSignals} tokens at 3/3` : "No live signals",
         accent: "#90dcff",
-        barPct: avgConsensusStrength,
+        barPct: fullConsensusPct,
         helper: "3-exchange directional confirmation",
       },
       {
@@ -794,7 +801,7 @@ export default function Home() {
         helper: divergenceSignals.length > 0 ? "Consensus split needs attention" : "No active split across venues",
       },
     ];
-  }, [analyticsExchanges, realtimeMarketSignals]);
+  }, [realtimeMarketSignals]);
   const wallet = data?.wallet;
   const walletCards = useMemo(
     () => [
@@ -1040,27 +1047,16 @@ export default function Home() {
         {data && (
           <>
             <section style={panelBoxStyle}>
-              <h2 style={h2Style}>Token Decision Board</h2>
+              <h2 style={h2Style}>Decision Matrix</h2>
               <div style={sectionDividerStyle} />
-              {tokenDecisionBoard.length === 0 ? (
-                <p style={mutedStyle}>No token decision data available.</p>
+              <p style={{ ...mutedStyle, marginTop: -2, marginBottom: 12 }}>
+                Bybit stays as execution truth while Binance and OKX reinforce directional consensus.
+              </p>
+              {decisionMatrixSummaryCards.length === 0 ? (
+                <p style={mutedStyle}>No live decision data yet.</p>
               ) : (
-                <div style={tokenGridStyle}>
-                  {tokenDecisionBoard.map((item) => (
-                    <TokenDecisionBoardCard key={item.symbol} item={item} />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section style={panelBoxStyle}>
-              <h2 style={h2Style}>Consensus Health</h2>
-              <div style={sectionDividerStyle} />
-              {consensusHealthCards.length === 0 ? (
-                <p style={mutedStyle}>No consensus data yet.</p>
-              ) : (
-                <div style={exchangeRankGridStyle}>
-                  {consensusHealthCards.map((card) => (
+                <div style={decisionSummaryGridStyle}>
+                  {decisionMatrixSummaryCards.map((card) => (
                     <article
                       key={card.label}
                       style={{
@@ -1093,6 +1089,16 @@ export default function Home() {
                         />
                       </div>
                     </article>
+                  ))}
+                </div>
+              )}
+              <div style={{ ...sectionDividerStyle, marginTop: 14 }} />
+              {tokenDecisionBoard.length === 0 ? (
+                <p style={mutedStyle}>No token decision data available.</p>
+              ) : (
+                <div style={tokenGridStyle}>
+                  {tokenDecisionBoard.map((item) => (
+                    <TokenDecisionBoardCard key={item.symbol} item={item} />
                   ))}
                 </div>
               )}
@@ -1532,6 +1538,10 @@ function TokenDecisionBoardCard({ item }: { item: TokenDecisionCardData }) {
       </div>
       <div style={tokenDetailGridStyle}>
         <div style={tokenMetricStyle}>
+          <div style={tokenMetricLabelStyle}>Consensus</div>
+          <div style={tokenMetricValueStyle}>{item.consensusSide}</div>
+        </div>
+        <div style={tokenMetricStyle}>
           <div style={tokenMetricLabelStyle}>Bybit</div>
           <div style={tokenMetricValueStyle}>{item.bybitRegime}</div>
         </div>
@@ -1948,6 +1958,12 @@ const statusPillValueStyle: CSSProperties = {
 };
 
 const tokenGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+};
+
+const decisionSummaryGridStyle: CSSProperties = {
   display: "grid",
   gap: 10,
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
