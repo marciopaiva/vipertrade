@@ -24,6 +24,12 @@ type ServiceHealth = {
   url: string;
   error?: string;
   invalid_market_signals_dropped?: number;
+  last_invalid_market_signal_drop?: {
+    symbol?: string;
+    stage?: string;
+    reason?: string;
+    timestamp?: string;
+  };
 };
 
 type AnalyticsScores = {
@@ -158,11 +164,30 @@ async function checkServiceUrl(url: string): Promise<ServiceHealth> {
 
     const rawBody = await response.text();
     let invalidDropped: number | undefined;
+    let lastInvalidDrop:
+      | {
+          symbol?: string;
+          stage?: string;
+          reason?: string;
+          timestamp?: string;
+        }
+      | undefined;
     if (rawBody) {
       try {
-        const parsed = JSON.parse(rawBody) as { invalid_market_signals_dropped?: unknown };
+        const parsed = JSON.parse(rawBody) as {
+          invalid_market_signals_dropped?: unknown;
+          last_invalid_market_signal_drop?: {
+            symbol?: string;
+            stage?: string;
+            reason?: string;
+            timestamp?: string;
+          };
+        };
         if (typeof parsed.invalid_market_signals_dropped === "number") {
           invalidDropped = parsed.invalid_market_signals_dropped;
+        }
+        if (parsed.last_invalid_market_signal_drop && typeof parsed.last_invalid_market_signal_drop === "object") {
+          lastInvalidDrop = parsed.last_invalid_market_signal_drop;
         }
       } catch {
         // plain-text health endpoints are still valid
@@ -177,6 +202,7 @@ async function checkServiceUrl(url: string): Promise<ServiceHealth> {
       url,
       error: response.ok ? undefined : response.statusText,
       invalid_market_signals_dropped: invalidDropped,
+      last_invalid_market_signal_drop: lastInvalidDrop,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
