@@ -143,7 +143,9 @@ impl MarketSignal {
             return Err("market signal rsi_14 must be finite and between 0 and 100".to_string());
         }
         if !(self.consensus_rsi_14.is_finite() && (0.0..=100.0).contains(&self.consensus_rsi_14)) {
-            return Err("market signal consensus_rsi_14 must be finite and between 0 and 100".to_string());
+            return Err(
+                "market signal consensus_rsi_14 must be finite and between 0 and 100".to_string(),
+            );
         }
         if !(self.macd_line.is_finite()) {
             return Err("market signal macd_line must be finite".to_string());
