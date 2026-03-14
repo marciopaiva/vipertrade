@@ -421,7 +421,6 @@ services:
       timeout: 10s
       retries: 3
     volumes:
-      - ../api:/app
       - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
       - ../logs:/app/logs
     depends_on:
