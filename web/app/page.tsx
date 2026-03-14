@@ -194,6 +194,12 @@ type DashboardPayload = {
     url: string;
     error?: string;
     invalid_market_signals_dropped?: number;
+    last_invalid_market_signal_drop?: {
+      symbol?: string;
+      stage?: string;
+      reason?: string;
+      timestamp?: string;
+    };
   }>;
   partial?: boolean;
   warnings?: string[];
@@ -486,10 +492,37 @@ export default function Home() {
     const svc = services.find((item) => item.name === "market-data");
     return svc?.invalid_market_signals_dropped ?? 0;
   }, [services]);
+  const marketDataLastInvalidDrop = useMemo(() => {
+    const svc = services.find((item) => item.name === "market-data");
+    return svc?.last_invalid_market_signal_drop;
+  }, [services]);
   const strategyInvalidSignalsDropped = useMemo(() => {
     const svc = services.find((item) => item.name === "strategy");
     return svc?.invalid_market_signals_dropped ?? 0;
   }, [services]);
+  const strategyLastInvalidDrop = useMemo(() => {
+    const svc = services.find((item) => item.name === "strategy");
+    return svc?.last_invalid_market_signal_drop;
+  }, [services]);
+  const invalidSignalAlerts = useMemo(() => {
+    return [
+      {
+        service: "Market Data",
+        count: marketDataInvalidSignalsDropped,
+        last: marketDataLastInvalidDrop,
+      },
+      {
+        service: "Strategy",
+        count: strategyInvalidSignalsDropped,
+        last: strategyLastInvalidDrop,
+      },
+    ].filter((item) => item.count > 0);
+  }, [
+    marketDataInvalidSignalsDropped,
+    marketDataLastInvalidDrop,
+    strategyInvalidSignalsDropped,
+    strategyLastInvalidDrop,
+  ]);
   const bybitPrivateOk = useMemo(() => {
     const svc = services.find((item) => item.name === "bybit-private");
     return !!svc?.ok;
@@ -909,6 +942,37 @@ export default function Home() {
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
+          </Panel>
+        )}
+        {invalidSignalAlerts.length > 0 && (
+          <Panel title="Signal Guard Alerts" tone="warn">
+            <div style={{ display: "grid", gap: 10 }}>
+              {invalidSignalAlerts.map((alert) => (
+                <div
+                  key={alert.service}
+                  style={{
+                    border: "1px solid rgba(247, 181, 0, 0.32)",
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "rgba(73, 54, 6, 0.18)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                    <strong style={{ color: "#ffd978" }}>
+                      {alert.service}: {alert.count} dropped
+                    </strong>
+                    <span style={{ color: "#d8bc72", fontSize: 12 }}>
+                      {alert.last?.timestamp ? new Date(alert.last.timestamp).toLocaleString() : "timestamp unavailable"}
+                    </span>
+                  </div>
+                  <div style={{ color: "#f8e8b0", fontSize: 13, marginTop: 6 }}>
+                    {alert.last?.symbol ? `${alert.last.symbol} · ` : ""}
+                    {alert.last?.stage ? `${prettifyReason(alert.last.stage)} · ` : ""}
+                    {alert.last?.reason || "reason unavailable"}
+                  </div>
+                </div>
+              ))}
+            </div>
           </Panel>
         )}
 

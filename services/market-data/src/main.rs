@@ -101,6 +101,14 @@ struct LatestSignalsSnapshot {
     items: HashMap<String, MarketSignal>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct InvalidSignalDrop {
+    symbol: String,
+    stage: String,
+    reason: String,
+    timestamp: String,
+}
+
 fn parse_trading_pairs() -> Vec<String> {
     let raw = std::env::var("TRADING_PAIRS")
         .unwrap_or_else(|_| "DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT".to_string());
@@ -1204,6 +1212,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let latest_signals_for_health = Arc::clone(&latest_signals);
     let invalid_signal_count = Arc::new(AtomicU64::new(0));
     let invalid_signal_count_for_health = Arc::clone(&invalid_signal_count);
+    let last_invalid_signal = Arc::new(RwLock::new(None::<InvalidSignalDrop>));
+    let last_invalid_signal_for_health = Arc::clone(&last_invalid_signal);
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -1215,6 +1225,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let latest_signals_for_conn = Arc::clone(&latest_signals_for_health);
                         let invalid_signal_count_for_conn =
                             Arc::clone(&invalid_signal_count_for_health);
+                        let last_invalid_signal_for_conn =
+                            Arc::clone(&last_invalid_signal_for_health);
                         tokio::spawn(async move {
                             let mut request_buf = [0_u8; 2048];
                             let bytes_read = socket.read(&mut request_buf).await.unwrap_or(0);
@@ -1236,9 +1248,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     body
                                 )
                             } else if request.starts_with("GET /health") {
+                                let last_invalid = last_invalid_signal_for_conn.read().await.clone();
                                 let body = serde_json::json!({
                                     "status": "ok",
                                     "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
+                                    "last_invalid_market_signal_drop": last_invalid,
                                 })
                                 .to_string();
                                 format!(
@@ -1315,14 +1329,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     if let Err(err) = signal.validate() {
                         invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                        let drop = InvalidSignalDrop {
+                            symbol: symbol.clone(),
+                            stage: "pre_publish_signal".to_string(),
+                            reason: err.clone(),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        };
+                        *last_invalid_signal.write().await = Some(drop.clone());
                         eprintln!(
                             "{}",
                             serde_json::json!({
                                 "service": "market-data",
                                 "event": "invalid_market_signal_dropped",
-                                "symbol": symbol,
-                                "stage": "pre_publish_signal",
-                                "reason": err,
+                                "symbol": drop.symbol,
+                                "stage": drop.stage,
+                                "reason": drop.reason,
+                                "timestamp": drop.timestamp,
                             })
                         );
                         continue;
@@ -1335,14 +1357,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let event = MarketSignalEvent::new(signal);
                     if let Err(err) = event.validate() {
                         invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                        let drop = InvalidSignalDrop {
+                            symbol: symbol.clone(),
+                            stage: "pre_publish_event".to_string(),
+                            reason: err.clone(),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                        };
+                        *last_invalid_signal.write().await = Some(drop.clone());
                         eprintln!(
                             "{}",
                             serde_json::json!({
                                 "service": "market-data",
                                 "event": "invalid_market_signal_dropped",
-                                "symbol": symbol,
-                                "stage": "pre_publish_event",
-                                "reason": err,
+                                "symbol": drop.symbol,
+                                "stage": drop.stage,
+                                "reason": drop.reason,
+                                "timestamp": drop.timestamp,
                             })
                         );
                         continue;

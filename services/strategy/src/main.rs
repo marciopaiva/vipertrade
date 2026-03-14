@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{watch, RwLock};
 use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
 use tupa_parser::{parse_program, Item, PipelineDecl, Program};
 use tupa_runtime::Runtime;
@@ -75,6 +75,14 @@ struct EntryGuardState {
 struct SignalConfirmationState {
     side: String,
     consecutive_valid_ticks: usize,
+}
+
+#[derive(Debug, Clone)]
+struct InvalidSignalDrop {
+    symbol: String,
+    stage: String,
+    reason: String,
+    timestamp: String,
 }
 
 impl StrategyConfig {
@@ -1447,6 +1455,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut health_shutdown_rx = shutdown_rx.clone();
     let invalid_signal_count = Arc::new(AtomicU64::new(0));
     let invalid_signal_count_for_health = Arc::clone(&invalid_signal_count);
+    let last_invalid_signal = Arc::new(RwLock::new(None::<InvalidSignalDrop>));
+    let last_invalid_signal_for_health = Arc::clone(&last_invalid_signal);
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -1457,10 +1467,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if let Ok((mut socket, _)) = accept_result {
                         let invalid_signal_count_for_conn =
                             Arc::clone(&invalid_signal_count_for_health);
+                        let last_invalid_signal_for_conn =
+                            Arc::clone(&last_invalid_signal_for_health);
                         tokio::spawn(async move {
+                            let last_invalid = last_invalid_signal_for_conn.read().await.clone();
                             let body = serde_json::json!({
                                 "status": "ok",
                                 "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
+                                "last_invalid_market_signal_drop": last_invalid.as_ref().map(|drop| json!({
+                                    "symbol": drop.symbol,
+                                    "stage": drop.stage,
+                                    "reason": drop.reason,
+                                    "timestamp": drop.timestamp,
+                                })),
                             })
                             .to_string();
                             let response = format!(
@@ -1579,14 +1598,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if let Err(err) = signal_event.validate() {
                     invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                    let drop = InvalidSignalDrop {
+                        symbol: signal_event.signal.symbol.clone(),
+                        stage: "pre_decision".to_string(),
+                        reason: err.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    *last_invalid_signal.write().await = Some(drop.clone());
                     eprintln!(
                         "{}",
                         serde_json::json!({
                             "service": "strategy",
                             "event": "invalid_market_signal_dropped",
-                            "symbol": signal_event.signal.symbol,
-                            "stage": "pre_decision",
-                            "reason": err,
+                            "symbol": drop.symbol,
+                            "stage": drop.stage,
+                            "reason": drop.reason,
+                            "timestamp": drop.timestamp,
                         })
                     );
                     continue;
