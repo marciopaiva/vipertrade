@@ -956,13 +956,11 @@ fn execute_strategy_step(
             let macd_signal = get_f64(&state, "macd_signal", 0.0);
             let macd_histogram = get_f64(&state, "macd_histogram", 0.0);
             let consensus_macd_line = get_f64(&state, "consensus_macd_line", macd_line);
-            let consensus_macd_signal =
-                get_f64(&state, "consensus_macd_signal", macd_signal);
+            let consensus_macd_signal = get_f64(&state, "consensus_macd_signal", macd_signal);
             let consensus_macd_histogram =
                 get_f64(&state, "consensus_macd_histogram", macd_histogram);
             let volume_ratio = get_f64(&state, "volume_ratio", 0.0);
-            let consensus_volume_ratio =
-                get_f64(&state, "consensus_volume_ratio", volume_ratio);
+            let consensus_volume_ratio = get_f64(&state, "consensus_volume_ratio", volume_ratio);
             let btc_regime = get_string(&state, "btc_regime", "neutral");
             let btc_trend_score = get_f64(&state, "btc_trend_score", 0.0);
             let btc_consensus_count = get_i64(&state, "btc_consensus_count", 0);
