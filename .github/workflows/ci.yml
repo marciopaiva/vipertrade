@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web
+        working-directory: services/web
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: 20
           cache: yarn
-          cache-dependency-path: web/yarn.lock
+          cache-dependency-path: services/web/yarn.lock
 
       - name: Enable Corepack
         run: corepack enable
