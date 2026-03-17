@@ -347,7 +347,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   web:
     build:
-      context: ../web
+      context: ../services/web
       dockerfile: Dockerfile
       args:
         NODE_VERSION: "20"

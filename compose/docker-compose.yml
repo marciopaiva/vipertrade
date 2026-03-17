@@ -373,7 +373,7 @@ services:
   # ═══════════════════════════════════════════════════════════
   web:
     build:
-      context: ../web
+      context: ../services/web
       dockerfile: Dockerfile
       args:
         NODE_VERSION: "20"
@@ -383,7 +383,7 @@ services:
       - "3000:3000"
     environment:
       TRADING_MODE: ${TRADING_MODE:-paper}
-      NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:8080
       NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
       DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
       REDIS_URL: redis://redis:6379
