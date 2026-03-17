@@ -9,6 +9,16 @@ const nextConfig = {
   // SWC minifier (faster than Terser)
   swcMinify: true,
   
+  // Disable ESLint during build (run separately)
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  
+  // Disable TypeScript type checking during build (run separately)
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  
   // Environment variables
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
