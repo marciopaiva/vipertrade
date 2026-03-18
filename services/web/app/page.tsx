@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { ViperTradeLogo } from '@/components/ViperTradeLogo';
-import { ServiceFlowDiagram } from '@/components/dashboard/ServiceFlowDiagram';
+import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
