@@ -646,15 +646,15 @@ export default function DashboardPage() {
               <div className="border-t border-slate-700/50 pt-2">
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Daily</div>
+                    <div className="text-xs text-slate-500">PNL</div>
                     <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_daily_loss_pct}%</div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Lev</div>
+                    <div className="text-xs text-slate-500">Lev PNL 7D</div>
                     <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_leverage}x</div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Risk</div>
+                    <div className="text-xs text-slate-500">Risk PNL 30D</div>
                     <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.risk_per_trade_pct}%</div>
                   </div>
                 </div>
