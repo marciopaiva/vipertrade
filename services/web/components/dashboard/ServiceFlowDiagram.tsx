@@ -1,16 +1,13 @@
 // components/dashboard/ServiceFlowDiagram.tsx
 'use client';
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 interface ServiceFlowDiagramProps {
   services?: Array<{ name: string; ok: boolean; latency_ms: number }>;
   executionMode?: 'paper' | 'testnet' | 'mainnet';
   executorState?: 'running' | 'paused' | 'down';
   events?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string }>;
-  width?: number;
-  height?: number;
-  selectedSymbol?: string;
 }
 
 // 🎨 VIPERTRADE COLOR PALETTE
@@ -95,12 +92,7 @@ export default function ServiceFlowDiagram({
   executionMode = 'paper',
   executorState = 'down',
   events = [],
-  width = 900,
-  height = 400,
-  selectedSymbol,
 }: ServiceFlowDiagramProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [animationKey, setAnimationKey] = useState(0);
 
   // Create service map for quick lookups
@@ -147,24 +139,6 @@ export default function ServiceFlowDiagram({
     return colorMap[nodeId] || COLORS.viperCyan;
   };
 
-  // Get current token from recent executor events
-  const currentToken = useMemo(() => {
-    const executorEvents = events.filter(e => e.event_type.includes('executor') && e.symbol);
-    if (executorEvents.length > 0) {
-      return executorEvents[0].symbol?.replace('USDT', '') || 'DOGE';
-    }
-    return selectedSymbol || 'DOGE';
-  }, [events, selectedSymbol]);
-
-  // Check if there's a recent signal (for pulse effect)
-  const hasRecentSignal = useMemo(() => {
-    const recentSignals = events.filter(e =>
-      e.event_type.includes('strategy') ||
-      e.event_type.includes('decision')
-    );
-    return recentSignals.length > 0;
-  }, [events]);
-
   // Re-trigger animations periodically
   useEffect(() => {
     const interval = setInterval(() => {
@@ -180,7 +154,7 @@ export default function ServiceFlowDiagram({
         { id: 'bybit', label: 'BYBIT', sublabel: `${getNodeLatency('bybit')}ms`, x: 80, y: 200, status: getNodeStatus('bybit'), latency: getNodeLatency('bybit'), color: getNodeColor('bybit', getNodeStatus('bybit')), size: 'md' as const },
         { id: 'market-data', label: 'MARKET-DATA', sublabel: `${getNodeLatency('market-data')}ms`, x: 280, y: 200, status: getNodeStatus('market-data'), latency: getNodeLatency('market-data'), color: getNodeColor('market-data', getNodeStatus('market-data')), size: 'md' as const },
         { id: 'strategy', label: 'STRATEGY', sublabel: `${getNodeLatency('strategy')}ms`, x: 420, y: 200, status: getNodeStatus('strategy'), latency: getNodeLatency('strategy'), color: getNodeColor('strategy', getNodeStatus('strategy')), size: 'md' as const },
-        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms • ${currentToken}`, x: 620, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
+        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms`, x: 620, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
         { id: 'api', label: 'API', sublabel: `${getNodeLatency('api')}ms`, x: 820, y: 80, status: getNodeStatus('api'), latency: getNodeLatency('api'), color: getNodeColor('api', getNodeStatus('api')), size: 'md' as const },
         { id: 'monitor', label: 'MONITOR', sublabel: `${getNodeLatency('monitor')}ms`, x: 820, y: 200, status: getNodeStatus('monitor'), latency: getNodeLatency('monitor'), color: getNodeColor('monitor', getNodeStatus('monitor')), size: 'md' as const },
         { id: 'analytics', label: 'ANALYTICS', sublabel: `${getNodeLatency('analytics')}ms`, x: 820, y: 320, status: getNodeStatus('analytics'), latency: getNodeLatency('analytics'), color: getNodeColor('analytics', getNodeStatus('analytics')), size: 'md' as const },
@@ -194,7 +168,7 @@ export default function ServiceFlowDiagram({
         { id: 'market-data', label: 'MARKET-DATA', sublabel: `${getNodeLatency('market-data')}ms`, x: 280, y: 100, status: getNodeStatus('market-data'), latency: getNodeLatency('market-data'), color: getNodeColor('market-data', getNodeStatus('market-data')), size: 'md' as const },
         { id: 'analytics', label: 'ANALYTICS', sublabel: `${getNodeLatency('analytics')}ms`, x: 280, y: 300, status: getNodeStatus('analytics'), latency: getNodeLatency('analytics'), color: getNodeColor('analytics', getNodeStatus('analytics')), size: 'md' as const },
         { id: 'strategy', label: 'STRATEGY', sublabel: `${getNodeLatency('strategy')}ms`, x: 420, y: 200, status: getNodeStatus('strategy'), latency: getNodeLatency('strategy'), color: getNodeColor('strategy', getNodeStatus('strategy')), size: 'md' as const },
-        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms • ${currentToken}`, x: 620, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
+        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms`, x: 620, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
         { id: 'api', label: 'API', sublabel: `${getNodeLatency('api')}ms`, x: 820, y: 60, status: getNodeStatus('api'), latency: getNodeLatency('api'), color: getNodeColor('api', getNodeStatus('api')), size: 'md' as const },
         { id: 'monitor', label: 'MONITOR', sublabel: `${getNodeLatency('monitor')}ms`, x: 820, y: 200, status: getNodeStatus('monitor'), latency: getNodeLatency('monitor'), color: getNodeColor('monitor', getNodeStatus('monitor')), size: 'md' as const },
         { id: 'backtest', label: 'BACKTEST', sublabel: `${getNodeLatency('backtest')}ms`, x: 820, y: 340, status: getNodeStatus('backtest'), latency: getNodeLatency('backtest'), color: getNodeColor('backtest', getNodeStatus('backtest')), size: 'md' as const },
@@ -230,27 +204,9 @@ export default function ServiceFlowDiagram({
       ];
 
   return (
-    <div className="relative w-full bg-[#0a1929] rounded-xl border border-cyan-900/30 overflow-hidden shadow-2xl">
-      {/* Header */}
-      <div className="absolute top-4 left-6 z-10">
-        <h3 className="text-lg font-semibold text-white tracking-tight">System Architecture</h3>
-        <p className="text-xs text-cyan-400/80 mt-0.5">Real-time data flow • Latency monitoring</p>
-      </div>
-
-      {/* Mode & Token Badge */}
-      <div className="absolute top-4 right-6 z-10 flex items-center gap-2">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/40 rounded-full backdrop-blur-sm">
-          <span className="text-purple-400 text-xs font-bold tracking-wide uppercase">{executionMode}</span>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/40 rounded-full backdrop-blur-sm">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50" />
-          <span className="text-green-400 text-sm font-bold tracking-wide">{currentToken}</span>
-        </div>
-      </div>
-
+    <div className="w-full overflow-x-auto">
       {/* SVG Canvas */}
       <svg
-        ref={svgRef}
         viewBox="0 0 900 500"
         className="w-full h-auto"
         style={{ minHeight: '400px' }}
@@ -362,20 +318,15 @@ export default function ServiceFlowDiagram({
         <g className="nodes">
           {NODES.map((node) => {
             const sizes = getNodeSize(node.size);
-            const isHovered = hoveredNode === node.id;
             const isExecutor = node.id === 'executor';
 
             return (
               <g
                 key={node.id}
                 transform={`translate(${node.x}, ${node.y})`}
-                onMouseEnter={() => setHoveredNode(node.id)}
-                onMouseLeave={() => setHoveredNode(null)}
-                className="cursor-pointer transition-all duration-300"
+                className="transition-all duration-300"
                 style={{
-                  filter: isHovered || isExecutor ? `url(#${isExecutor ? 'centralGlow' : 'nodeGlow'})` : 'none',
-                  transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-                  transformOrigin: `${node.x}px ${node.y}px`,
+                  filter: isExecutor ? 'url(#centralGlow)' : 'none',
                 }}
               >
                 {/* Outer Glow Ring (animated pulse) */}
@@ -430,44 +381,6 @@ export default function ServiceFlowDiagram({
                   className="animate-pulse"
                 />
 
-                {/* Token symbol inside executor */}
-                {isExecutor && node.status === 'active' && (
-                  <>
-                    <text
-                      y={-8}
-                      textAnchor="middle"
-                      fill={node.color}
-                      fontSize="14"
-                      fontWeight="700"
-                    >
-                      {currentToken}
-                    </text>
-                    {/* Signal pulse ring */}
-                    {hasRecentSignal && (
-                      <circle
-                        r="35"
-                        fill="none"
-                        stroke={COLORS.viperPurple}
-                        strokeWidth="2"
-                        opacity="0.8"
-                      >
-                        <animate
-                          attributeName="r"
-                          values="35;50"
-                          dur="1.5s"
-                          repeatCount="indefinite"
-                        />
-                        <animate
-                          attributeName="opacity"
-                          values="0.8;0"
-                          dur="1.5s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-                    )}
-                  </>
-                )}
-
                 {/* Label */}
                 <text
                   y={sizes.outer + 25}
@@ -497,48 +410,6 @@ export default function ServiceFlowDiagram({
           })}
         </g>
       </svg>
-
-      {/* Legend - Updated Colors */}
-      <div className="absolute bottom-4 left-6 z-10 flex flex-wrap gap-4 text-xs">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0a1929]/80 border border-[#00ff88]/30 rounded-lg backdrop-blur-sm">
-          <div className="w-3 h-3 rounded-full bg-[#10b981] shadow-lg shadow-[#10b981]/50 animate-pulse" />
-          <span className="text-[#00ff88] font-medium">Active</span>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0a1929]/80 border border-[#f59e0b]/30 rounded-lg backdrop-blur-sm">
-          <div className="w-3 h-3 rounded-full bg-[#f59e0b] shadow-lg shadow-[#f59e0b]/50" />
-          <span className="text-[#fbbf24] font-medium">Warning</span>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0a1929]/80 border border-[#ef4444]/30 rounded-lg backdrop-blur-sm">
-          <div className="w-3 h-3 rounded-full bg-[#ef4444] shadow-lg shadow-[#ef4444]/50" />
-          <span className="text-[#f87171] font-medium">Error</span>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0a1929]/80 border border-[#00d4ff]/30 rounded-lg backdrop-blur-sm">
-          <div className="w-8 h-0.5 bg-gradient-to-r from-transparent via-[#00d4ff] to-transparent shadow-lg shadow-[#00d4ff]/50" />
-          <span className="text-[#00d4ff] font-medium">Data Flow</span>
-        </div>
-      </div>
-
-      {/* Tooltip */}
-      {hoveredNode && (
-        <div className="absolute bottom-16 right-6 z-20 px-4 py-3 bg-[#0a1929]/95 border border-cyan-500/40 rounded-lg shadow-2xl backdrop-blur-md min-w-[180px]">
-          <p className="text-white font-bold text-sm tracking-wide">
-            {NODES.find(n => n.id === hoveredNode)?.label}
-          </p>
-          <div className="mt-2 space-y-1">
-            <p className="text-cyan-400 text-xs">
-              Latency: <span className="font-mono font-semibold">{NODES.find(n => n.id === hoveredNode)?.latency}ms</span>
-            </p>
-            <p className="text-green-400 text-xs">
-              Status: <span className="font-semibold">{NODES.find(n => n.id === hoveredNode)?.status.toUpperCase()}</span>
-            </p>
-            {NODES.find(n => n.id === hoveredNode)?.isCentral && (
-              <p className="text-yellow-400 text-xs mt-2 pt-2 border-t border-cyan-900/30">
-                ⭐ Central Node
-              </p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
