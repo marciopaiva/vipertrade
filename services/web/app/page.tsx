@@ -646,16 +646,20 @@ export default function DashboardPage() {
               <div className="border-t border-slate-700/50 pt-2">
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">PNL</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_daily_loss_pct}%</div>
+                    <div className="text-xs text-slate-500">PNL 24H</div>
+                    <div className={cn('text-sm font-semibold', (data?.performance?.last_24h?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {usd(data?.performance?.last_24h?.total_pnl)}
+                    </div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Lev PNL 7D</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_leverage}x</div>
+                    <div className="text-xs text-slate-500">PNL 7D</div>
+                    <div className={cn('text-sm font-semibold', (data?.performance?.last_7d?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {usd(data?.performance?.last_7d?.total_pnl)}
+                    </div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Risk PNL 30D</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.risk_per_trade_pct}%</div>
+                    <div className="text-xs text-slate-500">PNL 30D</div>
+                    <div className="text-sm font-semibold text-slate-300">-</div>
                   </div>
                 </div>
               </div>
