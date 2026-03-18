@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { ViperTradeLogo } from '@/components/ViperTradeLogo';
-import { ServiceFlowDiagram } from '@/components/dashboard/ServiceFlowDiagram';
+import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -504,8 +504,8 @@ export default function DashboardPage() {
         hasDivergence,
       };
     }).sort((a: any, b: any) => {
-      const tonePriority = { positive: 0, negative: 0, neutral: 1 };
-      return tonePriority[a.stateTone] - tonePriority[b.stateTone] || 
+      const tonePriority: Record<string, number> = { positive: 0, negative: 0, neutral: 1 };
+      return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
              b.consensusCount - a.consensusCount ||
              Math.abs(b.trendScore) - Math.abs(a.trendScore);
     });
@@ -542,13 +542,13 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-6 space-y-6">
+      <main className="container mx-auto px-4 py-4 space-y-4">
         {/* Architecture Flow + Wallet Overview - Side by Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Architecture Flow */}
           <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg text-slate-200">Architecture Flow</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
               <ServiceFlowDiagram
@@ -562,9 +562,9 @@ export default function DashboardPage() {
 
           {/* Wallet Card - Unified */}
           <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-1">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg text-slate-200">Wallet Overview</CardTitle>
+                <CardTitle className="text-base text-slate-200">Wallet Overview</CardTitle>
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {data?.wallet?.account_type || 'UNIFIED'}
                 </Badge>
@@ -646,16 +646,20 @@ export default function DashboardPage() {
               <div className="border-t border-slate-700/50 pt-2">
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Daily</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_daily_loss_pct}%</div>
+                    <div className="text-xs text-slate-500">PNL 24H</div>
+                    <div className={cn('text-sm font-semibold', (data?.performance?.last_24h?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {usd(data?.performance?.last_24h?.total_pnl)}
+                    </div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Lev</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.max_leverage}x</div>
+                    <div className="text-xs text-slate-500">PNL 7D</div>
+                    <div className={cn('text-sm font-semibold', (data?.performance?.last_7d?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                      {usd(data?.performance?.last_7d?.total_pnl)}
+                    </div>
                   </div>
                   <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">Risk</div>
-                    <div className="text-sm font-semibold text-slate-300">{data?.status?.risk_limits?.risk_per_trade_pct}%</div>
+                    <div className="text-xs text-slate-500">PNL 30D</div>
+                    <div className="text-sm font-semibold text-slate-300">-</div>
                   </div>
                 </div>
               </div>

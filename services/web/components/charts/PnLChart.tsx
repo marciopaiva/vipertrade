@@ -34,14 +34,14 @@ export function PnLChart({ data }: PnLChartProps) {
             fontSize={12}
             tickFormatter={(value) => `$${value}`}
           />
-          <Tooltip 
-            contentStyle={{ 
-              backgroundColor: '#1e293b', 
+          <Tooltip
+            contentStyle={{
+              backgroundColor: '#1e293b',
               border: '1px solid #334155',
               borderRadius: '8px'
             }}
             labelStyle={{ color: '#94a3b8' }}
-            formatter={(value: number) => [`$${value.toFixed(2)}`, 'PnL']}
+            formatter={(value: any) => [`$${(value as number).toFixed(2)}`, 'PnL']}
           />
           <Line 
             type="monotone" 

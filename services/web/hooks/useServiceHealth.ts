@@ -13,7 +13,7 @@ export function useServiceHealth() {
     const fetchHealth = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi(endpoints.dashboard);
+        const data: any = await fetchApi(endpoints.dashboard);
         setServices(data?.services || []);
         setError(null);
       } catch (err) {

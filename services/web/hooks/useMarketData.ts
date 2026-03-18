@@ -15,7 +15,7 @@ export function useMarketData() {
     const fetchMarketData = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi(endpoints.marketSignals);
+        const data: any = await fetchApi(endpoints.marketSignals);
         setMarketSignals(data?.items || []);
         setError(null);
       } catch (err) {
