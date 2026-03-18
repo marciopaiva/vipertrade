@@ -38,6 +38,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=deps /app/node_modules ./node_modules
 
+# Install sharp for Next.js image optimization
+RUN npm install --arch=x64 --platform=linux sharp
+
 # Set ownership for remaining files
 RUN chown -R nextjs:nodejs /app
 
