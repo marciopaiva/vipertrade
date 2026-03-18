@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { ViperTradeLogo } from '@/components/ViperTradeLogo';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
-import { ServiceFlowDiagramRadar } from '@/components/dashboard/ServiceFlowDiagramRadar';
 import { PositionTable } from '@/components/dashboard/PositionTable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -421,7 +420,6 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [flowView, setFlowView] = useState<'diagram' | 'radar'>('diagram');
 
   // Fetch from Next.js API route directly (has market_signals)
   const fetchDashboard = useCallback(async () => {
@@ -550,43 +548,15 @@ export default function DashboardPage() {
           {/* Architecture Flow */}
           <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg text-slate-200">Architecture Flow</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant={flowView === 'diagram' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setFlowView('diagram')}
-                    className="text-xs px-2 py-1 h-7"
-                  >
-                    Diagram
-                  </Button>
-                  <Button
-                    variant={flowView === 'radar' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setFlowView('radar')}
-                    className="text-xs px-2 py-1 h-7"
-                  >
-                    Radar
-                  </Button>
-                </div>
-              </div>
+              <CardTitle className="text-lg text-slate-200">Architecture Flow</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              {flowView === 'radar' ? (
-                <ServiceFlowDiagramRadar
-                  services={data?.services || []}
-                  executionMode={tradingMode}
-                  executorState={executorEnabled ? 'running' : 'down'}
-                />
-              ) : (
-                <ServiceFlowDiagram
-                  services={data?.services || []}
-                  executionMode={tradingMode}
-                  executorState={executorEnabled ? 'running' : 'down'}
-                  events={data?.events?.items || []}
-                />
-              )}
+              <ServiceFlowDiagram
+                services={data?.services || []}
+                executionMode={tradingMode}
+                executorState={executorEnabled ? 'running' : 'down'}
+                events={data?.events?.items || []}
+              />
             </CardContent>
           </Card>
 
