@@ -248,17 +248,17 @@ async function fetchServices(baseUrl: string, tradingMode?: string): Promise<Ser
           return { ...result, name: target.name };
         }
       }
-      const last = await checkServiceUrl(target.urls[target.urls.length - 1]);
+      const last = await checkServiceUrl(target.urls[target.urls.length - 1]!);
       return { ...last, name: target.name };
     }),
   );
 
   const bybitPrivate = await fetchJson(baseUrl, "/external/bybit-private-health");
   const bybitPrivateService: ServiceHealth = bybitPrivate.ok
-    ? ({
-        name: "bybit-private",
+    ? {
         ...(bybitPrivate.data as ServiceHealth),
-      } as ServiceHealth)
+        name: "bybit-private",
+      }
     : {
         name: "bybit-private",
         ok: false,
@@ -342,8 +342,8 @@ export async function GET() {
               error: "unavailable",
             } as DailyTradesSummary),
         events: events.ok ? events.data : { items: [] },
-        market_signals: marketSignals.ok ? marketSignals.data : { updated_at: null, items: {} },
-        analytics_scores: analyticsScores.ok ? analyticsScores.data : ({ updated_at: null, exchanges: [], by_symbol: [] } as AnalyticsScores),
+        market_signals: marketSignals.ok ? marketSignals.data : { updated_at: undefined, items: {} },
+        analytics_scores: analyticsScores.ok ? analyticsScores.data : { updated_at: undefined, exchanges: [], by_symbol: [] } as unknown as AnalyticsScores,
         risk_kpis: riskKpis.ok
           ? riskKpis.data
           : {

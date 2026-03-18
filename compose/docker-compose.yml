@@ -377,7 +377,6 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_VERSION: "20"
-        WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-vipertrade-base-web-node:20-bookworm}
     container_name: vipertrade-web
     ports:
       - "3000:3000"

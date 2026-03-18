@@ -7,13 +7,13 @@ ARG NODE_VERSION=20
 FROM node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production --frozen-lockfile
+RUN npm ci --only=production --legacy-peer-deps --frozen-lockfile
 
 # Stage 2: Builder
 FROM node:${NODE_VERSION}-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY . .
 RUN npm run build
 
@@ -31,15 +31,22 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy static files first
+# Copy public directory first
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/static ./public/_next/static
 
-# Copy standalone output
-COPY --from=builder /app/.next/standalone ./
+# Copy standalone server output
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+
+# Copy .next/static for client-side assets
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./public/_next/static
+
+# Copy node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
-# Set ownership
+# Install sharp for Next.js image optimization
+RUN npm install --legacy-peer-deps --arch=x64 --platform=linux sharp
+
+# Set ownership for remaining files
 RUN chown -R nextjs:nodejs /app
 
 # Switch to non-root user
@@ -48,7 +55,7 @@ USER nextjs
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 CMD ["node", "server.js"]
