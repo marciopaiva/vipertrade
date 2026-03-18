@@ -24,7 +24,7 @@ const COLORS = {
   viperBlue: '#3b82f6',
   
   // Exchanges (Warm tones)
-  binance: '#f0b90b',
+  binance: '#ffffff',
   okx: '#ffffff',
   bybit: '#f7a600',
   
@@ -209,7 +209,7 @@ export default function ServiceFlowDiagram({
       <svg
         viewBox="0 0 900 500"
         className="w-full h-auto"
-        style={{ minHeight: '400px' }}
+        style={{ minHeight: '300px' }}
         preserveAspectRatio="xMinYMin meet"
       >
         <defs>

@@ -542,13 +542,13 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-6 space-y-6">
+      <main className="container mx-auto px-4 py-4 space-y-4">
         {/* Architecture Flow + Wallet Overview - Side by Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Architecture Flow */}
           <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg text-slate-200">Architecture Flow</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
               <ServiceFlowDiagram
@@ -562,9 +562,9 @@ export default function DashboardPage() {
 
           {/* Wallet Card - Unified */}
           <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-1">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg text-slate-200">Wallet Overview</CardTitle>
+                <CardTitle className="text-base text-slate-200">Wallet Overview</CardTitle>
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {data?.wallet?.account_type || 'UNIFIED'}
                 </Badge>
