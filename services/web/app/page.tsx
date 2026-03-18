@@ -40,6 +40,15 @@ interface TokenDecision {
   hasDivergence: boolean;
 }
 
+interface FlowContext {
+  strategySymbol?: string;
+  strategyState?: string;
+  strategyContext?: string;
+  executorSymbol?: string;
+  executorAction?: string;
+  executorContext?: string;
+}
+
 interface DashboardData {
   status: {
     trading_mode: string;
@@ -99,7 +108,7 @@ interface DashboardData {
     account_type?: string;
   };
   services: Array<{ name: string; ok: boolean; latency_ms: number }>;
-  events?: { items?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string }> };
+  events?: { items?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string; data?: any }> };
   market_signals?: { items?: any[] | Record<string, any> };
 }
 
@@ -458,6 +467,7 @@ export default function DashboardPage() {
       trades: dashboardData.trades || { items: [] },
       wallet: dashboardData.wallet,
       services: dashboardData.services || [],
+      events: dashboardData.events || { items: [] },
       market_signals: dashboardData.market_signals || { items: {} },
     };
   }, [dashboardData, refreshKey]);
@@ -511,6 +521,52 @@ export default function DashboardPage() {
     });
   }, [data?.market_signals?.items]);
 
+  const flowContext = useMemo<FlowContext>(() => {
+    const signalsObj = (data?.market_signals?.items as Record<string, any>) || {};
+    const leadToken = tokenDecisions[0];
+    const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
+
+    const latestExecutorEvent = (data?.events?.items || []).find(
+      (event) => event.event_type === 'executor_event_processed' && event.symbol
+    );
+
+    const openPosition = (data?.positions?.items || [])[0];
+    const lastClosedTrade = (data?.trades?.items || []).find((trade) => trade.status === 'closed');
+
+    const strategyState = leadToken
+      ? `${leadToken.stateLabel} • ${leadToken.consensusSide}`
+      : 'scan idle';
+    const strategyContext = leadSignal
+      ? `${leadSignal.consensus_count || 0}/${leadSignal.exchanges_available || 0} consensus`
+      : undefined;
+
+    const executorSymbol =
+      openPosition?.symbol ||
+      latestExecutorEvent?.symbol ||
+      lastClosedTrade?.symbol;
+
+    const executorAction = openPosition
+      ? `open ${openPosition.side.toLowerCase()}`
+      : latestExecutorEvent?.data?.action
+        ? String(latestExecutorEvent.data.action).toLowerCase()
+        : 'idle';
+
+    const executorContext = openPosition
+      ? `${usd(openPosition.notional_usdt)} live`
+      : latestExecutorEvent?.data?.status
+        ? String(latestExecutorEvent.data.status).replaceAll('_', ' ')
+        : 'awaiting decision';
+
+    return {
+      strategySymbol: leadToken?.symbol,
+      strategyState,
+      strategyContext,
+      executorSymbol,
+      executorAction,
+      executorContext,
+    };
+  }, [data?.events?.items, data?.market_signals?.items, data?.positions?.items, data?.trades?.items, tokenDecisions]);
+
   if (loading && !dashboardData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -543,129 +599,133 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
-        {/* Architecture Flow + Wallet Overview - Side by Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Architecture Flow */}
-          <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-1">
-              <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <ServiceFlowDiagram
-                services={data?.services || []}
-                executionMode={tradingMode}
-                executorState={executorEnabled ? 'running' : 'down'}
-                events={data?.events?.items || []}
-              />
-            </CardContent>
-          </Card>
+        {/* Architecture Flow */}
+        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ServiceFlowDiagram
+              services={data?.services || []}
+              executionMode={tradingMode}
+              executorState={executorEnabled ? 'running' : 'down'}
+              events={data?.events?.items || []}
+            />
+          </CardContent>
+        </Card>
 
-          {/* Wallet Card - Unified */}
-          <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-            <CardHeader className="pb-1">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base text-slate-200">Wallet Overview</CardTitle>
-                <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
-                  {data?.wallet?.account_type || 'UNIFIED'}
+        {/* Wallet Card - Unified */}
+        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+          <CardHeader className="pb-1">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base text-slate-200">Wallet Overview</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-4">
+            <div className="relative overflow-hidden rounded-[28px] border border-slate-700/60 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.74),rgba(15,23,42,0.42))] px-6 py-5">
+              <div className="absolute right-4 top-4 hidden sm:block">
+                <svg width="120" height="56" viewBox="0 0 120 56" className="opacity-80">
+                  <defs>
+                    <linearGradient id="walletLine" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
+                      <stop offset="100%" stopColor="#34d399" stopOpacity="0.95" />
+                    </linearGradient>
+                    <linearGradient id="walletFill" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.28" />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d="M10 42 L34 36 L58 30 L82 18 L110 6" fill="none" stroke="url(#walletLine)" strokeWidth="2.5" strokeLinecap="round" />
+                  <path d="M10 42 L34 36 L58 30 L82 18 L110 6 L110 56 L10 56 Z" fill="url(#walletFill)" />
+                </svg>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-[11px] uppercase tracking-[0.32em] text-slate-500">Portfolio</div>
+                <Badge className="border-emerald-500/40 bg-emerald-500/10 text-[10px] tracking-[0.18em] text-emerald-300">
+                  Live
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="pt-0 space-y-3">
-              {/* Top Row - Main balances */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider">Equity</div>
-                  <div className="text-lg font-bold text-cyan-400">{usd(data?.wallet?.total_equity)}</div>
+
+              <div className="mt-4 flex flex-wrap items-end gap-x-4 gap-y-3">
+                <div className="text-5xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-6xl">
+                  {usd(data?.wallet?.total_equity)}
                 </div>
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider">Margin</div>
-                  <div className="text-sm font-semibold text-slate-200">{usd(data?.wallet?.margin_balance)}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider">PnL</div>
-                  <div className={cn('text-sm font-semibold', (data?.wallet?.unrealized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
-                    {usd(data?.wallet?.unrealized_pnl)}
-                  </div>
+                <div className={cn(
+                  'rounded-full border px-3 py-1 text-sm font-semibold',
+                  (data?.performance?.last_7d?.total_pnl ?? 0) >= 0
+                    ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                    : 'border-red-500/35 bg-red-500/10 text-red-300'
+                )}>
+                  {usd(data?.performance?.last_7d?.total_pnl)} · 7d
                 </div>
               </div>
 
-              {/* Divider */}
-              <div className="border-t border-slate-700/50"></div>
-
-              {/* Margin Info + IM/MM Bar */}
-              <div className="bg-slate-800/50 rounded-lg p-3 space-y-2">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="text-xs text-slate-400 uppercase tracking-wider">Initial Margin</div>
-                    <div className="text-sm font-semibold text-cyan-400">{usd(data?.wallet?.initial_margin)}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400 uppercase tracking-wider">MM</div>
-                    <div className="text-sm font-semibold text-amber-400">{usd(data?.wallet?.maintenance_margin)}</div>
-                  </div>
-                </div>
-                {/* IM/MM Ratio Bar */}
-                <div className="relative h-2 bg-slate-700 rounded-full overflow-hidden">
-                  <div 
-                    className="absolute h-full bg-gradient-to-r from-cyan-500 to-amber-500 transition-all"
-                    style={{ 
-                      width: `${Math.min(100, ((data?.wallet?.maintenance_margin || 0) / Math.max(1, data?.wallet?.initial_margin || 1)) * 100)}%` 
-                    }}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-slate-500">
-                  <span>IM: {pct(data?.wallet?.account_im_rate)}</span>
-                  <span>MM: {pct(data?.wallet?.account_mm_rate)}</span>
-                </div>
-              </div>
-
-              {/* Bottom Row - Profile & Stats */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Trade Profile */}
-                <div className="bg-slate-800/50 rounded-lg p-2 space-y-1">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider">Profile</div>
-                  <Badge 
-                    variant="outline" 
-                    className="border-cyan-500/50 text-cyan-400 bg-cyan-500/10 text-xs mb-1"
-                  >
-                    {data?.status?.trading_mode || 'PAPER'}
-                  </Badge>
-                  <div className="text-xs font-semibold text-slate-200 truncate">
+              <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <div className="text-slate-500">
+                  Profile{' '}
+                  <span className="font-semibold text-slate-200">
                     {data?.status?.trade_profile_label || data?.status?.trading_profile || 'MEDIUM'}
-                  </div>
+                  </span>
                 </div>
-
-                {/* Open Positions */}
-                <div className="bg-slate-800/50 rounded-lg p-2 space-y-1">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider">Open</div>
-                  <div className="text-lg font-semibold text-purple-400">{data?.positions?.items?.length || 0}</div>
+                <div className="text-slate-500">
+                  Open <span className="font-semibold text-violet-300">{data?.positions?.items?.length || 0}</span>
+                </div>
+                <div className={cn('font-medium', (data?.wallet?.unrealized_pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                  {usd(data?.wallet?.unrealized_pnl)} unrealized
                 </div>
               </div>
+            </div>
 
-              {/* Risk Limits - Compact */}
-              <div className="border-t border-slate-700/50 pt-2">
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">PNL 24H</div>
-                    <div className={cn('text-sm font-semibold', (data?.performance?.last_24h?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Deposited</div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">{usd(data?.wallet?.wallet_balance)}</div>
+                <div className="mt-2 text-xs text-slate-500">
+                  {(data?.wallet?.margin_balance ?? 0) > 0
+                    ? `${(((data?.wallet?.initial_margin || 0) / Math.max(1, data?.wallet?.margin_balance || 1)) * 100).toFixed(0)}% active`
+                    : 'No active margin'}
+                </div>
+                <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full border border-slate-700/70" />
+              </div>
+
+              <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Earnings</div>
+                    <div className={cn('mt-3 text-[2rem] font-semibold tracking-[-0.03em]', (data?.performance?.last_24h?.total_pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
                       {usd(data?.performance?.last_24h?.total_pnl)}
                     </div>
-                  </div>
-                  <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">PNL 7D</div>
-                    <div className={cn('text-sm font-semibold', (data?.performance?.last_7d?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
-                      {usd(data?.performance?.last_7d?.total_pnl)}
+                    <div className="mt-2 text-xs text-slate-500">
+                      {data?.performance?.last_24h?.win_rate !== undefined
+                        ? `${data.performance.last_24h.win_rate.toFixed(1)}% win rate`
+                        : '24h performance'}
                     </div>
                   </div>
-                  <div className="bg-slate-800/30 rounded p-1.5">
-                    <div className="text-xs text-slate-500">PNL 30D</div>
-                    <div className="text-sm font-semibold text-slate-300">-</div>
-                  </div>
+                  <div className="text-xs text-slate-500">24h</div>
+                </div>
+                <div className="absolute bottom-0 right-0 h-14 w-20 rounded-tl-2xl bg-[linear-gradient(135deg,rgba(15,23,42,0)_0%,rgba(59,130,246,0.14)_100%)]" />
+              </div>
+
+              <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/[0.08] p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Active Trading</div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">{usd(data?.wallet?.margin_balance)}</div>
+                <div className="mt-2 flex items-center gap-2 text-xs text-emerald-300">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  Working for you
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+
+              <div className="rounded-[20px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Idle Funds</div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-amber-300">{usd(data?.wallet?.available_balance)}</div>
+                <div className="mt-2 text-xs text-amber-200/80">
+                  Ready capital
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Decision Matrix */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
@@ -676,8 +736,52 @@ export default function DashboardPage() {
             {tokenDecisions.length === 0 ? (
               <div className="text-center text-slate-500 py-8">No decision data available</div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                {tokenDecisions.map((token) => {
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.3fr_1fr_1fr]">
+                  <div className="rounded-[22px] border border-slate-700/50 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.12),transparent_32%),linear-gradient(180deg,rgba(30,41,59,0.55),rgba(15,23,42,0.38))] px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Strategy Focus</div>
+                    <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-50">
+                      {flowContext.strategySymbol || 'No active setup'}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-300">
+                      {flowContext.strategyState || 'Scanning market conditions'}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">{flowContext.strategyContext || 'No dominant block reason right now'}</div>
+                  </div>
+                  <div className="rounded-[22px] border border-slate-700/50 bg-slate-800/35 px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Executor</div>
+                    <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-50">
+                      {flowContext.executorSymbol || (executorEnabled ? 'Executor idle' : 'Executor paused')}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-300">
+                      {flowContext.executorAction || (executorEnabled ? 'Awaiting valid decision' : 'Stopped')}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">{flowContext.executorContext || 'No execution pressure on the hot path'}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Ready</div>
+                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-emerald-300">
+                        {tokenDecisions.filter((token) => token.stateTone === 'positive').length}
+                      </div>
+                    </div>
+                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Watching</div>
+                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-violet-300">
+                        {tokenDecisions.filter((token) => token.stateTone === 'neutral').length}
+                      </div>
+                    </div>
+                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Divergence</div>
+                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-amber-300">
+                        {tokenDecisions.filter((token) => token.hasDivergence).length}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {tokenDecisions.map((token) => {
                   const stateColor = token.stateTone === 'positive' ? '#10b981'
                     : token.stateTone === 'negative' ? '#ef4444'
                     : '#6366f1';
@@ -686,48 +790,55 @@ export default function DashboardPage() {
                     : '#64748b';
                   const trendPositive = token.trendScore >= 0;
 
-                  return (
-                    <div key={token.symbol} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50 space-y-2">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="text-base font-bold text-slate-200">{token.symbol}</div>
-                          <div className="text-xs text-slate-500">
-                            {token.consensusCount}/{token.exchangesAvailable} exchanges
+                    return (
+                      <div
+                        key={token.symbol}
+                        className="rounded-[22px] border border-slate-700/50 bg-[linear-gradient(180deg,rgba(30,41,59,0.58),rgba(15,23,42,0.38))] p-4 shadow-[0_12px_28px_rgba(2,6,23,0.18)]"
+                      >
+                        <div className="flex justify-between items-start gap-3">
+                          <div>
+                            <div className="text-lg font-semibold tracking-[-0.02em] text-slate-50">{token.symbol}</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {token.consensusCount}/{token.exchangesAvailable} exchanges aligned
+                            </div>
+                          </div>
+                          <Badge
+                            style={{ backgroundColor: stateColor + '22', color: stateColor, borderColor: stateColor + '55' }}
+                            className="text-xs"
+                          >
+                            {token.stateLabel}
+                          </Badge>
+                        </div>
+
+                        <div className="mt-5 flex items-end justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Trend</div>
+                            <div className={cn('mt-1 text-3xl font-semibold tracking-[-0.04em]', trendPositive ? 'text-slate-50' : 'text-red-300')}>
+                              {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
+                            </div>
+                          </div>
+                          <Badge
+                            style={{ backgroundColor: alignmentColor + '22', color: alignmentColor, borderColor: alignmentColor + '55' }}
+                            className="text-xs"
+                          >
+                            {token.bybitAligned ? 'Aligned' : token.hasDivergence ? 'Divergent' : 'Watching'}
+                          </Badge>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-700/50 pt-3">
+                          <div className="rounded-2xl bg-slate-900/35 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Consensus</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-200 truncate">{token.consensusSide}</div>
+                          </div>
+                          <div className="rounded-2xl bg-slate-900/35 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Bybit</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-200 truncate">{token.bybitRegime}</div>
                           </div>
                         </div>
-                        <Badge
-                          style={{ backgroundColor: stateColor + '22', color: stateColor, borderColor: stateColor + '55' }}
-                          className="text-xs"
-                        >
-                          {token.stateLabel}
-                        </Badge>
                       </div>
-
-                      <div className="flex justify-between items-center">
-                        <span className={trendPositive ? 'text-slate-200' : 'text-red-400'}>
-                          Trend {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
-                        </span>
-                        <Badge
-                          style={{ backgroundColor: alignmentColor + '22', color: alignmentColor, borderColor: alignmentColor + '55' }}
-                          className="text-xs"
-                        >
-                          {token.bybitAligned ? 'Aligned' : token.hasDivergence ? 'Divergent' : 'Watching'}
-                        </Badge>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/50">
-                        <div>
-                          <div className="text-xs text-slate-500 uppercase">Consensus</div>
-                          <div className="text-sm font-semibold text-slate-300 truncate">{token.consensusSide}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-slate-500 uppercase">Bybit</div>
-                          <div className="text-sm font-semibold text-slate-300 truncate">{token.bybitRegime}</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </CardContent>

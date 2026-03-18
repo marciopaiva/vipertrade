@@ -1,7 +1,6 @@
-// components/dashboard/ServiceFlowDiagram.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 
 interface ServiceFlowDiagramProps {
   services?: Array<{ name: string; ok: boolean; latency_ms: number }>;
@@ -10,420 +9,317 @@ interface ServiceFlowDiagramProps {
   events?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string }>;
 }
 
-// 🎨 VIPERTRADE COLOR PALETTE
-const COLORS = {
-  // Background & Base
-  background: '#0a1929',
-  surface: '#0f2441',
-  border: 'rgba(6, 182, 212, 0.2)',
-  
-  // Primary Brand Colors
-  viperCyan: '#00d4ff',
-  viperGreen: '#00ff88',
-  viperPurple: '#a855f7',
-  viperBlue: '#3b82f6',
-  
-  // Exchanges (Warm tones)
-  binance: '#ffffff',
-  okx: '#ffffff',
-  bybit: '#f7a600',
-  
-  // Infrastructure (Cool tones)
-  marketData: '#06b6d4',
-  analytics: '#0891b2',
-  
-  // Processing (Purple tones)
-  strategy: '#a855f7',
-  backtest: '#9333ea',
-  
-  // Executor (Green - maximum highlight)
-  executor: '#00ff88',
-  executorGlow: '#10b981',
-  
-  // Monitoring (Blue tones)
-  api: '#3b82f6',
-  monitor: '#00d4ff',
-  
-  // Status Indicators
-  statusActive: '#10b981',
-  statusWarning: '#f59e0b',
-  statusError: '#ef4444',
-  statusInactive: '#64748b',
-  
-  // Connections
-  connectionPrimary: '#14b8a6',
-  connectionSecondary: '#06b6d4',
-  connectionAlert: '#f59e0b',
+const STAGE_COLORS = {
+  sources: {
+    border: 'border-slate-700/70',
+    panel: 'bg-slate-950/45',
+    pill: 'border-slate-700/70 bg-slate-900/70 text-slate-200',
+  },
+  marketData: {
+    border: 'border-sky-400/55',
+    panel: 'bg-sky-500/[0.06]',
+    glow: 'shadow-[0_0_0_1px_rgba(56,189,248,0.14),0_14px_30px_rgba(14,165,233,0.10)]',
+    accent: 'text-sky-300',
+    dot: 'bg-sky-400',
+    rail: 'from-sky-400/35 via-sky-400/10 to-transparent',
+  },
+  strategy: {
+    border: 'border-violet-400/55',
+    panel: 'bg-violet-500/[0.06]',
+    glow: 'shadow-[0_0_0_1px_rgba(192,132,252,0.14),0_14px_30px_rgba(139,92,246,0.10)]',
+    accent: 'text-violet-300',
+    dot: 'bg-violet-400',
+    rail: 'from-violet-400/35 via-violet-400/10 to-transparent',
+  },
+  executor: {
+    border: 'border-emerald-400/65',
+    panel: 'bg-emerald-500/[0.07]',
+    glow: 'shadow-[0_0_0_1px_rgba(52,211,153,0.18),0_0_38px_rgba(16,185,129,0.14)]',
+    accent: 'text-emerald-300',
+    dot: 'bg-emerald-400',
+    rail: 'from-emerald-400/40 via-emerald-400/12 to-transparent',
+  },
+  sidecars: {
+    border: 'border-slate-700/70',
+    panel: 'bg-slate-950/45',
+    pill: 'border-slate-700/70 bg-slate-900/60 text-slate-200',
+  },
 };
 
-interface Node {
-  id: string;
-  label: string;
-  sublabel?: string;
-  x: number;
-  y: number;
-  status: 'active' | 'inactive' | 'warning' | 'error';
-  latency?: number;
-  color: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
-  isCentral?: boolean;
+function normalizeName(name: string) {
+  return name.toLowerCase();
 }
 
-interface Connection {
-  from: string;
-  to: string;
-  color: string;
-  animated?: boolean;
-  delay?: number;
+function getService(services: Array<{ name: string; ok: boolean; latency_ms: number }>, matcher: string) {
+  return services.find((svc) => normalizeName(svc.name).includes(matcher));
 }
 
-const getNodeSize = (size: string = 'md') => {
-  const sizes = {
-    sm: { outer: 25, inner: 20, center: 5 },
-    md: { outer: 32, inner: 27, center: 7 },
-    lg: { outer: 42, inner: 36, center: 9 },
-    xl: { outer: 55, inner: 45, center: 12 },
+function getStatusTone(ok: boolean | undefined, latency: number | undefined) {
+  if (ok === false) {
+    return {
+      ring: 'ring-1 ring-red-400/45',
+      badge: 'text-red-300 border-red-400/40 bg-red-500/10',
+      dot: 'bg-red-400',
+      label: 'down',
+    };
+  }
+  if ((latency ?? 0) > 500) {
+    return {
+      ring: 'ring-1 ring-amber-400/40',
+      badge: 'text-amber-300 border-amber-400/35 bg-amber-500/10',
+      dot: 'bg-amber-400',
+      label: 'slow',
+    };
+  }
+  return {
+    ring: 'ring-1 ring-emerald-400/35',
+    badge: 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10',
+    dot: 'bg-emerald-400',
+    label: 'live',
   };
-  return sizes[size as keyof typeof sizes] || sizes.md;
-};
+}
+
+function StageCard({
+  title,
+  latency,
+  subtitle,
+  color,
+  tone,
+  hero = false,
+}: {
+  title: string;
+  latency?: number;
+  subtitle: string;
+  color: typeof STAGE_COLORS.marketData;
+  tone: ReturnType<typeof getStatusTone>;
+  hero?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        'relative overflow-hidden rounded-2xl border backdrop-blur-sm',
+        hero ? 'min-h-[128px] px-4 py-4' : 'min-h-[112px] px-4 py-3',
+        color.border,
+        color.panel,
+        color.glow,
+        tone.ring,
+      ].join(' ')}
+    >
+      <div className={`absolute inset-x-6 top-0 h-px bg-gradient-to-r ${color.rail}`} />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Stage</div>
+          <div className={`mt-1 font-semibold text-slate-100 ${hero ? 'text-base' : 'text-sm'}`}>{title}</div>
+        </div>
+        <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+          {tone.label}
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Latency</div>
+          <div className={`mt-1 font-semibold ${hero ? 'text-2xl' : 'text-xl'} ${color.accent}`}>
+            {typeof latency === 'number' ? `${latency}ms` : '--'}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Role</div>
+          <div className="mt-1 text-xs text-slate-300">{subtitle}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourcePill({
+  label,
+  latency,
+  accent,
+  ok,
+}: {
+  label: string;
+  latency?: number;
+  accent: string;
+  ok?: boolean;
+}) {
+  const tone = getStatusTone(ok, latency);
+
+  return (
+    <div className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sources.pill} ${tone.ring}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${accent}`} />
+          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">{label}</span>
+        </div>
+        <span className="text-xs text-slate-400">{typeof latency === 'number' ? `${latency}ms` : '--'}</span>
+      </div>
+    </div>
+  );
+}
+
+function SidecarPill({
+  label,
+  latency,
+  ok,
+}: {
+  label: string;
+  latency?: number;
+  ok?: boolean;
+}) {
+  const tone = getStatusTone(ok, latency);
+
+  return (
+    <div className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sidecars.pill} ${tone.ring}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">{label}</span>
+        </div>
+        <span className="text-xs text-slate-400">{typeof latency === 'number' ? `${latency}ms` : '--'}</span>
+      </div>
+    </div>
+  );
+}
+
+function BlockConnector({ from, to }: { from: string; to: string }) {
+  return (
+    <div className="hidden xl:flex items-center justify-center">
+      <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
+        <div className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`} />
+        <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/75 shadow-[0_0_14px_rgba(255,255,255,0.35)]" />
+      </div>
+    </div>
+  );
+}
 
 export default function ServiceFlowDiagram({
   services = [],
   executionMode = 'paper',
   executorState = 'down',
-  events = [],
 }: ServiceFlowDiagramProps) {
-  const [animationKey, setAnimationKey] = useState(0);
+  const serviceState = useMemo(() => {
+    const bybit = getService(services, 'bybit');
+    const binance = getService(services, 'binance');
+    const okx = getService(services, 'okx');
+    const marketData = getService(services, 'market-data');
+    const strategy = getService(services, 'strategy');
+    const executor = getService(services, 'executor');
+    const api = getService(services, 'api');
+    const monitor = getService(services, 'monitor');
+    const analytics = getService(services, 'analytics');
+    const backtest = getService(services, 'backtest');
 
-  // Create service map for quick lookups
-  const serviceMap = useMemo(() => new Map(services.map((svc) => [svc.name, svc])), [services]);
-
-  // Get node status from service health
-  const getNodeStatus = (nodeId: string): 'active' | 'inactive' | 'warning' | 'error' => {
-    const service = serviceMap.get(nodeId);
-    if (!service) {
-      if (nodeId === 'executor') {
-        return executorState === 'running' ? 'active' : executorState === 'paused' ? 'warning' : 'error';
-      }
-      return 'inactive';
-    }
-    if (!service.ok) return 'error';
-    if (service.latency_ms > 500) return 'warning';
-    return 'active';
-  };
-
-  // Get node latency from service data
-  const getNodeLatency = (nodeId: string): number => {
-    const service = serviceMap.get(nodeId);
-    return service?.latency_ms ?? 0;
-  };
-
-  // Get node color based on status and type
-  const getNodeColor = (nodeId: string, status: string): string => {
-    if (status === 'error') return COLORS.statusError;
-    if (status === 'warning') return COLORS.statusWarning;
-    
-    const colorMap: Record<string, string> = {
-      'binance': COLORS.binance,
-      'okx': COLORS.okx,
-      'bybit': COLORS.bybit,
-      'market-data': COLORS.marketData,
-      'analytics': COLORS.analytics,
-      'strategy': COLORS.strategy,
-      'executor': COLORS.executor,
-      'api': COLORS.api,
-      'monitor': COLORS.monitor,
-      'backtest': COLORS.backtest,
+    return {
+      bybit,
+      binance,
+      okx,
+      marketData,
+      strategy,
+      executor: {
+        ok: executorState === 'running' ? true : executorState === 'paused' ? true : executor?.ok ?? false,
+        latency_ms: executor?.latency_ms ?? 0,
+      },
+      api,
+      monitor,
+      analytics,
+      backtest,
     };
-    
-    return colorMap[nodeId] || COLORS.viperCyan;
-  };
+  }, [executorState, services]);
 
-  // Re-trigger animations periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAnimationKey(prev => prev + 1);
-    }, 8000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Dynamic nodes based on execution mode
-  const NODES: Node[] = executionMode === 'testnet'
-    ? [
-        // Testnet mode - simplified (Bybit only)
-        { id: 'bybit', label: 'BYBIT', sublabel: `${getNodeLatency('bybit')}ms`, x: 80, y: 200, status: getNodeStatus('bybit'), latency: getNodeLatency('bybit'), color: getNodeColor('bybit', getNodeStatus('bybit')), size: 'md' as const },
-        { id: 'market-data', label: 'MARKET-DATA', sublabel: `${getNodeLatency('market-data')}ms`, x: 280, y: 200, status: getNodeStatus('market-data'), latency: getNodeLatency('market-data'), color: getNodeColor('market-data', getNodeStatus('market-data')), size: 'md' as const },
-        { id: 'strategy', label: 'STRATEGY', sublabel: `${getNodeLatency('strategy')}ms`, x: 420, y: 200, status: getNodeStatus('strategy'), latency: getNodeLatency('strategy'), color: getNodeColor('strategy', getNodeStatus('strategy')), size: 'md' as const },
-        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms`, x: 620, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
-        { id: 'api', label: 'API', sublabel: `${getNodeLatency('api')}ms`, x: 820, y: 80, status: getNodeStatus('api'), latency: getNodeLatency('api'), color: getNodeColor('api', getNodeStatus('api')), size: 'md' as const },
-        { id: 'monitor', label: 'MONITOR', sublabel: `${getNodeLatency('monitor')}ms`, x: 820, y: 200, status: getNodeStatus('monitor'), latency: getNodeLatency('monitor'), color: getNodeColor('monitor', getNodeStatus('monitor')), size: 'md' as const },
-        { id: 'analytics', label: 'ANALYTICS', sublabel: `${getNodeLatency('analytics')}ms`, x: 820, y: 320, status: getNodeStatus('analytics'), latency: getNodeLatency('analytics'), color: getNodeColor('analytics', getNodeStatus('analytics')), size: 'md' as const },
-        { id: 'backtest', label: 'BACKTEST', sublabel: `${getNodeLatency('backtest')}ms`, x: 820, y: 440, status: getNodeStatus('backtest'), latency: getNodeLatency('backtest'), color: getNodeColor('backtest', getNodeStatus('backtest')), size: 'md' as const },
-      ]
-    : [
-        // Mainnet/Paper mode - full (multi-exchange)
-        { id: 'binance', label: 'BINANCE', sublabel: `${getNodeLatency('binance')}ms`, x: 80, y: 60, status: getNodeStatus('binance'), latency: getNodeLatency('binance'), color: getNodeColor('binance', getNodeStatus('binance')), size: 'md' as const },
-        { id: 'bybit', label: 'BYBIT', sublabel: `${getNodeLatency('bybit')}ms`, x: 80, y: 200, status: getNodeStatus('bybit'), latency: getNodeLatency('bybit'), color: getNodeColor('bybit', getNodeStatus('bybit')), size: 'md' as const },
-        { id: 'okx', label: 'OKX', sublabel: `${getNodeLatency('okx')}ms`, x: 80, y: 340, status: getNodeStatus('okx'), latency: getNodeLatency('okx'), color: getNodeColor('okx', getNodeStatus('okx')), size: 'md' as const },
-        { id: 'strategy', label: 'STRATEGY', sublabel: `${getNodeLatency('strategy')}ms`, x: 280, y: 60, status: getNodeStatus('strategy'), latency: getNodeLatency('strategy'), color: getNodeColor('strategy', getNodeStatus('strategy')), size: 'md' as const },
-        { id: 'market-data', label: 'MARKET-DATA', sublabel: `${getNodeLatency('market-data')}ms`, x: 280, y: 200, status: getNodeStatus('market-data'), latency: getNodeLatency('market-data'), color: getNodeColor('market-data', getNodeStatus('market-data')), size: 'md' as const },
-        { id: 'analytics', label: 'ANALYTICS', sublabel: `${getNodeLatency('analytics')}ms`, x: 280, y: 340, status: getNodeStatus('analytics'), latency: getNodeLatency('analytics'), color: getNodeColor('analytics', getNodeStatus('analytics')), size: 'md' as const },       
-        { id: 'executor', label: 'EXECUTOR', sublabel: `${getNodeLatency('executor')}ms`, x: 560, y: 200, status: getNodeStatus('executor'), latency: getNodeLatency('executor'), color: getNodeColor('executor', getNodeStatus('executor')), size: 'xl' as const, isCentral: true },
-        { id: 'api', label: 'API', sublabel: `${getNodeLatency('api')}ms`, x: 820, y: 60, status: getNodeStatus('api'), latency: getNodeLatency('api'), color: getNodeColor('api', getNodeStatus('api')), size: 'md' as const },
-        { id: 'monitor', label: 'MONITOR', sublabel: `${getNodeLatency('monitor')}ms`, x: 820, y: 200, status: getNodeStatus('monitor'), latency: getNodeLatency('monitor'), color: getNodeColor('monitor', getNodeStatus('monitor')), size: 'md' as const },
-        { id: 'backtest', label: 'BACKTEST', sublabel: `${getNodeLatency('backtest')}ms`, x: 820, y: 340, status: getNodeStatus('backtest'), latency: getNodeLatency('backtest'), color: getNodeColor('backtest', getNodeStatus('backtest')), size: 'md' as const },
-      ];
-
-  const CONNECTIONS: Connection[] = executionMode === 'testnet'
-    ? [
-        { from: 'bybit', to: 'market-data', color: COLORS.bybit, animated: true, delay: 0 },
-        { from: 'market-data', to: 'strategy', color: COLORS.viperPurple, animated: true, delay: 0 },
-        { from: 'strategy', to: 'executor', color: COLORS.viperGreen, animated: true, delay: 0 },
-        { from: 'executor', to: 'api', color: COLORS.api, animated: true, delay: 0 },
-        { from: 'executor', to: 'monitor', color: COLORS.viperCyan, animated: true, delay: 0.5 },
-        { from: 'executor', to: 'analytics', color: COLORS.analytics, animated: true, delay: 1 },
-        { from: 'executor', to: 'backtest', color: COLORS.backtest, animated: true, delay: 1.5 },
-      ]
-    : [
-        // Exchanges → Market Data
-        { from: 'binance', to: 'market-data', color: COLORS.connectionPrimary, animated: true, delay: 0 },
-        { from: 'okx', to: 'market-data', color: COLORS.connectionPrimary, animated: true, delay: 0.5 },
-        { from: 'bybit', to: 'market-data', color: COLORS.bybit, animated: true, delay: 1 },
-        // Bybit → Analytics
-        { from: 'bybit', to: 'analytics', color: COLORS.connectionSecondary, animated: true, delay: 1.5 },
-        // Market Data → Strategy
-        { from: 'market-data', to: 'strategy', color: COLORS.viperPurple, animated: true, delay: 0 },
-        // Strategy → Executor
-        { from: 'strategy', to: 'executor', color: COLORS.viperGreen, animated: true, delay: 0 },
-        // Analytics → Executor
-        { from: 'analytics', to: 'executor', color: COLORS.connectionPrimary, animated: true, delay: 0.5 },
-        // Executor → Monitoring
-        { from: 'executor', to: 'api', color: COLORS.api, animated: true, delay: 0 },
-        { from: 'executor', to: 'monitor', color: COLORS.viperCyan, animated: true, delay: 0.5 },
-        { from: 'executor', to: 'backtest', color: COLORS.backtest, animated: true, delay: 1 },
-      ];
+  const marketTone = getStatusTone(serviceState.marketData?.ok, serviceState.marketData?.latency_ms);
+  const strategyTone = getStatusTone(serviceState.strategy?.ok, serviceState.strategy?.latency_ms);
+  const executorTone = getStatusTone(serviceState.executor?.ok, serviceState.executor?.latency_ms);
+  const showMultiSource = executionMode !== 'testnet';
 
   return (
-    <div className="w-full overflow-x-auto">
-      {/* SVG Canvas */}
-      <svg
-        viewBox="0 0 900 500"
-        className="w-full h-auto"
-        style={{ minHeight: '300px' }}
-        preserveAspectRatio="xMinYMin meet"
-      >
-        <defs>
-          {/* Glow Filter for Nodes */}
-          <filter id="nodeGlow" x="-100%" y="-100%" width="300%" height="300%">
-            <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-            <feMerge>
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
+    <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
+      <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Sources</div>
+            <div className="mt-1 text-sm font-semibold text-slate-100">
+              {showMultiSource ? 'Exchange Feeds' : 'Execution Venue'}
+            </div>
+          </div>
+          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+            {showMultiSource ? '3 venues' : 'single venue'}
+          </div>
+        </div>
 
-          {/* Strong Glow for Central Node */}
-          <filter id="centralGlow" x="-150%" y="-150%" width="400%" height="400%">
-            <feGaussianBlur stdDeviation="6" result="coloredBlur" />
-            <feMerge>
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="coloredBlur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
+        <div className="space-y-3">
+          {showMultiSource && (
+            <SourcePill label="BINANCE" latency={serviceState.binance?.latency_ms} accent="bg-slate-100" ok={serviceState.binance?.ok} />
+          )}
+          <SourcePill label="BYBIT" latency={serviceState.bybit?.latency_ms} accent="bg-amber-400" ok={serviceState.bybit?.ok} />
+          {showMultiSource && (
+            <SourcePill label="OKX" latency={serviceState.okx?.latency_ms} accent="bg-slate-300" ok={serviceState.okx?.ok} />
+          )}
+        </div>
+      </div>
 
-          {/* Glow Gradient for Central Node */}
-          <radialGradient id="centralGlowGradient">
-            <stop offset="0%" stopColor="#00ff88" stopOpacity="1" />
-            <stop offset="50%" stopColor="#00d4ff" stopOpacity="0.6" />
-            <stop offset="100%" stopColor="#0a1929" stopOpacity="0" />
-          </radialGradient>
+      <BlockConnector from="from-slate-300/15 via-sky-400/55" to="to-violet-400/35" />
 
-          {/* Gradient for Connection Lines */}
-          <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.2" />
-            <stop offset="50%" stopColor="#00d4ff" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.2" />
-          </linearGradient>
+      <div className="relative overflow-hidden rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Core pipeline</div>
+            <div className="mt-1 text-sm font-semibold text-slate-100">Market Data to Execution</div>
+          </div>
+          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+            runtime path
+          </div>
+        </div>
 
-          {/* Particle Gradient */}
-          <radialGradient id="particleGradient">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-            <stop offset="50%" stopColor="#00ff88" stopOpacity="0.9" />
-            <stop offset="100%" stopColor="#00d4ff" stopOpacity="0" />
-          </radialGradient>
-        </defs>
+        <div className="pointer-events-none absolute left-8 right-8 top-[74px] hidden h-px bg-gradient-to-r from-sky-400/20 via-violet-400/20 to-emerald-400/20 lg:block" />
 
-        {/* Connection Lines */}
-        <g className="connections" key={animationKey}>
-          {CONNECTIONS.map((conn, index) => {
-            const fromNode = NODES.find(n => n.id === conn.from);
-            const toNode = NODES.find(n => n.id === conn.to);
-            if (!fromNode || !toNode) return null;
+        <div className="grid gap-3 lg:grid-cols-3">
+          <StageCard
+            title="Market"
+            latency={serviceState.marketData?.latency_ms}
+            subtitle="normalize + publish"
+            color={STAGE_COLORS.marketData}
+            tone={marketTone}
+          />
+          <StageCard
+            title="Strategy"
+            latency={serviceState.strategy?.latency_ms}
+            subtitle="score + decide"
+            color={STAGE_COLORS.strategy}
+            tone={strategyTone}
+          />
+          <StageCard
+            title="Executor"
+            latency={serviceState.executor?.latency_ms}
+            subtitle={executorState === 'paused' ? 'orders paused' : 'orders + reconcile'}
+            color={STAGE_COLORS.executor}
+            tone={executorTone}
+            hero
+          />
+        </div>
+      </div>
 
-            const fromSize = getNodeSize(fromNode.size);
-            const toSize = getNodeSize(toNode.size);
+      <BlockConnector from="from-violet-400/35 via-emerald-400/55" to="to-blue-400/25" />
 
-            // Check if connection is vertical (same x column, different y)
-            const isVertical = Math.abs(fromNode.x - toNode.x) < 50;
-            
-            let pathData;
-            if (isVertical) {
-              // Vertical connection: exit from top/bottom of nodes
-              const fromY = fromNode.y < toNode.y ? fromNode.y + fromSize.outer : fromNode.y - fromSize.outer;
-              const toY = fromNode.y < toNode.y ? toNode.y - toSize.outer : toNode.y + toSize.outer;
-              const midY = (fromY + toY) / 2;
-              pathData = `M ${fromNode.x} ${fromY}
-                           C ${fromNode.x} ${midY},
-                             ${toNode.x} ${midY},
-                             ${toNode.x} ${toY}`;
-            } else {
-              // Horizontal connection: exit from sides
-              const midX = (fromNode.x + toNode.x) / 2;
-              const controlPoint1X = fromNode.x + (midX - fromNode.x) * 0.7;
-              const controlPoint2X = toNode.x - (toNode.x - midX) * 0.7;
-              pathData = `M ${fromNode.x + fromSize.outer} ${fromNode.y}
-                           C ${controlPoint1X} ${fromNode.y},
-                             ${controlPoint2X} ${toNode.y},
-                             ${toNode.x - toSize.outer} ${toNode.y}`;
-            }
+      <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Sidecars</div>
+            <div className="mt-1 text-sm font-semibold text-slate-100">State and Analysis</div>
+          </div>
+          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+            observers
+          </div>
+        </div>
 
-            const isActive = fromNode.status === 'active' && toNode.status === 'active';
-
-            return (
-              <g key={`${conn.from}-${conn.to}`}>
-                {/* Base Line (subtle) */}
-                <path
-                  d={pathData}
-                  stroke={isActive ? conn.color : COLORS.statusInactive}
-                  strokeWidth="1.5"
-                  fill="none"
-                  opacity={isActive ? 0.5 : 0.2}
-                  strokeDasharray="4,4"
-                />
-
-                {/* Animated Particle */}
-                {conn.animated && isActive && (
-                  <>
-                    <circle r="5" fill={conn.color} opacity="0.8" filter="url(#nodeGlow)">
-                      <animateMotion
-                        dur={`${3 + (conn.delay ?? 0)}s`}
-                        repeatCount="indefinite"
-                        path={pathData}
-                      />
-                    </circle>
-                    <circle r="3" fill="#ffffff" opacity="0.6">
-                      <animateMotion
-                        dur={`${3 + (conn.delay ?? 0)}s`}
-                        repeatCount="indefinite"
-                        path={pathData}
-                      />
-                    </circle>
-                  </>
-                )}
-              </g>
-            );
-          })}
-        </g>
-
-        {/* Nodes */}
-        <g className="nodes">
-          {NODES.map((node) => {
-            const sizes = getNodeSize(node.size);
-            const isExecutor = node.id === 'executor';
-
-            return (
-              <g
-                key={node.id}
-                transform={`translate(${node.x}, ${node.y})`}
-                className="transition-all duration-300"
-                style={{
-                  filter: isExecutor ? 'url(#centralGlow)' : 'none',
-                }}
-              >
-                {/* Outer Glow Ring (animated pulse) */}
-                <circle
-                  r={sizes.outer + 10}
-                  fill="none"
-                  stroke={node.color}
-                  strokeWidth="1"
-                  opacity="0.2"
-                  className="animate-pulse"
-                />
-
-                {/* Main Outer Circle */}
-                <circle
-                  r={sizes.outer}
-                  fill="#0a1929"
-                  stroke={node.color}
-                  strokeWidth={isExecutor ? 3 : 2}
-                  opacity={isExecutor ? 1 : 0.9}
-                />
-
-                {/* Inner Ring */}
-                <circle
-                  r={sizes.inner}
-                  fill="none"
-                  stroke={node.color}
-                  strokeWidth="1"
-                  opacity="0.5"
-                />
-
-                {/* Center Dot */}
-                <circle
-                  r={sizes.center}
-                  fill={node.color}
-                  opacity="0.9"
-                  filter={isExecutor ? 'url(#centralGlow)' : 'none'}
-                />
-
-                {/* Status Indicator (top-right) */}
-                <circle
-                  cx={sizes.outer - 10}
-                  cy={-sizes.outer + 10}
-                  r="6"
-                  fill={
-                    node.status === 'active' ? COLORS.statusActive :
-                    node.status === 'warning' ? COLORS.statusWarning :
-                    node.status === 'error' ? COLORS.statusError :
-                    COLORS.statusInactive
-                  }
-                  stroke="#0a1929"
-                  strokeWidth="2"
-                  className="animate-pulse"
-                />
-
-                {/* Label */}
-                <text
-                  y={sizes.outer + 25}
-                  textAnchor="middle"
-                  fill="#ffffff"
-                  fontSize="10"
-                  fontWeight="700"
-                  fontFamily="system-ui, -apple-system, sans-serif"
-                  style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                >
-                  {node.label}
-                </text>
-
-                {/* Sublabel (Latency) */}
-                <text
-                  y={sizes.outer + 38}
-                  textAnchor="middle"
-                  fill={node.color}
-                  fontSize="9"
-                  fontFamily="system-ui, -apple-system, sans-serif"
-                  opacity="0.8"
-                >
-                  {node.sublabel}
-                </text>
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+          <SidecarPill label="API" latency={serviceState.api?.latency_ms} ok={serviceState.api?.ok} />
+          <SidecarPill label="MONITOR" latency={serviceState.monitor?.latency_ms} ok={serviceState.monitor?.ok} />
+          <SidecarPill label="ANALYTICS" latency={serviceState.analytics?.latency_ms} ok={serviceState.analytics?.ok} />
+          <SidecarPill label="BACKTEST" latency={serviceState.backtest?.latency_ms} ok={serviceState.backtest?.ok} />
+        </div>
+      </div>
     </div>
   );
 }
