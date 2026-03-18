@@ -56,11 +56,13 @@ export function useDashboard<T = unknown>(
 
   useEffect(() => {
     fetchData();
-    
+
     if (refreshInterval > 0 && enabled) {
       const interval = setInterval(fetchData, refreshInterval);
       return () => clearInterval(interval);
     }
+    
+    return undefined;
   }, [fetchData, refreshInterval, enabled]);
 
   return {

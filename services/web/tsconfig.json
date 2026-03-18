@@ -1,9 +1,12 @@
 {
   "compilerOptions": {
     // Target & Libs
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "target": "ES2020",
-    
     // Modules
     "allowJs": true,
     "skipLibCheck": true,
@@ -12,42 +15,37 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
-    
+    "jsx": "react-jsx",
     // Strict Type Checking
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
-    
     // Additional Safety (selective)
-    "noUnusedLocals": false,  // Allow unused in dev
-    "noUnusedParameters": false,
+    "noUnusedLocals": false, // Disabled: allows unused variables for future use
+    "noUnusedParameters": false, // Disabled: allows unused parameters for callbacks
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": false,  // Too strict for existing code
-    "exactOptionalPropertyTypes": false,  // Conflicts with undefined
+    "noUncheckedIndexedAccess": false, // Disabled: too strict for existing codebase
+    "exactOptionalPropertyTypes": false, // Disabled: conflicts with undefined patterns
     "noImplicitOverride": true,
-    
     // File System Safety
     "forceConsistentCasingInFileNames": true,
-    
     // Build
     "noEmit": true,
     "incremental": true,
-    
     // Next.js Plugin
     "plugins": [
       {
         "name": "next"
       }
     ],
-    
     // Path Aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     },
-    
     // Module Resolution
     "allowSyntheticDefaultImports": true
   },
@@ -55,7 +53,8 @@
     "next-env.d.ts",
     ".next/types/**/*.ts",
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

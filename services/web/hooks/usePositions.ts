@@ -14,7 +14,7 @@ export function usePositions() {
     const fetchPositions = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi(endpoints.positions);
+        const data: any = await fetchApi(endpoints.positions);
         setPositions(data?.items || []);
         setError(null);
       } catch (err) {
@@ -29,7 +29,7 @@ export function usePositions() {
     // Setup WebSocket for real-time position updates
     const ws = getWebSocketClient();
     ws.on('position_update', (data) => {
-      setPositions((prev: any[]) => {
+      setPositions(((prev: any[]) => {
         const index = prev.findIndex(p => p.trade_id === data.trade_id);
         if (index >= 0) {
           const updated = [...prev];
@@ -37,7 +37,7 @@ export function usePositions() {
           return updated;
         }
         return [data, ...prev];
-      });
+      }) as any);
     });
 
     return () => {
