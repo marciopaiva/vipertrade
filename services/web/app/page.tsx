@@ -504,8 +504,8 @@ export default function DashboardPage() {
         hasDivergence,
       };
     }).sort((a: any, b: any) => {
-      const tonePriority = { positive: 0, negative: 0, neutral: 1 };
-      return tonePriority[a.stateTone] - tonePriority[b.stateTone] || 
+      const tonePriority: Record<string, number> = { positive: 0, negative: 0, neutral: 1 };
+      return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
              b.consensusCount - a.consensusCount ||
              Math.abs(b.trendScore) - Math.abs(a.trendScore);
     });

@@ -33,13 +33,12 @@ RUN addgroup --system --gid 1001 nodejs && \
 
 # Copy static files first
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/static ./public/_next/static
 
-# Copy standalone output
-COPY --from=builder /app/.next/standalone ./
+# Copy standalone output with correct ownership
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=deps /app/node_modules ./node_modules
 
-# Set ownership
+# Set ownership for remaining files
 RUN chown -R nextjs:nodejs /app
 
 # Switch to non-root user
@@ -48,7 +47,7 @@ USER nextjs
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 CMD ["node", "server.js"]

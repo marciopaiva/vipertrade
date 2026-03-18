@@ -13,7 +13,7 @@ export function useTrades() {
     const fetchTrades = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi(endpoints.trades);
+        const data: any = await fetchApi(endpoints.trades);
         setTrades(data?.items || []);
         setError(null);
       } catch (err) {
