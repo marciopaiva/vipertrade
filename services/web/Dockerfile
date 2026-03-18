@@ -7,13 +7,13 @@ ARG NODE_VERSION=20
 FROM node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production --frozen-lockfile
+RUN npm ci --only=production --legacy-peer-deps --frozen-lockfile
 
 # Stage 2: Builder
 FROM node:${NODE_VERSION}-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY . .
 RUN npm run build
 
@@ -39,7 +39,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=deps /app/node_modules ./node_modules
 
 # Install sharp for Next.js image optimization
-RUN npm install --arch=x64 --platform=linux sharp
+RUN npm install --legacy-peer-deps --arch=x64 --platform=linux sharp
 
 # Set ownership for remaining files
 RUN chown -R nextjs:nodejs /app
