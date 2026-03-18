@@ -31,8 +31,11 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy only what's needed
+# Copy static files first
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/static ./public/_next/static
+
+# Copy standalone output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=deps /app/node_modules ./node_modules
 
