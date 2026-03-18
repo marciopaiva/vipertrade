@@ -2,17 +2,17 @@
 const nextConfig = {
   // Output standalone for Docker multi-stage
   output: 'standalone',
-  
+
   // React strict mode (helps find bugs)
   reactStrictMode: true,
-  
+
   // Environment variables
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws',
     NEXT_PUBLIC_TRADING_MODE: process.env.NEXT_PUBLIC_TRADING_MODE || 'paper',
   },
-  
+
   // Rewrites for API backend
   async rewrites() {
     return [
@@ -22,7 +22,7 @@ const nextConfig = {
       },
     ];
   },
-  
+
   // Security headers
   async headers() {
     return [
@@ -38,20 +38,27 @@ const nextConfig = {
       },
     ];
   },
-  
+
   // Image optimization
   images: {
     formats: ['image/avif', 'image/webp'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
-  
+
   // Compression
   compress: true,
-  
+
   // Source maps in development only
   productionBrowserSourceMaps: process.env.NODE_ENV === 'development',
-  
+
+  // Experimental features for standalone mode
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '2mb',
+    },
+  },
+
   // Turbopack config (empty for default behavior)
   turbopack: {},
 }

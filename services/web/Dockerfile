@@ -31,11 +31,16 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy static files first
+# Copy public directory first
 COPY --from=builder /app/public ./public
 
-# Copy standalone output with correct ownership
+# Copy standalone server output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+
+# Copy .next/static for client-side assets
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./public/_next/static
+
+# Copy node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
 # Install sharp for Next.js image optimization
