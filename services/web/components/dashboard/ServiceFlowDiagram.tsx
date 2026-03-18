@@ -251,10 +251,10 @@ export default function ServiceFlowDiagram({
       {/* SVG Canvas */}
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox="0 0 900 500"
         className="w-full h-auto"
         style={{ minHeight: '400px' }}
-        preserveAspectRatio="xMidYMid meet"
+        preserveAspectRatio="xMinYMin meet"
       >
         <defs>
           {/* Glow Filter for Nodes */}
