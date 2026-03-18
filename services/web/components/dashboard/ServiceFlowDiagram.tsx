@@ -266,15 +266,29 @@ export default function ServiceFlowDiagram({
             const fromSize = getNodeSize(fromNode.size);
             const toSize = getNodeSize(toNode.size);
 
-            // Calculate curve control points for smooth bezier
-            const midX = (fromNode.x + toNode.x) / 2;
-            const controlPoint1X = fromNode.x + (midX - fromNode.x) * 0.7;
-            const controlPoint2X = toNode.x - (toNode.x - midX) * 0.7;
-
-            const pathData = `M ${fromNode.x + fromSize.outer} ${fromNode.y} 
-                             C ${controlPoint1X} ${fromNode.y}, 
-                               ${controlPoint2X} ${toNode.y}, 
-                               ${toNode.x - toSize.outer} ${toNode.y}`;
+            // Check if connection is vertical (same x column, different y)
+            const isVertical = Math.abs(fromNode.x - toNode.x) < 50;
+            
+            let pathData;
+            if (isVertical) {
+              // Vertical connection: exit from top/bottom of nodes
+              const fromY = fromNode.y < toNode.y ? fromNode.y + fromSize.outer : fromNode.y - fromSize.outer;
+              const toY = fromNode.y < toNode.y ? toNode.y - toSize.outer : toNode.y + toSize.outer;
+              const midY = (fromY + toY) / 2;
+              pathData = `M ${fromNode.x} ${fromY}
+                           C ${fromNode.x} ${midY},
+                             ${toNode.x} ${midY},
+                             ${toNode.x} ${toY}`;
+            } else {
+              // Horizontal connection: exit from sides
+              const midX = (fromNode.x + toNode.x) / 2;
+              const controlPoint1X = fromNode.x + (midX - fromNode.x) * 0.7;
+              const controlPoint2X = toNode.x - (toNode.x - midX) * 0.7;
+              pathData = `M ${fromNode.x + fromSize.outer} ${fromNode.y}
+                           C ${controlPoint1X} ${fromNode.y},
+                             ${controlPoint2X} ${toNode.y},
+                             ${toNode.x - toSize.outer} ${toNode.y}`;
+            }
 
             const isActive = fromNode.status === 'active' && toNode.status === 'active';
 
