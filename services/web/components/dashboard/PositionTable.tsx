@@ -8,6 +8,8 @@ interface MarketSignal {
   symbol: string;
   current_price: number;
   bybit_price?: number;
+  consensus_side?: string;
+  bybit_regime?: string;
 }
 
 interface Position {
@@ -17,6 +19,7 @@ interface Position {
   quantity: number;
   notional_usdt: number;
   entry_price: number;
+  stop_loss_price?: number | null;
   leverage?: number;
   trailing_stop_activated?: boolean;
   trailing_stop_peak_price?: number | null;
@@ -34,6 +37,42 @@ interface PositionTableProps {
 }
 
 export function PositionTable({ positions, marketSignals = [], className }: PositionTableProps) {
+  const regimeBadgeStyle = (regime?: string) => {
+    switch ((regime || 'neutral').toLowerCase()) {
+      case 'bullish':
+        return {
+          backgroundColor: '#10b98122',
+          color: '#34d399',
+          borderColor: '#10b98155',
+        };
+      case 'bearish':
+        return {
+          backgroundColor: '#ef444422',
+          color: '#f87171',
+          borderColor: '#ef444455',
+        };
+      default:
+        return {
+          backgroundColor: '#ffffff10',
+          color: '#f8fafc',
+          borderColor: '#ffffff24',
+        };
+    }
+  };
+
+  const formatRelativeOpenTime = (openedAt?: string) => {
+    if (!openedAt) return '-';
+    const openedMs = Date.parse(openedAt);
+    if (Number.isNaN(openedMs)) return '-';
+    const diffSeconds = Math.max(0, Math.floor((Date.now() - openedMs) / 1000));
+    const hours = Math.floor(diffSeconds / 3600);
+    const minutes = Math.floor((diffSeconds % 3600) / 60);
+
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return '<1m';
+  };
+
   if (positions.length === 0) {
     return (
       <Card className={cn('bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50', className)}>
@@ -101,6 +140,22 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
         ? { label: 'Ready to Arm', tone: 'armed' as const }
         : { label: 'Waiting', tone: 'waiting' as const };
 
+    const trailingDisplayPrice = typeof trailingLivePrice === 'number'
+      ? trailingLivePrice
+      : typeof p.trailing_activation_price === 'number'
+        ? p.trailing_activation_price
+        : typeof p.break_even_price === 'number' && trailingArmedByPrice
+          ? p.break_even_price
+          : null;
+
+    const distanceToArmPct = !p.trailing_stop_activated &&
+      !trailingArmedByPrice &&
+      typeof markPrice === 'number' &&
+      typeof p.trailing_activation_price === 'number' &&
+      entryPrice > 0
+      ? Math.abs((p.trailing_activation_price - markPrice) / entryPrice)
+      : 0;
+
     const triggerState = p.trailing_stop_activated && typeof trailingLivePrice === 'number'
       ? `Trail ${trailingLivePrice.toFixed(6)}`
       : typeof p.trailing_activation_price === 'number'
@@ -121,6 +176,18 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
       trailingProgressPct,
       trailingState,
       triggerState,
+      trailingLabel: typeof trailingLivePrice === 'number'
+        ? 'Trailing Arm'
+        : typeof p.trailing_activation_price === 'number'
+          ? 'Trailing Arm'
+          : typeof p.fixed_take_profit_price === 'number'
+            ? 'Take Profit'
+            : 'Trigger',
+      trailingDisplayPrice,
+      distanceToArmPct,
+      consensusSide: signal?.consensus_side ?? 'neutral',
+      bybitRegime: signal?.bybit_regime ?? 'neutral',
+      openTimeLabel: formatRelativeOpenTime(p.opened_at),
     };
   });
 
@@ -142,10 +209,22 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
               >
                 <div className="flex items-center justify-between gap-4">
                   {/* Left: Symbol + Side + Qty */}
-                  <div className="flex items-center gap-2 min-w-[120px]">
+                  <div className="flex items-center gap-2 w-[220px] shrink-0">
                     <div>
                       <div className="text-sm font-bold text-slate-200">{position.symbol}</div>
                       <div className="text-xs text-slate-500">Qty: {position.quantity.toLocaleString()}</div>
+                      <div className="mt-1">
+                        <Badge
+                          className="h-5 px-2 text-[10px] font-medium"
+                          style={{
+                            backgroundColor: '#0f172acc',
+                            color: '#cbd5e1',
+                            borderColor: '#334155',
+                          }}
+                        >
+                          Age {position.openTimeLabel}
+                        </Badge>
+                      </div>
                     </div>
                     <Badge
                       style={{ backgroundColor: sideColor + '22', color: sideColor, borderColor: sideColor + '55' }}
@@ -165,34 +244,77 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                     </div>
                   </div>
 
-                  {/* Right: Entry/Mark/Delta/Notional */}
-                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[280px]">
+                  {/* Right: Entry/Mark/Trailing/Stop */}
+                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[440px]">
                     <div>
                       <div className="text-slate-500">Entry</div>
-                      <div className="text-slate-300">${position.entryPrice.toFixed(6)}</div>
+                      <Badge
+                        className="h-6 px-2 text-[11px] font-medium"
+                        style={{
+                          backgroundColor: '#0f172acc',
+                          color: '#e2e8f0',
+                          borderColor: '#334155',
+                        }}
+                      >
+                        ${position.entryPrice.toFixed(6)}
+                      </Badge>
                     </div>
                     <div>
                       <div className="text-slate-500">Mark</div>
-                      <div className="text-slate-300">
-                        {position.markPrice ? `$${position.markPrice.toFixed(6)}` : '-'}
-                      </div>
+                      {position.markPrice ? (
+                        <Badge
+                          className="h-6 px-2 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: '#0f172acc',
+                            color: '#e2e8f0',
+                            borderColor: '#334155',
+                          }}
+                        >
+                          ${position.markPrice.toFixed(6)}
+                        </Badge>
+                      ) : (
+                        <div className="text-slate-300">-</div>
+                      )}
                     </div>
                     <div>
-                      <div className="text-slate-500">Delta</div>
-                      <div className="font-semibold" style={{ color: position.markDeltaPct !== null && position.markDeltaPct! >= 0 ? '#10b981' : '#ef4444' }}>
-                        {position.markDeltaPct !== null ? `${(position.markDeltaPct! * 100).toFixed(2)}%` : '-'}
-                      </div>
+                      <div className="text-slate-500">Trailing</div>
+                      {typeof position.trailingDisplayPrice === 'number' ? (
+                        <Badge
+                          className="h-6 px-2 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: '#0f172acc',
+                            color: '#e2e8f0',
+                            borderColor: '#334155',
+                          }}
+                        >
+                          ${position.trailingDisplayPrice.toFixed(6)}
+                        </Badge>
+                      ) : (
+                        <div className="text-slate-300">-</div>
+                      )}
                     </div>
                     <div>
-                      <div className="text-slate-500">Notional</div>
-                      <div className="text-slate-300">${position.notional_usdt.toLocaleString()}</div>
+                      <div className="text-slate-500">Stop</div>
+                      {typeof position.stop_loss_price === 'number' ? (
+                        <Badge
+                          className="h-6 px-2 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: '#0f172acc',
+                            color: '#e2e8f0',
+                            borderColor: '#334155',
+                          }}
+                        >
+                          ${position.stop_loss_price.toFixed(6)}
+                        </Badge>
+                      ) : (
+                        <div className="text-slate-300">-</div>
+                      )}
                     </div>
                   </div>
 
                   {/* Far Right: Trailing Status */}
-                  <div className="hidden lg:flex items-center gap-3 min-w-[200px]">
+                  <div className="hidden lg:flex items-center gap-3 min-w-[320px]">
                     <div className="flex-1">
-                      <div className="text-xs text-slate-300 truncate">{position.triggerState}</div>
                       <div className="flex items-center gap-2 mt-1">
                         <Badge
                           style={{
@@ -200,23 +322,37 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                             color: position.trailing_stop_activated ? '#10b981' : position.trailingArmedByPrice ? '#f59e0b' : '#64748b',
                             borderColor: position.trailing_stop_activated ? '#10b98155' : position.trailingArmedByPrice ? '#f59e0b55' : '#64748b55'
                           }}
-                          className="text-xs px-1.5 py-0.5 h-5"
+                          className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium"
                         >
                           {position.trailingState.label}
                         </Badge>
                         {position.trailingProgressPct !== null && (
-                          <div className="flex items-center gap-1">
-                            <div className="w-16 h-1 bg-slate-700 rounded-full overflow-hidden">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-gradient-to-r from-cyan-500 to-green-500"
-                                style={{ width: `${Math.max(8, Math.round(position.trailingProgressPct! * 100))}%` }}
+                                style={{ width: `${position.trailingProgressPct! <= 0 ? 0 : Math.max(8, Math.round(position.trailingProgressPct! * 100))}%` }}
                               />
                             </div>
-                            <div className="text-xs text-slate-400 w-6 text-right">
+                            <div className="text-[11px] text-slate-400 w-8 text-right">
                               {Math.round(position.trailingProgressPct! * 100)}%
                             </div>
                           </div>
                         )}
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <Badge
+                          className="h-5 min-w-[120px] justify-center px-2 text-[10px] font-medium opacity-90"
+                          style={regimeBadgeStyle(position.consensusSide)}
+                        >
+                          Consensus {position.consensusSide}
+                        </Badge>
+                        <Badge
+                          className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium opacity-90"
+                          style={regimeBadgeStyle(position.bybitRegime)}
+                        >
+                          Bybit {position.bybitRegime}
+                        </Badge>
                       </div>
                     </div>
                   </div>

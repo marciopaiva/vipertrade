@@ -27,6 +27,7 @@ export interface Position {
   quantity: number;
   notional_usdt: number;
   entry_price: number;
+  stop_loss_price?: number | null;
   leverage?: number;
   trailing_stop_activated?: boolean;
   trailing_stop_peak_price?: number | null;
