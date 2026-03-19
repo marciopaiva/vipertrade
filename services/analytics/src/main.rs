@@ -1,9 +1,11 @@
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
+use serde_yaml::Value as YamlValue;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::error::Error;
+use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -43,25 +45,65 @@ struct ScoresSnapshot {
     by_symbol: Vec<SymbolScore>,
 }
 
-fn parse_trading_pairs() -> Vec<String> {
-    let raw = std::env::var("TRADING_PAIRS")
-        .unwrap_or_else(|_| "DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT".to_string());
-    let pairs: Vec<String> = raw
-        .split(',')
-        .map(|s| s.trim().to_uppercase())
-        .filter(|s| !s.is_empty())
-        .collect();
+fn configured_pairs_path() -> String {
+    std::env::var("STRATEGY_CONFIG")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "/app/config/pairs.yaml".to_string())
+}
+
+fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
+    let raw = fs::read_to_string(path).ok()?;
+    let yaml: YamlValue = serde_yaml::from_str(&raw).ok()?;
+    let obj = yaml.as_mapping()?;
+
+    let mut pairs = Vec::new();
+    for (key, value) in obj {
+        let Some(symbol) = key.as_str() else {
+            continue;
+        };
+        if symbol.eq_ignore_ascii_case("global") || symbol.eq_ignore_ascii_case("profiles") {
+            continue;
+        }
+
+        let enabled = value
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("enabled")))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if enabled {
+            pairs.push(symbol.to_uppercase());
+        }
+    }
 
     if pairs.is_empty() {
-        vec![
-            "DOGEUSDT".to_string(),
-            "XRPUSDT".to_string(),
-            "ADAUSDT".to_string(),
-            "XLMUSDT".to_string(),
-        ]
+        None
     } else {
-        pairs
+        pairs.sort();
+        Some(pairs)
     }
+}
+
+fn parse_trading_pairs() -> Vec<String> {
+    if let Ok(raw) = std::env::var("TRADING_PAIRS") {
+        let pairs: Vec<String> = raw
+            .split(',')
+            .map(|s| s.trim().to_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !pairs.is_empty() {
+            return pairs;
+        }
+    }
+
+    let config_path = configured_pairs_path();
+    if let Some(pairs) = parse_trading_pairs_from_config(&config_path) {
+        return pairs;
+    }
+    panic!(
+        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
+        config_path
+    );
 }
 
 fn parse_f64(raw: &str) -> Option<f64> {

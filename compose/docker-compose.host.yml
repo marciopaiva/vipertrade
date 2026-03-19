@@ -68,7 +68,7 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC:-wss://stream-testnet.bybit.com/v5/public/linear}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
+      STRATEGY_CONFIG: /app/config/pairs.yaml
       REDIS_HOST: localhost
       ANALYTICS_SCORES_URL: ${ANALYTICS_SCORES_URL:-http://localhost:8086/scores}
       ANALYTICS_MIN_EVALUATED: ${ANALYTICS_MIN_EVALUATED:-20}
@@ -107,7 +107,7 @@ services:
     environment:
       TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
+      STRATEGY_CONFIG: /app/config/pairs.yaml
       DB_HOST: localhost
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
@@ -117,6 +117,8 @@ services:
       ANALYTICS_LOOKBACK_HOURS: ${ANALYTICS_LOOKBACK_HOURS:-24}
       ANALYTICS_SAMPLE_INTERVAL_SECONDS: ${ANALYTICS_SAMPLE_INTERVAL_SECONDS:-5}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -219,8 +221,6 @@ services:
       TRADING_PROFILE: ${TRADING_PROFILE:-MEDIUM}
       EXECUTOR_ENABLE_LIVE_ORDERS: ${EXECUTOR_ENABLE_LIVE_ORDERS:-false}
       EXECUTOR_PAPER_MAX_OPEN_POSITIONS: ${EXECUTOR_PAPER_MAX_OPEN_POSITIONS:-4}
-      EXECUTOR_LIVE_SYMBOL_ALLOWLIST: ${EXECUTOR_LIVE_SYMBOL_ALLOWLIST:-DOGEUSDT}
-      TRADING_PAIRS: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,ADAUSDT,XLMUSDT}
       REDIS_URL: redis://localhost:6379
       REDIS_HOST: localhost
       REDIS_PORT: 6379
@@ -282,6 +282,7 @@ services:
       DB_NAME: ${POSTGRES_DB:-vipertrade}
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       HEALTH_CHECK_INTERVAL_MIN: ${HEALTH_CHECK_INTERVAL_MIN:-15}
       RECONCILIATION_INTERVAL_MIN: ${RECONCILIATION_INTERVAL_MIN:-5}
       ALERT_COOLDOWN_SEC: ${ALERT_COOLDOWN_SEC:-300}
