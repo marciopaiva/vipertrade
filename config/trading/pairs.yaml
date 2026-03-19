@@ -426,6 +426,270 @@ XLMUSDT:
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0038
+
+# ═══════════════════════════════════════════════════════════
+# SOLUSDT - Large Cap Alt (Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+SOLUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "high"
+  mode_profiles:
+    PAPER:
+      risk:
+        max_position_wallet_pct: 0.10
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0034
+    MAINNET:
+      risk:
+        max_position_wallet_pct: 0.10
+
+  risk:
+    stop_loss_pct: 0.0028
+    take_profit_pct: 0.003
+    max_position_usdt: 20.00
+    atr_multiplier: 0.70
+
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.010
+          - at_profit_pct: 0.050
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.0028
+        initial_trail_pct: 0.0016
+        ratchet_levels:
+          - at_profit_pct: 0.0048
+            trail_pct: 0.0022
+          - at_profit_pct: 0.0075
+            trail_pct: 0.0032
+        move_to_break_even_at: 0.0032
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.020
+        initial_trail_pct: 0.010
+        ratchet_levels:
+          - at_profit_pct: 0.040
+            trail_pct: 0.018
+          - at_profit_pct: 0.080
+            trail_pct: 0.030
+        move_to_break_even_at: 0.025
+
+  entry_filters:
+    min_trend_score_long: 0.30
+    min_trend_score_short: 0.32
+    min_trend_score: 0.30
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 6
+    max_atr_pct: 0.0052
+
+# ═══════════════════════════════════════════════════════════
+# LINKUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+LINKUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium-high"
+  mode_profiles:
+    PAPER:
+      risk:
+        max_position_wallet_pct: 0.08
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0027
+    MAINNET:
+      risk:
+        max_position_wallet_pct: 0.08
+
+  risk:
+    stop_loss_pct: 0.0026
+    take_profit_pct: 0.003
+    max_position_usdt: 18.00
+    atr_multiplier: 0.65
+
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.010
+          - at_profit_pct: 0.050
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.0026
+        initial_trail_pct: 0.0015
+        ratchet_levels:
+          - at_profit_pct: 0.0046
+            trail_pct: 0.0020
+          - at_profit_pct: 0.0072
+            trail_pct: 0.0030
+        move_to_break_even_at: 0.0030
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.020
+        initial_trail_pct: 0.010
+        ratchet_levels:
+          - at_profit_pct: 0.040
+            trail_pct: 0.018
+          - at_profit_pct: 0.080
+            trail_pct: 0.030
+        move_to_break_even_at: 0.025
+
+  entry_filters:
+    min_trend_score_long: 0.28
+    min_trend_score_short: 0.30
+    min_trend_score: 0.28
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0048
+
+# ═══════════════════════════════════════════════════════════
+# AVAXUSDT - Large Cap Alt (Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+AVAXUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "high"
+  mode_profiles:
+    PAPER:
+      risk:
+        max_position_wallet_pct: 0.08
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0027
+    MAINNET:
+      risk:
+        max_position_wallet_pct: 0.08
+
+  risk:
+    stop_loss_pct: 0.0030
+    take_profit_pct: 0.003
+    max_position_usdt: 18.00
+    atr_multiplier: 0.72
+
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.010
+          - at_profit_pct: 0.050
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.0030
+        initial_trail_pct: 0.0017
+        ratchet_levels:
+          - at_profit_pct: 0.0050
+            trail_pct: 0.0022
+          - at_profit_pct: 0.0080
+            trail_pct: 0.0032
+        move_to_break_even_at: 0.0032
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.020
+        initial_trail_pct: 0.010
+        ratchet_levels:
+          - at_profit_pct: 0.040
+            trail_pct: 0.018
+          - at_profit_pct: 0.080
+            trail_pct: 0.030
+        move_to_break_even_at: 0.025
+
+  entry_filters:
+    min_trend_score_long: 0.32
+    min_trend_score_short: 0.34
+    min_trend_score: 0.32
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 6
+    max_atr_pct: 0.0058
+
+# ═══════════════════════════════════════════════════════════
+# LTCUSDT - Large Cap Alt (Média Volatilidade)
+# ═══════════════════════════════════════════════════════════
+
+LTCUSDT:
+  enabled: true
+  category: "large_cap_alt"
+  volatility_profile: "medium"
+  mode_profiles:
+    PAPER:
+      risk:
+        max_position_wallet_pct: 0.07
+    TESTNET:
+      risk:
+        max_position_wallet_pct: 0.0024
+    MAINNET:
+      risk:
+        max_position_wallet_pct: 0.07
+
+  risk:
+    stop_loss_pct: 0.0024
+    take_profit_pct: 0.003
+    max_position_usdt: 16.00
+    atr_multiplier: 0.58
+
+  trailing_stop:
+    enabled: true
+    by_profile:
+      CONSERVATIVE:
+        activate_after_profit_pct: 0.012
+        initial_trail_pct: 0.006
+        ratchet_levels:
+          - at_profit_pct: 0.025
+            trail_pct: 0.010
+          - at_profit_pct: 0.050
+            trail_pct: 0.018
+        move_to_break_even_at: 0.018
+      MEDIUM:
+        activate_after_profit_pct: 0.0024
+        initial_trail_pct: 0.0014
+        ratchet_levels:
+          - at_profit_pct: 0.0044
+            trail_pct: 0.0019
+          - at_profit_pct: 0.0068
+            trail_pct: 0.0028
+        move_to_break_even_at: 0.0028
+      AGGRESSIVE:
+        activate_after_profit_pct: 0.020
+        initial_trail_pct: 0.010
+        ratchet_levels:
+          - at_profit_pct: 0.040
+            trail_pct: 0.018
+          - at_profit_pct: 0.080
+            trail_pct: 0.030
+        move_to_break_even_at: 0.025
+
+  entry_filters:
+    min_trend_score_long: 0.24
+    min_trend_score_short: 0.28
+    min_trend_score: 0.24
+    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks: 3
+    stop_loss_cooldown_minutes_short: 5
+    max_atr_pct: 0.0042
   
 # ═══════════════════════════════════════════════════════════
 # RISK PROFILES (Overrides globais por perfil)
