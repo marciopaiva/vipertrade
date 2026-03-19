@@ -30,12 +30,14 @@ interface TokenDecision {
   symbol: string;
   regime: string;
   consensusSide: string;
+  consensusLabel: string;
   bybitRegime: string;
   consensusCount: number;
   exchangesAvailable: number;
   trendScore: number;
   stateLabel: string;
   stateTone: 'positive' | 'negative' | 'neutral';
+  stateContext?: string;
   bybitAligned: boolean;
   hasDivergence: boolean;
 }
@@ -75,6 +77,11 @@ interface DashboardData {
     quantity: number;
     notional_usdt: number;
     entry_price: number;
+    opened_at?: string;
+    stop_loss_price?: number;
+    trailing_activation_price?: number;
+    fixed_take_profit_price?: number;
+    break_even_price?: number;
     trailing_stop_activated?: boolean;
     trailing_stop_peak_price?: number;
     trailing_stop_final_distance_pct?: number;
@@ -126,6 +133,14 @@ function usd(value: number | null | undefined) {
 function pct(value: number | null | undefined) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '-';
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function titleCase(value: string | null | undefined) {
+  if (!value) return '';
+  return value
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 // Components
@@ -480,21 +495,59 @@ export default function DashboardPage() {
     // items can be array or Record<string, Signal>
     const signalsObj = marketSignals.items as Record<string, any> || {};
     const signalsArray = Object.values(signalsObj);
+    const events = data?.events?.items || [];
+    const positions = data?.positions?.items || [];
+
+    const latestExecutorEventBySymbol = new Map<string, { action?: string; status?: string }>();
+    for (const event of events) {
+      if (event.event_type !== 'executor_event_processed' || !event.symbol || latestExecutorEventBySymbol.has(event.symbol)) {
+        continue;
+      }
+      latestExecutorEventBySymbol.set(event.symbol, {
+        action: event.data?.action ? String(event.data.action) : undefined,
+        status: event.data?.status ? String(event.data.status) : undefined,
+      });
+    }
     
     return signalsArray.map((signal: any) => {
       const consensusSide = signal.consensus_side || signal.regime || 'neutral';
       const consensusCount = signal.consensus_count || 0;
       const exchanges = signal.exchanges_available || 0;
+      const executorEvent = latestExecutorEventBySymbol.get(signal.symbol);
+      const openPosition = positions.find((position) => position.symbol === signal.symbol);
       
       let stateLabel = 'Watching';
       let stateTone: 'positive' | 'negative' | 'neutral' = 'neutral';
+      let stateContext: string | undefined;
+      let consensusLabel = 'Mixed Consensus';
       
       if (consensusSide === 'bullish' && consensusCount >= 2) {
-        stateLabel = 'Ready Long';
-        stateTone = 'positive';
+        consensusLabel = 'Bullish Consensus';
       } else if (consensusSide === 'bearish' && consensusCount >= 2) {
-        stateLabel = 'Ready Short';
-        stateTone = 'negative';
+        consensusLabel = 'Bearish Consensus';
+      } else if (consensusSide === 'bullish') {
+        consensusLabel = 'Bullish Watch';
+      } else if (consensusSide === 'bearish') {
+        consensusLabel = 'Bearish Watch';
+      }
+
+      if (openPosition) {
+        stateLabel = `Open ${String(openPosition.side)}`;
+        stateTone = String(openPosition.side).toLowerCase() === 'long' ? 'positive' : 'negative';
+        stateContext = `${usd(openPosition.notional_usdt)} live`;
+      } else if (executorEvent?.status === 'paper_open') {
+        const action = String(executorEvent.action || '').toUpperCase();
+        stateLabel = action === 'ENTER_LONG' ? 'Enter Long' : action === 'ENTER_SHORT' ? 'Enter Short' : 'Opening';
+        stateTone = action === 'ENTER_LONG' ? 'positive' : action === 'ENTER_SHORT' ? 'negative' : 'neutral';
+        stateContext = 'Executor accepted';
+      } else if (executorEvent?.status === 'ignored_hold') {
+        stateLabel = 'Hold';
+        stateTone = 'neutral';
+        stateContext = 'Strategy blocked entry';
+      } else if (executorEvent?.status?.startsWith('blocked_')) {
+        stateLabel = 'Blocked';
+        stateTone = 'neutral';
+        stateContext = titleCase(executorEvent.status);
       }
       
       const bybitAligned = consensusSide !== 'neutral' && (signal.bybit_regime || 'neutral') === consensusSide;
@@ -504,40 +557,43 @@ export default function DashboardPage() {
         symbol: signal.symbol,
         regime: signal.regime || 'neutral',
         consensusSide,
+        consensusLabel,
         bybitRegime: signal.bybit_regime || 'neutral',
         consensusCount,
         exchangesAvailable: exchanges,
         trendScore: signal.trend_score || 0,
         stateLabel,
         stateTone,
+        stateContext,
         bybitAligned,
         hasDivergence,
       };
     }).sort((a: any, b: any) => {
-      const tonePriority: Record<string, number> = { positive: 0, negative: 0, neutral: 1 };
+      const tonePriority: Record<string, number> = { positive: 0, negative: 1, neutral: 2 };
       return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
              b.consensusCount - a.consensusCount ||
              Math.abs(b.trendScore) - Math.abs(a.trendScore);
     });
-  }, [data?.market_signals?.items]);
+  }, [data?.events?.items, data?.market_signals?.items, data?.positions?.items]);
 
   const flowContext = useMemo<FlowContext>(() => {
     const signalsObj = (data?.market_signals?.items as Record<string, any>) || {};
-    const leadToken = tokenDecisions[0];
-    const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
-
     const latestExecutorEvent = (data?.events?.items || []).find(
       (event) => event.event_type === 'executor_event_processed' && event.symbol
     );
+    const leadToken = latestExecutorEvent?.symbol
+      ? tokenDecisions.find((token) => token.symbol === latestExecutorEvent.symbol) || tokenDecisions[0]
+      : tokenDecisions[0];
+    const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
 
     const openPosition = (data?.positions?.items || [])[0];
     const lastClosedTrade = (data?.trades?.items || []).find((trade) => trade.status === 'closed');
 
     const strategyState = leadToken
-      ? `${leadToken.stateLabel} • ${leadToken.consensusSide}`
+      ? leadToken.stateLabel
       : 'scan idle';
     const strategyContext = leadSignal
-      ? `${leadSignal.consensus_count || 0}/${leadSignal.exchanges_available || 0} consensus`
+      ? leadToken?.stateContext || `${leadSignal.consensus_count || 0}/${leadSignal.exchanges_available || 0} consensus`
       : undefined;
 
     const executorSymbol =
@@ -760,13 +816,13 @@ export default function DashboardPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
-                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Ready</div>
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Actionable</div>
                       <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-emerald-300">
                         {tokenDecisions.filter((token) => token.stateTone === 'positive').length}
                       </div>
                     </div>
                     <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
-                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Watching</div>
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Hold</div>
                       <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-violet-300">
                         {tokenDecisions.filter((token) => token.stateTone === 'neutral').length}
                       </div>
@@ -799,7 +855,7 @@ export default function DashboardPage() {
                           <div>
                             <div className="text-lg font-semibold tracking-[-0.02em] text-slate-50">{token.symbol}</div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {token.consensusCount}/{token.exchangesAvailable} exchanges aligned
+                              {token.consensusLabel}
                             </div>
                           </div>
                           <Badge
@@ -815,6 +871,9 @@ export default function DashboardPage() {
                             <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Trend</div>
                             <div className={cn('mt-1 text-3xl font-semibold tracking-[-0.04em]', trendPositive ? 'text-slate-50' : 'text-red-300')}>
                               {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
+                            </div>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {token.stateContext || `${token.consensusCount}/${token.exchangesAvailable} exchanges aligned`}
                             </div>
                           </div>
                           <Badge
