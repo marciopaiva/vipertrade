@@ -21,7 +21,7 @@ CREATE TABLE trades (
     order_link_id TEXT UNIQUE,   -- Nosso ID para idempotência
     
     -- Símbolo e direção
-    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'XLMUSDT')),
+    symbol TEXT NOT NULL,
     side TEXT NOT NULL CHECK (side IN ('Long', 'Short')),
     
     -- Detalhes da posição
@@ -46,7 +46,7 @@ CREATE TABLE trades (
     
     -- Status e motivo de fechamento
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'liquidated', 'cancelled', 'rejected')),
-    close_reason TEXT CHECK (close_reason IN ('take_profit', 'stop_loss', 'trailing_stop', 'time_exit', 'manual', 'liquidation', 'circuit_breaker', 'error')),
+    close_reason TEXT CHECK (close_reason IN ('take_profit', 'stop_loss', 'trailing_stop', 'time_exit', 'manual', 'liquidation', 'circuit_breaker', 'thesis_invalidated', 'error')),
     
     -- Tupã Engine Audit (CRÍTICO para compliance)
     pipeline_version TEXT NOT NULL DEFAULT '0.8.0-rc',
@@ -90,7 +90,7 @@ CREATE INDEX idx_trades_profile ON trades(trading_profile);
 
 CREATE TABLE position_snapshots (
     snapshot_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'XLMUSDT')),
+    symbol TEXT NOT NULL,
     
     -- Dados crus da Bybit (JSON flexível para evolução da API)
     bybit_data JSONB NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE bybit_fills (
     bybit_execution_id TEXT NOT NULL UNIQUE,
     bybit_order_id TEXT NOT NULL,
     order_link_id TEXT,
-    symbol TEXT NOT NULL CHECK (symbol IN ('DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'XLMUSDT')),
+    symbol TEXT NOT NULL,
     side TEXT,
     exec_qty NUMERIC NOT NULL CHECK (exec_qty > 0),
     exec_price NUMERIC,

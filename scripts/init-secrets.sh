@@ -146,7 +146,7 @@ echo ""
 echo -e "${BLUE}📊 Configuração de Trading:${NC}"
 echo "   Mode: ${TRADING_MODE:-paper}"
 echo "   Profile: ${TRADING_PROFILE:-MEDIUM}"
-echo "   Pairs: ${TRADING_PAIRS:-DOGEUSDT,XRPUSDT,TRXUSDT,XLMUSDT}"
+echo "   Pairs: ${TRADING_PAIRS:-from config/trading/pairs.yaml}"
 echo "   Smart Copy: ${SMART_COPY_ENABLED:-true}"
 echo "   Trailing Stop: ${TRAILING_STOP_ENABLED:-true}"
 

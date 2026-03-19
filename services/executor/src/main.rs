@@ -119,7 +119,7 @@ impl ExecutorConfig {
         let live_orders_enabled = trading_mode.executes_exchange_orders();
         let live_symbol_allowlist = parse_allowlist(
             std::env::var("EXECUTOR_LIVE_SYMBOL_ALLOWLIST")
-                .unwrap_or_else(|_| "DOGEUSDT".to_string())
+                .unwrap_or_default()
                 .as_str(),
         );
         let reconcile_fix = std::env::var("EXECUTOR_RECONCILE_FIX")

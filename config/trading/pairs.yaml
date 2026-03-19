@@ -124,26 +124,18 @@ global:
     enabled: true
     min_position_usdt: 5      # Abaixo não copia bem
     max_position_usdt: 30     # Acima exclui followers pequenos
-    target_position_usdt: 10-20  # Sweet spot
-    max_position_change_pct: 0.30  # Máx 30% variação entre trades
   
   # Trailing Stop Dinâmico (global defaults)
   trailing_stop:
     enabled: true
-    check_interval_ms: 500
-    max_updates_per_min: 10
-    min_move_threshold_pct: 0.002  # Só atualiza se mover >= 0.2%
   
   # Risk limits globais
   risk:
     max_daily_loss_pct: 0.03
     max_consecutive_losses: 3
-    max_open_positions: 4
-    max_total_exposure_pct: 0.50
   
   # Entry timing filters
   entry_filters:
-    avoid_hours_utc: ["00:00-02:00", "22:00-23:59"]  # Rollover funding
     min_volume_24h_usdt: 30000000  # $30M mínimo
     max_spread_pct: 0.001  # 0.1% máximo
     max_atr_pct: 0.05  # 5% volatilidade máxima
@@ -180,21 +172,11 @@ DOGEUSDT:
       risk:
         max_position_wallet_pct: 0.08
   
-  # Bybit-specific settings
-  bybit:
-    price_precision: 5
-    qty_precision: 0
-    tick_size: 0.00001
-    step_size: 1
-    min_order_value_usdt: 5.00
-    max_order_value_usdt: 50.00
-  
   # Risk parameters (mais conservador devido à volatilidade)
   risk:
     stop_loss_pct: 0.0025      # 0.25% para teste scalp
     take_profit_pct: 0.003      # 0.30% para teste scalp
     max_position_usdt: 15.00   # Máx 15% do capital
-    atr_period: 14
     atr_multiplier: 0.5        # Reduz sizing em alta volatilidade
   
   # Trailing Stop Dinâmico (específico para DOGE)
@@ -229,12 +211,6 @@ DOGEUSDT:
             trail_pct: 0.035
         move_to_break_even_at: 0.03
   
-  # Liquidity filters
-  liquidity:
-    min_24h_volume_usdt: 50000000  # $50M mínimo
-    max_spread_pct: 0.001          # 0.1% spread máximo
-    avoid_during_low_liquidity: true
-
   entry_filters:
     min_trend_score_long: 0.38
     min_trend_score_short: 0.35
@@ -246,11 +222,6 @@ DOGEUSDT:
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0055
   
-  # Smart Copy specific
-  smart_copy:
-    recommended_for_beginners: false
-    warning: "High volatility - use Conservative profile"
-
 # ═══════════════════════════════════════════════════════════
 # XRPUSDT - Large Cap Alt (Média-Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
@@ -270,19 +241,10 @@ XRPUSDT:
       risk:
         max_position_wallet_pct: 0.12
   
-  bybit:
-    price_precision: 4
-    qty_precision: 1
-    tick_size: 0.0001
-    step_size: 1
-    min_order_value_usdt: 5.00
-    max_order_value_usdt: 50.00
-  
   risk:
     stop_loss_pct: 0.0025
     take_profit_pct: 0.003
     max_position_usdt: 20.00
-    atr_period: 14
     atr_multiplier: 0.6
   
   trailing_stop:
@@ -316,11 +278,6 @@ XRPUSDT:
             trail_pct: 0.03
         move_to_break_even_at: 0.025
   
-  liquidity:
-    min_24h_volume_usdt: 100000000
-    max_spread_pct: 0.001
-    avoid_during_low_liquidity: true
-
   entry_filters:
     allow_long: true
     allow_short: true
@@ -333,10 +290,6 @@ XRPUSDT:
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0045
   
-  smart_copy:
-    recommended_for_beginners: true
-    warning: null
-
 # ═══════════════════════════════════════════════════════════
 # ADAUSDT - Large Cap Alt (Média-Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
@@ -356,19 +309,10 @@ ADAUSDT:
       risk:
         max_position_wallet_pct: 0.12
   
-  bybit:
-    price_precision: 4
-    qty_precision: 0
-    tick_size: 0.0001
-    step_size: 1
-    min_order_value_usdt: 5.00
-    max_order_value_usdt: 50.00
-  
   risk:
     stop_loss_pct: 0.0025
     take_profit_pct: 0.003
     max_position_usdt: 20.00
-    atr_period: 14
     atr_multiplier: 0.65
   
   trailing_stop:
@@ -402,11 +346,6 @@ ADAUSDT:
             trail_pct: 0.030
         move_to_break_even_at: 0.025
   
-  liquidity:
-    min_24h_volume_usdt: 50000000
-    max_spread_pct: 0.001
-    avoid_during_low_liquidity: true
-
   entry_filters:
     min_trend_score_long: 0.28
     min_trend_score_short: 0.24
@@ -418,10 +357,6 @@ ADAUSDT:
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0035
   
-  smart_copy:
-    recommended_for_beginners: true
-    warning: null
-
 # ═══════════════════════════════════════════════════════════
 # XLMUSDT - Large Cap Alt (Média-Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
@@ -445,19 +380,10 @@ XLMUSDT:
       risk:
         max_position_wallet_pct: 0.10
   
-  bybit:
-    price_precision: 5
-    qty_precision: 0
-    tick_size: 0.00001
-    step_size: 1
-    min_order_value_usdt: 5.00
-    max_order_value_usdt: 50.00
-  
   risk:
     stop_loss_pct: 0.0025
     take_profit_pct: 0.003
     max_position_usdt: 20.00
-    atr_period: 14
     atr_multiplier: 0.6
   
   trailing_stop:
@@ -491,11 +417,6 @@ XLMUSDT:
             trail_pct: 0.03
         move_to_break_even_at: 0.025
   
-  liquidity:
-    min_24h_volume_usdt: 20000000
-    max_spread_pct: 0.001
-    avoid_during_low_liquidity: true
-
   entry_filters:
     min_trend_score_long: 0.32
     min_trend_score_short: 0.28
@@ -506,10 +427,6 @@ XLMUSDT:
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0038
   
-  smart_copy:
-    recommended_for_beginners: true
-    warning: null
-
 # ═══════════════════════════════════════════════════════════
 # RISK PROFILES (Overrides globais por perfil)
 # ═══════════════════════════════════════════════════════════
@@ -519,25 +436,13 @@ profiles:
     risk_per_trade_pct: 0.75
     max_leverage: 2
     max_daily_loss_pct: 0.02
-    max_open_positions: 1
-    max_total_exposure_pct: 0.30
-    trailing_stop_aggressiveness: "high"  # Aperta rápido
-    position_sizing_multiplier: 0.6       # Reduz sizing base
   
   MEDIUM:
     risk_per_trade_pct: 1.25
     max_leverage: 2
     max_daily_loss_pct: 0.03
-    max_open_positions: 2
-    max_total_exposure_pct: 0.50
-    trailing_stop_aggressiveness: "medium"
-    position_sizing_multiplier: 1.0
   
   AGGRESSIVE:
     risk_per_trade_pct: 2.00
     max_leverage: 3
     max_daily_loss_pct: 0.05
-    max_open_positions: 3
-    max_total_exposure_pct: 0.70
-    trailing_stop_aggressiveness: "low"   # Dá mais espaço
-    position_sizing_multiplier: 1.4       # Aumenta sizing base

@@ -1,18 +1,19 @@
 use hmac::{Hmac, Mac};
 use redis::AsyncCommands;
 use serde_json::{json, Value};
+use serde_yaml::Value as YamlValue;
 use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 type HmacSha256 = Hmac<Sha256>;
-const RECON_SYMBOLS: [&str; 4] = ["DOGEUSDT", "XRPUSDT", "ADAUSDT", "XLMUSDT"];
 
 #[derive(Debug, Clone)]
 struct MonitorConfig {
@@ -29,6 +30,7 @@ struct MonitorConfig {
     bybit_api_key: String,
     bybit_api_secret: String,
     bybit_recv_window: String,
+    recon_symbols: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -97,6 +99,7 @@ impl MonitorConfig {
         let (bybit_api_key, bybit_api_secret) = resolve_bybit_credentials();
         let bybit_recv_window =
             std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
+        let recon_symbols = parse_trading_pairs();
 
         Self {
             health_check_interval_sec,
@@ -112,6 +115,7 @@ impl MonitorConfig {
             bybit_api_key,
             bybit_api_secret,
             bybit_recv_window,
+            recon_symbols,
         }
     }
 
@@ -144,6 +148,68 @@ fn read_non_empty_env(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+fn configured_pairs_path() -> String {
+    std::env::var("STRATEGY_CONFIG")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "/app/config/pairs.yaml".to_string())
+}
+
+fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
+    let raw = fs::read_to_string(path).ok()?;
+    let yaml: YamlValue = serde_yaml::from_str(&raw).ok()?;
+    let obj = yaml.as_mapping()?;
+
+    let mut pairs = Vec::new();
+    for (key, value) in obj {
+        let Some(symbol) = key.as_str() else {
+            continue;
+        };
+        if symbol.eq_ignore_ascii_case("global") || symbol.eq_ignore_ascii_case("profiles") {
+            continue;
+        }
+
+        let enabled = value
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::from("enabled")))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if enabled {
+            pairs.push(symbol.to_uppercase());
+        }
+    }
+
+    if pairs.is_empty() {
+        None
+    } else {
+        pairs.sort();
+        Some(pairs)
+    }
+}
+
+fn parse_trading_pairs() -> Vec<String> {
+    if let Ok(raw) = std::env::var("TRADING_PAIRS") {
+        let pairs: Vec<String> = raw
+            .split(',')
+            .map(|s| s.trim().to_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !pairs.is_empty() {
+            return pairs;
+        }
+    }
+
+    let config_path = configured_pairs_path();
+    if let Some(pairs) = parse_trading_pairs_from_config(&config_path) {
+        return pairs;
+    }
+
+    panic!(
+        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
+        config_path
+    );
 }
 
 fn resolve_bybit_credentials() -> (String, String) {
@@ -560,7 +626,7 @@ async fn run_reconciliation_cycle(
     cfg: &MonitorConfig,
     alert_last_sent: &mut HashMap<String, i64>,
 ) {
-    for symbol in RECON_SYMBOLS {
+    for symbol in &cfg.recon_symbols {
         let local_notional_usdt = match fetch_local_notional_usdt(pool, symbol).await {
             Ok(v) => v,
             Err(err) => {
@@ -644,12 +710,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cfg = MonitorConfig::from_env();
     println!(
-        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT cooldown={}s bybit_env={}",
+        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT cooldown={}s bybit_env={} symbols={}",
         cfg.health_check_interval_sec,
         cfg.reconciliation_interval_sec,
         cfg.max_position_drift_notional_usdt,
         cfg.alert_cooldown_sec,
-        cfg.bybit_env
+        cfg.bybit_env,
+        cfg.recon_symbols.join(",")
     );
 
     let pool = if let Some(database_url) = resolve_database_url() {
