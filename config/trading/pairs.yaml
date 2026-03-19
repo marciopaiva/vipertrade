@@ -34,9 +34,14 @@ global:
         move_to_break_even_at: 0.005
       min_hold_seconds: 180
       min_trend_score_long: 0.28
-      min_trend_score_short: 0.28
+      min_trend_score_short: 0.34
       min_signal_confirmation_ticks_long: 3
-      min_signal_confirmation_ticks_short: 5
+      min_signal_confirmation_ticks_short: 6
+      btc_macro_min_trend_score_long: 0.05
+      btc_macro_min_trend_score_short: 0.10
+      btc_macro_min_consensus_count_long: 2
+      btc_macro_min_consensus_count_short: 3
+      btc_macro_neutral_penalty: 0.05
       min_volume_ratio_long: 0.25
       min_volume_ratio_short: 0.25
       rsi_long_min: 52
@@ -107,9 +112,14 @@ global:
         move_to_break_even_at: 0.005
       min_hold_seconds: 180
       min_trend_score_long: 0.28
-      min_trend_score_short: 0.28
+      min_trend_score_short: 0.34
       min_signal_confirmation_ticks_long: 3
-      min_signal_confirmation_ticks_short: 5
+      min_signal_confirmation_ticks_short: 6
+      btc_macro_min_trend_score_long: 0.05
+      btc_macro_min_trend_score_short: 0.10
+      btc_macro_min_consensus_count_long: 2
+      btc_macro_min_consensus_count_short: 3
+      btc_macro_neutral_penalty: 0.05
       min_volume_ratio_long: 0.25
       min_volume_ratio_short: 0.25
       rsi_long_min: 52
@@ -149,6 +159,11 @@ global:
     rsi_long_max: 80
     rsi_short_min: 20
     rsi_short_max: 50
+    btc_macro_min_trend_score_long: 0.05
+    btc_macro_min_trend_score_short: 0.10
+    btc_macro_min_consensus_count_long: 2
+    btc_macro_min_consensus_count_short: 3
+    btc_macro_neutral_penalty: 0.05
     stop_loss_cooldown_minutes: 3
     stop_loss_cooldown_minutes_short: 5
     min_signal_confirmation_ticks_short: 4
@@ -428,10 +443,10 @@ XLMUSDT:
     max_atr_pct: 0.0038
 
 # ═══════════════════════════════════════════════════════════
-# SOLUSDT - Large Cap Alt (Alta Volatilidade)
+# SUIUSDT - Large Cap Alt (Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
 
-SOLUSDT:
+SUIUSDT:
   enabled: true
   category: "large_cap_alt"
   volatility_profile: "high"
@@ -447,10 +462,10 @@ SOLUSDT:
         max_position_wallet_pct: 0.10
 
   risk:
-    stop_loss_pct: 0.0028
+    stop_loss_pct: 0.0029
     take_profit_pct: 0.003
-    max_position_usdt: 20.00
-    atr_multiplier: 0.70
+    max_position_usdt: 18.00
+    atr_multiplier: 0.72
 
   trailing_stop:
     enabled: true
@@ -465,12 +480,12 @@ SOLUSDT:
             trail_pct: 0.018
         move_to_break_even_at: 0.018
       MEDIUM:
-        activate_after_profit_pct: 0.0028
-        initial_trail_pct: 0.0016
+        activate_after_profit_pct: 0.0030
+        initial_trail_pct: 0.0017
         ratchet_levels:
-          - at_profit_pct: 0.0048
+          - at_profit_pct: 0.0050
             trail_pct: 0.0022
-          - at_profit_pct: 0.0075
+          - at_profit_pct: 0.0080
             trail_pct: 0.0032
         move_to_break_even_at: 0.0032
       AGGRESSIVE:
@@ -484,14 +499,14 @@ SOLUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.30
-    min_trend_score_short: 0.32
-    min_trend_score: 0.30
-    min_signal_confirmation_ticks_long: 3
-    min_signal_confirmation_ticks_short: 4
-    min_signal_confirmation_ticks: 3
+    min_trend_score_long: 0.34
+    min_trend_score_short: 0.36
+    min_trend_score: 0.34
+    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_short: 5
+    min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0052
+    max_atr_pct: 0.0050
 
 # ═══════════════════════════════════════════════════════════
 # LINKUSDT - Large Cap Alt (Média-Alta Volatilidade)
@@ -560,13 +575,13 @@ LINKUSDT:
     max_atr_pct: 0.0048
 
 # ═══════════════════════════════════════════════════════════
-# AVAXUSDT - Large Cap Alt (Alta Volatilidade)
+# NEARUSDT - Large Cap Alt (Média-Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
 
-AVAXUSDT:
+NEARUSDT:
   enabled: true
   category: "large_cap_alt"
-  volatility_profile: "high"
+  volatility_profile: "medium-high"
   mode_profiles:
     PAPER:
       risk:
@@ -579,10 +594,10 @@ AVAXUSDT:
         max_position_wallet_pct: 0.08
 
   risk:
-    stop_loss_pct: 0.0030
+    stop_loss_pct: 0.0027
     take_profit_pct: 0.003
     max_position_usdt: 18.00
-    atr_multiplier: 0.72
+    atr_multiplier: 0.66
 
   trailing_stop:
     enabled: true
@@ -597,14 +612,14 @@ AVAXUSDT:
             trail_pct: 0.018
         move_to_break_even_at: 0.018
       MEDIUM:
-        activate_after_profit_pct: 0.0030
-        initial_trail_pct: 0.0017
+        activate_after_profit_pct: 0.0027
+        initial_trail_pct: 0.0016
         ratchet_levels:
-          - at_profit_pct: 0.0050
-            trail_pct: 0.0022
-          - at_profit_pct: 0.0080
-            trail_pct: 0.0032
-        move_to_break_even_at: 0.0032
+          - at_profit_pct: 0.0048
+            trail_pct: 0.0021
+          - at_profit_pct: 0.0075
+            trail_pct: 0.0030
+        move_to_break_even_at: 0.0030
       AGGRESSIVE:
         activate_after_profit_pct: 0.020
         initial_trail_pct: 0.010
@@ -616,14 +631,14 @@ AVAXUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.32
+    min_trend_score_long: 0.30
     min_trend_score_short: 0.34
-    min_trend_score: 0.32
-    min_signal_confirmation_ticks_long: 3
-    min_signal_confirmation_ticks_short: 4
-    min_signal_confirmation_ticks: 3
+    min_trend_score: 0.30
+    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_short: 5
+    min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0058
+    max_atr_pct: 0.0048
 
 # ═══════════════════════════════════════════════════════════
 # LTCUSDT - Large Cap Alt (Média Volatilidade)

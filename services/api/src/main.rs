@@ -232,6 +232,8 @@ struct TradeItem {
     entry_price: f64,
     exit_price: Option<f64>,
     pnl: Option<f64>,
+    close_reason: Option<String>,
+    duration_seconds: Option<i64>,
     opened_at: DateTime<Utc>,
     closed_at: Option<DateTime<Utc>>,
 }
@@ -1245,6 +1247,8 @@ async fn build_paper_trades_response(
             f64,
             Option<f64>,
             Option<f64>,
+            Option<String>,
+            Option<i64>,
             DateTime<Utc>,
             Option<DateTime<Utc>>,
         ),
@@ -1258,6 +1262,11 @@ async fn build_paper_trades_response(
              COALESCE(entry_price::double precision, 0),
              exit_price::double precision,
              pnl::double precision,
+             close_reason,
+             CASE
+               WHEN closed_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM (closed_at - opened_at))::bigint)
+               ELSE NULL
+             END AS duration_seconds,
              opened_at,
              closed_at
          FROM trades
@@ -1283,6 +1292,8 @@ async fn build_paper_trades_response(
                         entry_price,
                         exit_price,
                         pnl,
+                        close_reason,
+                        duration_seconds,
                         opened_at,
                         closed_at,
                     )| TradeItem {
@@ -1294,6 +1305,8 @@ async fn build_paper_trades_response(
                         entry_price,
                         exit_price,
                         pnl,
+                        close_reason,
+                        duration_seconds,
                         opened_at,
                         closed_at,
                     },
@@ -2646,6 +2659,8 @@ fn build_trade_item_from_closed_pnl(item: &Value) -> Option<TradeItem> {
         entry_price,
         exit_price,
         pnl,
+        close_reason: None,
+        duration_seconds: Some((closed_at - opened_at).num_seconds().max(0)),
         opened_at,
         closed_at: Some(closed_at),
     })

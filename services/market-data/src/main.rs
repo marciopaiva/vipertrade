@@ -124,6 +124,15 @@ struct InvalidSignalDrop {
     timestamp: String,
 }
 
+#[derive(Debug, Clone)]
+struct ConsensusLatchState {
+    stable_side: String,
+    pending_side: String,
+    pending_count: u8,
+}
+
+const CONSENSUS_SIDE_CONFIRMATION_CYCLES: u8 = 2;
+
 fn configured_pairs_path() -> String {
     std::env::var("STRATEGY_CONFIG")
         .ok()
@@ -702,12 +711,18 @@ fn build_exchange_signal(symbol: &str, snapshot: RawExchangeSnapshot) -> Result<
         return Err(format!("{} {} aligned candles empty", snapshot.source, symbol));
     }
 
+    let last_closed_price = snapshot
+        .candles
+        .last()
+        .map(|c| c.close)
+        .unwrap_or(0.0)
+        .max(0.0);
     let current_price = snapshot.current_price.max(0.0);
     let atr_14 = compute_atr14(&snapshot.candles);
     let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
         compute_indicator_bundle_complete(snapshot.source, symbol, &snapshot.candles)?;
     let trend_score = composite_trend_score(
-        current_price,
+        last_closed_price,
         ema_fast,
         ema_slow,
         rsi_14,
@@ -1313,6 +1328,41 @@ fn apply_btc_context(signal: &mut MarketSignal, btc_signal: &MarketSignal) {
     signal.btc_volume_ratio = btc_signal.consensus_volume_ratio;
 }
 
+fn stabilize_consensus_side(
+    signal: &mut MarketSignal,
+    state: &mut HashMap<String, ConsensusLatchState>,
+) {
+    let symbol = signal.symbol.clone();
+    let observed_side = signal.consensus_side.clone();
+
+    let entry = state.entry(symbol).or_insert_with(|| ConsensusLatchState {
+        stable_side: observed_side.clone(),
+        pending_side: observed_side.clone(),
+        pending_count: 0,
+    });
+
+    if observed_side == entry.stable_side {
+        entry.pending_side = observed_side.clone();
+        entry.pending_count = 0;
+    } else {
+        if observed_side == entry.pending_side {
+            entry.pending_count = entry.pending_count.saturating_add(1);
+        } else {
+            entry.pending_side = observed_side.clone();
+            entry.pending_count = 1;
+        }
+
+        if entry.pending_count >= CONSENSUS_SIDE_CONFIRMATION_CYCLES {
+            entry.stable_side = observed_side.clone();
+            entry.pending_side = observed_side.clone();
+            entry.pending_count = 0;
+        }
+    }
+
+    signal.consensus_side = entry.stable_side.clone();
+    signal.regime = entry.stable_side.clone();
+}
+
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -1435,6 +1485,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(20)
         .max(1);
+    let mut consensus_latch = HashMap::<String, ConsensusLatchState>::new();
     println!(
         "Market-data running in BYBIT_ENV={} base_url={} analytics_scores_url={} with pairs={}",
         bybit_env,
@@ -1458,7 +1509,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             fetch_analytics_weights(&http, &analytics_scores_url, analytics_min_evaluated).await;
 
         let btc_context = match fetch_market_signal(&http, &base_url, "BTCUSDT", &weights).await {
-            Ok(signal) => signal,
+            Ok(mut signal) => {
+                stabilize_consensus_side(&mut signal, &mut consensus_latch);
+                signal
+            }
             Err(err) => {
                 latest_signals.write().await.clear();
                 eprintln!(
@@ -1482,6 +1536,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         for symbol in &symbols {
             match fetch_market_signal(&http, &base_url, symbol, &weights).await {
                 Ok(mut signal) => {
+                    stabilize_consensus_side(&mut signal, &mut consensus_latch);
                     apply_btc_context(&mut signal, &btc_context);
                     if let Err(err) = signal.validate() {
                         invalid_signal_count.fetch_add(1, Ordering::Relaxed);
