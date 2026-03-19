@@ -117,6 +117,8 @@ interface DashboardData {
   services: Array<{ name: string; ok: boolean; latency_ms: number }>;
   events?: { items?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string; data?: any }> };
   market_signals?: { items?: any[] | Record<string, any> };
+  partial?: boolean;
+  warnings?: string[];
 }
 
 // Helper functions
@@ -337,6 +339,16 @@ function ClosedTradesTable({ trades }: { trades: Array<{
           </div>
         )}
 
+        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+          <div>Asset</div>
+          <div>Side</div>
+          <div className="text-right">PnL</div>
+          <div>Entry</div>
+          <div>Exit</div>
+          <div>Closed</div>
+          <div>Reason</div>
+        </div>
+
         {/* Trades list - compact */}
         <div className="space-y-2">
           {paginatedTrades.map(trade => {
@@ -346,7 +358,7 @@ function ClosedTradesTable({ trades }: { trades: Array<{
             const durationLabel = trade.duration_seconds
               ? `${Math.max(1, Math.round(trade.duration_seconds / 60))}m`
               : '-';
-            const reasonLabel = titleCase(trade.close_reason || 'closed');
+            const reasonLabel = titleCase(trade.close_reason || 'unknown');
             const closedAt = trade.closed_at ? new Date(trade.closed_at) : null;
             const closedDateLabel = closedAt
               ? closedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -360,23 +372,21 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                 key={trade.trade_id}
                 className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3"
               >
-                <div className="flex items-center justify-between gap-4">
-                  {/* Left: Symbol + Side + Meta */}
-                  <div className="flex items-center gap-2 w-[240px] shrink-0">
-                    <div>
-                      <div className="text-sm font-bold text-slate-200">{trade.symbol}</div>
-                      <div className="mt-1 text-[11px] text-slate-500">{reasonLabel}</div>
-                    </div>
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] xl:items-center">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-slate-200">{trade.symbol}</div>
+                  </div>
+
+                  <div>
                     <Badge
                       style={{ backgroundColor: sideColor + '22', color: sideColor, borderColor: sideColor + '55' }}
-                      className="text-xs px-1.5 py-0.5 h-5"
+                      className="h-5 min-w-[58px] justify-center px-1.5 py-0.5 text-[10px]"
                     >
                       {trade.side.toUpperCase()}
                     </Badge>
                   </div>
 
-                  {/* Center: PnL */}
-                  <div className="text-right min-w-[100px]">
+                  <div className="text-right xl:pr-2">
                     <div className="text-sm font-bold" style={{ color: pnlColor }}>
                       {pnl ? `$${pnl.toFixed(2)}` : '-'}
                     </div>
@@ -385,12 +395,10 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                     </div>
                   </div>
 
-                  {/* Right: Entry/Exit */}
-                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[220px]">
+                  <div className="grid grid-cols-2 gap-2 text-xs md:contents">
                     <div>
-                      <div className="text-slate-500">Entry</div>
                       <Badge
-                        className="h-6 px-2 text-[11px] font-medium"
+                        className="h-6 w-full justify-center px-2 text-[11px] font-medium"
                         style={{
                           backgroundColor: '#0f172acc',
                           color: '#e2e8f0',
@@ -401,10 +409,9 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                       </Badge>
                     </div>
                     <div>
-                      <div className="text-slate-500">Exit</div>
                       {trade.exit_price ? (
                         <Badge
-                          className="h-6 px-2 text-[11px] font-medium"
+                          className="h-6 w-full justify-center px-2 text-[11px] font-medium"
                           style={{
                             backgroundColor: '#0f172acc',
                             color: '#e2e8f0',
@@ -414,28 +421,24 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                           ${trade.exit_price.toFixed(6)}
                         </Badge>
                       ) : (
-                        <div className="text-slate-300">-</div>
+                        <div className="flex h-6 items-center justify-center text-slate-300">-</div>
                       )}
                     </div>
                   </div>
 
-                  {/* Far Right: Closed + Summary */}
-                  <div className="hidden lg:flex items-center justify-end gap-6 min-w-[300px]">
-                    <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Duration</div>
-                      <div className="text-xs mt-1 text-slate-200">{durationLabel}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Closed</div>
-                      <div className="text-xs mt-1 text-slate-200">{closedDateLabel}</div>
-                      <div className="text-[11px] text-slate-400">{closedTimeLabel}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Result</div>
-                      <div className="text-xs mt-1" style={{ color: pnlColor }}>
-                        {pnl >= 0 ? 'Winner' : 'Loser'}
-                      </div>
-                    </div>
+                  <div>
+                    <div className="text-xs text-slate-200">{closedDateLabel}</div>
+                    <div className="text-[11px] text-slate-400">{closedTimeLabel}</div>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="text-slate-200">{reasonLabel}</span>
+                    {durationLabel !== '-' && (
+                      <>
+                        <span className="text-slate-600">·</span>
+                        <span className="text-slate-400">{durationLabel}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -481,6 +484,7 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastStableMarketSignals, setLastStableMarketSignals] = useState<Record<string, any>>({});
 
   // Fetch from Next.js API route directly (has market_signals)
   const fetchDashboard = useCallback(async () => {
@@ -521,17 +525,39 @@ export default function DashboardPage() {
       services: dashboardData.services || [],
       events: dashboardData.events || { items: [] },
       market_signals: dashboardData.market_signals || { items: {} },
+      partial: Boolean(dashboardData.partial),
+      warnings: Array.isArray(dashboardData.warnings) ? dashboardData.warnings : [],
     };
   }, [dashboardData, refreshKey]);
+
+  const liveMarketSignals = useMemo<Record<string, any>>(() => {
+    const items = data?.market_signals?.items;
+    if (!items) return {};
+    if (Array.isArray(items)) {
+      return Object.fromEntries(items.map((signal: any) => [signal.symbol, signal]));
+    }
+    return items as Record<string, any>;
+  }, [data?.market_signals?.items]);
+
+  useEffect(() => {
+    if (Object.keys(liveMarketSignals).length > 0) {
+      setLastStableMarketSignals(liveMarketSignals);
+    }
+  }, [liveMarketSignals]);
+
+  const effectiveMarketSignals = useMemo<Record<string, any>>(() => {
+    if (Object.keys(liveMarketSignals).length > 0) return liveMarketSignals;
+    return lastStableMarketSignals;
+  }, [lastStableMarketSignals, liveMarketSignals]);
+
+  const decisionMatrixStale = Object.keys(liveMarketSignals).length === 0 && Object.keys(lastStableMarketSignals).length > 0;
   
   // Build Decision Matrix from market signals
   const tokenDecisions = useMemo<TokenDecision[]>(() => {
-    const marketSignals = data?.market_signals;
-    if (!marketSignals) return [];
-    
-    // items can be array or Record<string, Signal>
-    const signalsObj = marketSignals.items as Record<string, any> || {};
+    const signalsObj = effectiveMarketSignals;
     const signalsArray = Object.values(signalsObj);
+    if (signalsArray.length === 0) return [];
+
     const events = data?.events?.items || [];
     const positions = data?.positions?.items || [];
 
@@ -611,10 +637,10 @@ export default function DashboardPage() {
              b.consensusCount - a.consensusCount ||
              Math.abs(b.trendScore) - Math.abs(a.trendScore);
     });
-  }, [data?.events?.items, data?.market_signals?.items, data?.positions?.items]);
+  }, [data?.events?.items, data?.positions?.items, effectiveMarketSignals]);
 
   const flowContext = useMemo<FlowContext>(() => {
-    const signalsObj = (data?.market_signals?.items as Record<string, any>) || {};
+    const signalsObj = effectiveMarketSignals;
     const latestExecutorEvent = (data?.events?.items || []).find(
       (event) => event.event_type === 'executor_event_processed' && event.symbol
     );
@@ -658,7 +684,7 @@ export default function DashboardPage() {
       executorAction,
       executorContext,
     };
-  }, [data?.events?.items, data?.market_signals?.items, data?.positions?.items, data?.trades?.items, tokenDecisions]);
+  }, [data?.events?.items, data?.positions?.items, data?.trades?.items, effectiveMarketSignals, tokenDecisions]);
 
   if (loading && !dashboardData) {
     return (
@@ -823,11 +849,20 @@ export default function DashboardPage() {
         {/* Decision Matrix */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-slate-200">Decision Matrix</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-lg text-slate-200">Decision Matrix</CardTitle>
+              {decisionMatrixStale && (
+                <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-300">
+                  Refreshing signals
+                </Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             {tokenDecisions.length === 0 ? (
-              <div className="text-center text-slate-500 py-8">No decision data available</div>
+              <div className="text-center text-slate-500 py-8">
+                {data?.partial ? 'Decision feed is temporarily unavailable' : 'No decision data available'}
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.3fr_1fr_1fr]">

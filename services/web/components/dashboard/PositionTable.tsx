@@ -197,6 +197,17 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
         <CardTitle className="text-lg text-slate-200">Open Positions ({positions.length})</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
+        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_105px_105px_105px_105px_110px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+          <div>Asset</div>
+          <div>Side</div>
+          <div className="text-right">PnL</div>
+          <div>Entry</div>
+          <div>Mark</div>
+          <div>Trail</div>
+          <div>Stop</div>
+          <div>State</div>
+          <div>Context</div>
+        </div>
         <div className="space-y-2">
           {enrichedPositions.map((position) => {
             const pnlColor = (position.unrealizedPnl ?? 0) >= 0 ? '#10b981' : '#ef4444';
@@ -207,35 +218,21 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                 key={position.trade_id}
                 className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3"
               >
-                <div className="flex items-center justify-between gap-4">
-                  {/* Left: Symbol + Side + Qty */}
-                  <div className="flex items-center gap-2 w-[220px] shrink-0">
-                    <div>
-                      <div className="text-sm font-bold text-slate-200">{position.symbol}</div>
-                      <div className="text-xs text-slate-500">Qty: {position.quantity.toLocaleString()}</div>
-                      <div className="mt-1">
-                        <Badge
-                          className="h-5 px-2 text-[10px] font-medium"
-                          style={{
-                            backgroundColor: '#0f172acc',
-                            color: '#cbd5e1',
-                            borderColor: '#334155',
-                          }}
-                        >
-                          Age {position.openTimeLabel}
-                        </Badge>
-                      </div>
-                    </div>
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_105px_105px_105px_105px_110px_1fr] xl:items-center">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-slate-200">{position.symbol}</div>
+                  </div>
+
+                  <div>
                     <Badge
                       style={{ backgroundColor: sideColor + '22', color: sideColor, borderColor: sideColor + '55' }}
-                      className="text-xs px-1.5 py-0.5 h-5"
+                      className="h-5 min-w-[58px] justify-center px-1.5 py-0.5 text-[10px]"
                     >
                       {position.side.toUpperCase()}
                     </Badge>
                   </div>
 
-                  {/* Center: PnL */}
-                  <div className="text-right min-w-[100px]">
+                  <div className="text-right xl:pr-2">
                     <div className="text-sm font-bold" style={{ color: pnlColor }}>
                       {position.unrealizedPnl !== null ? `$${position.unrealizedPnl.toFixed(2)}` : '-'}
                     </div>
@@ -244,117 +241,87 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                     </div>
                   </div>
 
-                  {/* Right: Entry/Mark/Trailing/Stop */}
-                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[440px]">
-                    <div>
-                      <div className="text-slate-500">Entry</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4 xl:contents">
+                    <Badge
+                      className="h-6 w-full justify-center px-2 text-[11px] font-medium"
+                      style={{
+                        backgroundColor: '#0f172acc',
+                        color: '#e2e8f0',
+                        borderColor: '#334155',
+                      }}
+                    >
+                      ${position.entryPrice.toFixed(6)}
+                    </Badge>
+                    {position.markPrice ? (
                       <Badge
-                        className="h-6 px-2 text-[11px] font-medium"
+                        className="h-6 w-full justify-center px-2 text-[11px] font-medium"
                         style={{
                           backgroundColor: '#0f172acc',
                           color: '#e2e8f0',
                           borderColor: '#334155',
                         }}
                       >
-                        ${position.entryPrice.toFixed(6)}
+                        ${position.markPrice.toFixed(6)}
                       </Badge>
-                    </div>
-                    <div>
-                      <div className="text-slate-500">Mark</div>
-                      {position.markPrice ? (
-                        <Badge
-                          className="h-6 px-2 text-[11px] font-medium"
-                          style={{
-                            backgroundColor: '#0f172acc',
-                            color: '#e2e8f0',
-                            borderColor: '#334155',
-                          }}
-                        >
-                          ${position.markPrice.toFixed(6)}
-                        </Badge>
-                      ) : (
-                        <div className="text-slate-300">-</div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-slate-500">Trailing</div>
-                      {typeof position.trailingDisplayPrice === 'number' ? (
-                        <Badge
-                          className="h-6 px-2 text-[11px] font-medium"
-                          style={{
-                            backgroundColor: '#0f172acc',
-                            color: '#e2e8f0',
-                            borderColor: '#334155',
-                          }}
-                        >
-                          ${position.trailingDisplayPrice.toFixed(6)}
-                        </Badge>
-                      ) : (
-                        <div className="text-slate-300">-</div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-slate-500">Stop</div>
-                      {typeof position.stop_loss_price === 'number' ? (
-                        <Badge
-                          className="h-6 px-2 text-[11px] font-medium"
-                          style={{
-                            backgroundColor: '#0f172acc',
-                            color: '#e2e8f0',
-                            borderColor: '#334155',
-                          }}
-                        >
-                          ${position.stop_loss_price.toFixed(6)}
-                        </Badge>
-                      ) : (
-                        <div className="text-slate-300">-</div>
-                      )}
-                    </div>
+                    ) : (
+                      <div className="flex h-6 items-center justify-center text-slate-300">-</div>
+                    )}
+                    {typeof position.trailingDisplayPrice === 'number' ? (
+                      <Badge
+                        className="h-6 w-full justify-center px-2 text-[11px] font-medium"
+                        style={{
+                          backgroundColor: '#0f172acc',
+                          color: '#e2e8f0',
+                          borderColor: '#334155',
+                        }}
+                      >
+                        ${position.trailingDisplayPrice.toFixed(6)}
+                      </Badge>
+                    ) : (
+                      <div className="flex h-6 items-center justify-center text-slate-300">-</div>
+                    )}
+                    {typeof position.stop_loss_price === 'number' ? (
+                      <Badge
+                        className="h-6 w-full justify-center px-2 text-[11px] font-medium"
+                        style={{
+                          backgroundColor: '#0f172acc',
+                          color: '#e2e8f0',
+                          borderColor: '#334155',
+                        }}
+                      >
+                        ${position.stop_loss_price.toFixed(6)}
+                      </Badge>
+                    ) : (
+                      <div className="flex h-6 items-center justify-center text-slate-300">-</div>
+                    )}
                   </div>
 
-                  {/* Far Right: Trailing Status */}
-                  <div className="hidden lg:flex items-center gap-3 min-w-[320px]">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge
-                          style={{
-                            backgroundColor: position.trailing_stop_activated ? '#10b98122' : position.trailingArmedByPrice ? '#f59e0b22' : '#64748b22',
-                            color: position.trailing_stop_activated ? '#10b981' : position.trailingArmedByPrice ? '#f59e0b' : '#64748b',
-                            borderColor: position.trailing_stop_activated ? '#10b98155' : position.trailingArmedByPrice ? '#f59e0b55' : '#64748b55'
-                          }}
-                          className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium"
-                        >
-                          {position.trailingState.label}
-                        </Badge>
-                        {position.trailingProgressPct !== null && (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-gradient-to-r from-cyan-500 to-green-500"
-                                style={{ width: `${position.trailingProgressPct! <= 0 ? 0 : Math.max(8, Math.round(position.trailingProgressPct! * 100))}%` }}
-                              />
-                            </div>
-                            <div className="text-[11px] text-slate-400 w-8 text-right">
-                              {Math.round(position.trailingProgressPct! * 100)}%
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <Badge
-                          className="h-5 min-w-[120px] justify-center px-2 text-[10px] font-medium opacity-90"
-                          style={regimeBadgeStyle(position.consensusSide)}
-                        >
-                          Consensus {position.consensusSide}
-                        </Badge>
-                        <Badge
-                          className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium opacity-90"
-                          style={regimeBadgeStyle(position.bybitRegime)}
-                        >
-                          Bybit {position.bybitRegime}
-                        </Badge>
-                      </div>
-                    </div>
+                  <div>
+                    <Badge
+                      style={{
+                        backgroundColor: position.trailing_stop_activated ? '#10b98122' : position.trailingArmedByPrice ? '#f59e0b22' : '#64748b22',
+                        color: position.trailing_stop_activated ? '#10b981' : position.trailingArmedByPrice ? '#f59e0b' : '#64748b',
+                        borderColor: position.trailing_stop_activated ? '#10b98155' : position.trailingArmedByPrice ? '#f59e0b55' : '#64748b55'
+                      }}
+                      className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium"
+                    >
+                      {position.trailingState.label}
+                    </Badge>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-start">
+                    <Badge
+                      className="h-5 min-w-[120px] justify-center px-2 text-[10px] font-medium opacity-90"
+                      style={regimeBadgeStyle(position.consensusSide)}
+                    >
+                      Consensus {position.consensusSide}
+                    </Badge>
+                    <Badge
+                      className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium opacity-90"
+                      style={regimeBadgeStyle(position.bybitRegime)}
+                    >
+                      Bybit {position.bybitRegime}
+                    </Badge>
                   </div>
                 </div>
               </div>

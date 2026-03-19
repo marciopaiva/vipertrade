@@ -492,26 +492,72 @@ impl StrategyConfig {
             return Some(0.0);
         }
 
+        let min_trend_score = self.btc_macro_min_trend_score_for_side(side);
+        let min_consensus_count = self.btc_macro_min_consensus_count_for_side(side);
+
         let aligned = if side.eq_ignore_ascii_case("short") {
             btc_regime.eq_ignore_ascii_case("bearish")
-                && btc_trend_score <= -0.05
-                && btc_consensus_count >= 2
+                && btc_trend_score <= -min_trend_score
+                && btc_consensus_count >= min_consensus_count
         } else {
             btc_regime.eq_ignore_ascii_case("bullish")
-                && btc_trend_score >= 0.05
-                && btc_consensus_count >= 2
+                && btc_trend_score >= min_trend_score
+                && btc_consensus_count >= min_consensus_count
         };
 
         if aligned {
             return Some(0.0);
         }
 
-        let neutral = btc_regime.eq_ignore_ascii_case("neutral") && btc_consensus_count >= 2;
+        let neutral = btc_regime.eq_ignore_ascii_case("neutral") && btc_consensus_count >= min_consensus_count;
         if neutral {
-            return Some(0.05);
+            return Some(self.btc_macro_neutral_penalty());
         }
 
         None
+    }
+
+    fn btc_macro_min_trend_score_for_side(&self, side: &str) -> f64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "btc_macro_min_trend_score_short"
+        } else {
+            "btc_macro_min_trend_score_long"
+        };
+
+        self.mode_f64(side_key).unwrap_or_else(|| {
+            cfg_f64(
+                &self.global,
+                &["entry_filters", side_key],
+                0.05,
+            )
+        })
+    }
+
+    fn btc_macro_min_consensus_count_for_side(&self, side: &str) -> i64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "btc_macro_min_consensus_count_short"
+        } else {
+            "btc_macro_min_consensus_count_long"
+        };
+
+        self.mode_i64(side_key).unwrap_or_else(|| {
+            cfg_i64(
+                &self.global,
+                &["entry_filters", side_key],
+                2,
+            )
+        })
+        .max(1)
+    }
+
+    fn btc_macro_neutral_penalty(&self) -> f64 {
+        self.mode_f64("btc_macro_neutral_penalty").unwrap_or_else(|| {
+            cfg_f64(
+                &self.global,
+                &["entry_filters", "btc_macro_neutral_penalty"],
+                0.05,
+            )
+        })
     }
 
     fn min_volume_24h_usdt(&self, symbol: &str) -> i64 {
