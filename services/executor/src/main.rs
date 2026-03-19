@@ -402,7 +402,7 @@ fn close_reason_from_decision(reason: &str) -> String {
     } else if normalized.trim().is_empty() {
         "manual".to_string()
     } else {
-        normalized
+        "manual".to_string()
     }
 }
 
