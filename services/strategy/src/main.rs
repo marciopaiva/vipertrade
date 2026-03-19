@@ -509,7 +509,8 @@ impl StrategyConfig {
             return Some(0.0);
         }
 
-        let neutral = btc_regime.eq_ignore_ascii_case("neutral") && btc_consensus_count >= min_consensus_count;
+        let neutral = btc_regime.eq_ignore_ascii_case("neutral")
+            && btc_consensus_count >= min_consensus_count;
         if neutral {
             return Some(self.btc_macro_neutral_penalty());
         }
@@ -524,13 +525,8 @@ impl StrategyConfig {
             "btc_macro_min_trend_score_long"
         };
 
-        self.mode_f64(side_key).unwrap_or_else(|| {
-            cfg_f64(
-                &self.global,
-                &["entry_filters", side_key],
-                0.05,
-            )
-        })
+        self.mode_f64(side_key)
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", side_key], 0.05))
     }
 
     fn btc_macro_min_consensus_count_for_side(&self, side: &str) -> i64 {
@@ -540,24 +536,20 @@ impl StrategyConfig {
             "btc_macro_min_consensus_count_long"
         };
 
-        self.mode_i64(side_key).unwrap_or_else(|| {
-            cfg_i64(
-                &self.global,
-                &["entry_filters", side_key],
-                2,
-            )
-        })
-        .max(1)
+        self.mode_i64(side_key)
+            .unwrap_or_else(|| cfg_i64(&self.global, &["entry_filters", side_key], 2))
+            .max(1)
     }
 
     fn btc_macro_neutral_penalty(&self) -> f64 {
-        self.mode_f64("btc_macro_neutral_penalty").unwrap_or_else(|| {
-            cfg_f64(
-                &self.global,
-                &["entry_filters", "btc_macro_neutral_penalty"],
-                0.05,
-            )
-        })
+        self.mode_f64("btc_macro_neutral_penalty")
+            .unwrap_or_else(|| {
+                cfg_f64(
+                    &self.global,
+                    &["entry_filters", "btc_macro_neutral_penalty"],
+                    0.05,
+                )
+            })
     }
 
     fn min_volume_24h_usdt(&self, symbol: &str) -> i64 {
@@ -571,15 +563,15 @@ impl StrategyConfig {
             })
             .or_else(|| self.mode_i64("min_volume_24h_usdt"))
             .unwrap_or_else(|| {
-            self.pair_cfg(symbol)
-                .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
-                .unwrap_or_else(|| {
-                    cfg_i64(
-                        &self.global,
-                        &["entry_filters", "min_volume_24h_usdt"],
-                        30_000_000,
-                    )
-                })
+                self.pair_cfg(symbol)
+                    .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
+                    .unwrap_or_else(|| {
+                        cfg_i64(
+                            &self.global,
+                            &["entry_filters", "min_volume_24h_usdt"],
+                            30_000_000,
+                        )
+                    })
             })
     }
 
@@ -1579,7 +1571,10 @@ fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> Str
             return "long_block_disabled".to_string();
         }
         if !signal.regime.eq_ignore_ascii_case("bullish") {
-            return format!("long_block_consensus_regime_{}", signal.regime.to_lowercase());
+            return format!(
+                "long_block_consensus_regime_{}",
+                signal.regime.to_lowercase()
+            );
         }
         if !signal.bybit_regime.eq_ignore_ascii_case("bullish") {
             return format!(
@@ -1641,7 +1636,10 @@ fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> Str
             return "short_block_disabled".to_string();
         }
         if !signal.regime.eq_ignore_ascii_case("bearish") {
-            return format!("short_block_consensus_regime_{}", signal.regime.to_lowercase());
+            return format!(
+                "short_block_consensus_regime_{}",
+                signal.regime.to_lowercase()
+            );
         }
         if !signal.bybit_regime.eq_ignore_ascii_case("bearish") {
             return format!(
