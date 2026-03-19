@@ -1702,18 +1702,30 @@ fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> Str
 }
 
 fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnapshot) -> bool {
+    const NEUTRAL_THESIS_BREAK_TREND_SCORE: f64 = 0.05;
+
     if open.side == "Long" {
-        let consensus_lost = !signal.consensus_side.eq_ignore_ascii_case("bullish");
-        let bybit_lost = !signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let consensus_bearish = signal.consensus_side.eq_ignore_ascii_case("bearish");
+        let bybit_bearish = signal.bybit_regime.eq_ignore_ascii_case("bearish");
+        let consensus_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish");
+        let bybit_not_bullish = !signal.bybit_regime.eq_ignore_ascii_case("bullish");
         let trend_flipped = signal.consensus_trend_score <= 0.0 || signal.trend_score <= 0.0;
+        let neutral_break = signal.consensus_trend_score <= -NEUTRAL_THESIS_BREAK_TREND_SCORE
+            || signal.trend_score <= -NEUTRAL_THESIS_BREAK_TREND_SCORE;
 
-        (consensus_lost || bybit_lost) && trend_flipped
+        ((consensus_bearish || bybit_bearish) && trend_flipped)
+            || (consensus_not_bullish && bybit_not_bullish && neutral_break)
     } else if open.side == "Short" {
-        let consensus_lost = !signal.consensus_side.eq_ignore_ascii_case("bearish");
-        let bybit_lost = !signal.bybit_regime.eq_ignore_ascii_case("bearish");
+        let consensus_bullish = signal.consensus_side.eq_ignore_ascii_case("bullish");
+        let bybit_bullish = signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let consensus_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish");
+        let bybit_not_bearish = !signal.bybit_regime.eq_ignore_ascii_case("bearish");
         let trend_flipped = signal.consensus_trend_score >= 0.0 || signal.trend_score >= 0.0;
+        let neutral_break = signal.consensus_trend_score >= NEUTRAL_THESIS_BREAK_TREND_SCORE
+            || signal.trend_score >= NEUTRAL_THESIS_BREAK_TREND_SCORE;
 
-        (consensus_lost || bybit_lost) && trend_flipped
+        ((consensus_bullish || bybit_bullish) && trend_flipped)
+            || (consensus_not_bearish && bybit_not_bearish && neutral_break)
     } else {
         false
     }
