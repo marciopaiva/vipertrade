@@ -399,8 +399,6 @@ fn close_reason_from_decision(reason: &str) -> String {
         "circuit_breaker".to_string()
     } else if normalized.contains("thesis_invalidated") {
         "thesis_invalidated".to_string()
-    } else if normalized.trim().is_empty() {
-        "manual".to_string()
     } else {
         "manual".to_string()
     }
