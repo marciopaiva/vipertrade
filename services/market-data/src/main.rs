@@ -1,11 +1,11 @@
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, RwLock};
@@ -46,12 +46,23 @@ struct TickerItem {
     funding_rate: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Candle {
+    open_time_ms: i64,
     high: f64,
     low: f64,
     close: f64,
     volume_quote: f64,
+}
+
+#[derive(Debug, Clone)]
+struct RawExchangeSnapshot {
+    source: &'static str,
+    current_price: f64,
+    volume_24h: i64,
+    funding_rate: f64,
+    spread_pct: f64,
+    candles: Vec<Candle>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +147,10 @@ fn parse_f64(raw: &str) -> Option<f64> {
     raw.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
+fn parse_i64(raw: &str) -> Option<i64> {
+    raw.parse::<i64>().ok()
+}
+
 fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
     let mut candles: Vec<Candle> = rows
         .into_iter()
@@ -143,11 +158,13 @@ fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
             if row.len() < 5 {
                 return None;
             }
+            let open_time_ms = parse_i64(&row[0])?;
             let high = parse_f64(&row[2])?;
             let low = parse_f64(&row[3])?;
             let close = parse_f64(&row[4])?;
             let volume_quote = row.get(6).and_then(|v| parse_f64(v)).unwrap_or(0.0);
             Some(Candle {
+                open_time_ms,
                 high,
                 low,
                 close,
@@ -164,9 +181,10 @@ fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
 fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
-            if row.len() < 5 {
+            if row.len() < 8 {
                 return None;
             }
+            let open_time_ms = row[0].as_i64()?;
             let high = row[2].as_str().and_then(parse_f64)?;
             let low = row[3].as_str().and_then(parse_f64)?;
             let close = row[4].as_str().and_then(parse_f64)?;
@@ -176,6 +194,7 @@ fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
                 .and_then(parse_f64)
                 .unwrap_or(0.0);
             Some(Candle {
+                open_time_ms,
                 high,
                 low,
                 close,
@@ -189,14 +208,16 @@ fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
     let mut candles: Vec<Candle> = rows
         .into_iter()
         .filter_map(|row| {
-            if row.len() < 5 {
+            if row.len() < 8 {
                 return None;
             }
+            let open_time_ms = parse_i64(&row[0])?;
             let high = parse_f64(&row[2])?;
             let low = parse_f64(&row[3])?;
             let close = parse_f64(&row[4])?;
             let volume_quote = row.get(7).and_then(|v| parse_f64(v)).unwrap_or(0.0);
             Some(Candle {
+                open_time_ms,
                 high,
                 low,
                 close,
@@ -211,6 +232,105 @@ fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
 }
 
 const REQUIRED_CANDLE_COUNT: usize = 200;
+const FETCH_CANDLE_LIMIT: usize = 220;
+const CANDLE_INTERVAL_MS: i64 = 60_000;
+
+fn unix_time_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn retain_closed_candles(candles: Vec<Candle>) -> Vec<Candle> {
+    let now_ms = unix_time_ms();
+    candles
+        .into_iter()
+        .filter(|candle| candle.open_time_ms > 0 && candle.open_time_ms + CANDLE_INTERVAL_MS <= now_ms)
+        .collect()
+}
+
+fn align_exchange_candles(symbol: &str, snapshots: &mut [RawExchangeSnapshot]) -> Result<(), String> {
+    if snapshots.is_empty() {
+        return Err(format!("{} no exchange snapshots available", symbol));
+    }
+
+    for snapshot in snapshots.iter_mut() {
+        snapshot.candles = retain_closed_candles(std::mem::take(&mut snapshot.candles));
+        if snapshot.candles.len() < REQUIRED_CANDLE_COUNT {
+            return Err(format!(
+                "{} {} closed candles incomplete: expected at least {}, got {}",
+                snapshot.source,
+                symbol,
+                REQUIRED_CANDLE_COUNT,
+                snapshot.candles.len()
+            ));
+        }
+    }
+
+    let mut common_times: HashSet<i64> = snapshots[0]
+        .candles
+        .iter()
+        .map(|candle| candle.open_time_ms)
+        .collect();
+    for snapshot in snapshots.iter().skip(1) {
+        let source_times: HashSet<i64> = snapshot
+            .candles
+            .iter()
+            .map(|candle| candle.open_time_ms)
+            .collect();
+        common_times.retain(|ts| source_times.contains(ts));
+    }
+
+    if common_times.len() < REQUIRED_CANDLE_COUNT {
+        return Err(format!(
+            "{} aligned closed candles incomplete across exchanges: expected at least {}, got {}",
+            symbol,
+            REQUIRED_CANDLE_COUNT,
+            common_times.len()
+        ));
+    }
+
+    let mut aligned_times: Vec<i64> = common_times.into_iter().collect();
+    aligned_times.sort_unstable();
+    let keep_times: HashSet<i64> = aligned_times[aligned_times.len() - REQUIRED_CANDLE_COUNT..]
+        .iter()
+        .copied()
+        .collect();
+
+    for snapshot in snapshots.iter_mut() {
+        snapshot
+            .candles
+            .retain(|candle| keep_times.contains(&candle.open_time_ms));
+        snapshot.candles.sort_by_key(|candle| candle.open_time_ms);
+        if snapshot.candles.len() != REQUIRED_CANDLE_COUNT {
+            return Err(format!(
+                "{} {} aligned candle count mismatch: expected {}, got {}",
+                snapshot.source,
+                symbol,
+                REQUIRED_CANDLE_COUNT,
+                snapshot.candles.len()
+            ));
+        }
+    }
+
+    let reference_last_ts = snapshots[0]
+        .candles
+        .last()
+        .map(|candle| candle.open_time_ms)
+        .unwrap_or(0);
+    if snapshots
+        .iter()
+        .any(|snapshot| snapshot.candles.last().map(|candle| candle.open_time_ms) != Some(reference_last_ts))
+    {
+        return Err(format!(
+            "{} aligned candle tail mismatch across exchanges",
+            symbol
+        ));
+    }
+
+    Ok(())
+}
 
 fn compute_atr14(candles: &[Candle]) -> f64 {
     if candles.len() < 2 {
@@ -535,14 +655,53 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
         .map_err(|e| format!("decode failed: {}", e))
 }
 
+fn build_exchange_signal(symbol: &str, snapshot: RawExchangeSnapshot) -> Result<ExchangeSignal, String> {
+    if snapshot.candles.is_empty() {
+        return Err(format!("{} {} aligned candles empty", snapshot.source, symbol));
+    }
+
+    let current_price = snapshot.current_price.max(0.0);
+    let atr_14 = compute_atr14(&snapshot.candles);
+    let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
+        compute_indicator_bundle_complete(snapshot.source, symbol, &snapshot.candles)?;
+    let trend_score = composite_trend_score(
+        current_price,
+        ema_fast,
+        ema_slow,
+        rsi_14,
+        macd_histogram,
+        volume_ratio,
+    );
+    let (regime, trend_slope) = classify_regime(&snapshot.candles, trend_score);
+
+    Ok(ExchangeSignal {
+        source: snapshot.source,
+        current_price,
+        atr_14,
+        volume_24h: snapshot.volume_24h,
+        funding_rate: snapshot.funding_rate,
+        trend_score,
+        spread_pct: snapshot.spread_pct,
+        ema_fast,
+        ema_slow,
+        rsi_14,
+        macd_line,
+        macd_signal,
+        macd_histogram,
+        volume_ratio,
+        regime,
+        trend_slope,
+    })
+}
+
 async fn fetch_market_signal_bybit(
     http: &reqwest::Client,
     base_url: &str,
     symbol: &str,
-) -> Result<ExchangeSignal, String> {
+) -> Result<RawExchangeSnapshot, String> {
     let kline_url = format!(
-        "{}/v5/market/kline?category=linear&symbol={}&interval=1&limit=200",
-        base_url, symbol
+        "{}/v5/market/kline?category=linear&symbol={}&interval=1&limit={}",
+        base_url, symbol, FETCH_CANDLE_LIMIT
     );
     let ticker_url = format!(
         "{}/v5/market/tickers?category=linear&symbol={}",
@@ -588,20 +747,6 @@ async fn fetch_market_signal_bybit(
         .unwrap_or(fallback_price)
         .max(0.0);
 
-    let atr_14 = compute_atr14(&candles);
-
-    let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle_complete("bybit", symbol, &candles)?;
-    let trend_score = composite_trend_score(
-        current_price,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_histogram,
-        volume_ratio,
-    );
-    let (regime, trend_slope) = classify_regime(&candles, trend_score);
-
     let bid = parse_f64(&ticker.bid1_price).unwrap_or(0.0);
     let ask = parse_f64(&ticker.ask1_price).unwrap_or(0.0);
     let spread_pct = if bid > 0.0 && ask > 0.0 && ask >= bid {
@@ -625,23 +770,13 @@ async fn fetch_market_signal_bybit(
         .and_then(parse_f64)
         .unwrap_or(0.0);
 
-    Ok(ExchangeSignal {
+    Ok(RawExchangeSnapshot {
         source: "bybit",
         current_price,
-        atr_14,
         volume_24h,
         funding_rate,
-        trend_score,
         spread_pct,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_line,
-        macd_signal,
-        macd_histogram,
-        volume_ratio,
-        regime,
-        trend_slope,
+        candles,
     })
 }
 
@@ -662,11 +797,11 @@ struct BinanceBookTicker {
 async fn fetch_market_signal_binance(
     http: &reqwest::Client,
     symbol: &str,
-) -> Result<ExchangeSignal, String> {
+) -> Result<RawExchangeSnapshot, String> {
     let base_url = "https://fapi.binance.com";
     let kline_url = format!(
-        "{}/fapi/v1/klines?symbol={}&interval=1m&limit=200",
-        base_url, symbol
+        "{}/fapi/v1/klines?symbol={}&interval=1m&limit={}",
+        base_url, symbol, FETCH_CANDLE_LIMIT
     );
     let ticker_24h_url = format!("{}/fapi/v1/ticker/24hr?symbol={}", base_url, symbol);
     let book_ticker_url = format!("{}/fapi/v1/ticker/bookTicker?symbol={}", base_url, symbol);
@@ -715,18 +850,6 @@ async fn fetch_market_signal_binance(
         .map_err(|e| format!("binance bookTicker decode failed: {}", e))?;
 
     let current_price = candles.last().map(|c| c.close).unwrap_or(0.0).max(0.0);
-    let atr_14 = compute_atr14(&candles);
-    let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle_complete("binance", symbol, &candles)?;
-    let trend_score = composite_trend_score(
-        current_price,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_histogram,
-        volume_ratio,
-    );
-    let (regime, trend_slope) = classify_regime(&candles, trend_score);
 
     let bid = parse_f64(&book_ticker.bid_price).unwrap_or(0.0);
     let ask = parse_f64(&book_ticker.ask_price).unwrap_or(0.0);
@@ -743,23 +866,13 @@ async fn fetch_market_signal_binance(
 
     let volume_24h = parse_f64(&ticker_24h.quote_volume).unwrap_or(0.0).round() as i64;
 
-    Ok(ExchangeSignal {
+    Ok(RawExchangeSnapshot {
         source: "binance",
         current_price,
-        atr_14,
         volume_24h,
         funding_rate: 0.0,
-        trend_score,
         spread_pct,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_line,
-        macd_signal,
-        macd_histogram,
-        volume_ratio,
-        regime,
-        trend_slope,
+        candles,
     })
 }
 
@@ -784,12 +897,12 @@ struct OkxTicker {
 async fn fetch_market_signal_okx(
     http: &reqwest::Client,
     symbol: &str,
-) -> Result<ExchangeSignal, String> {
+) -> Result<RawExchangeSnapshot, String> {
     let base_url = "https://www.okx.com";
     let inst_id = okx_inst_id(symbol);
     let kline_url = format!(
-        "{}/api/v5/market/candles?instId={}&bar=1m&limit=200",
-        base_url, inst_id
+        "{}/api/v5/market/candles?instId={}&bar=1m&limit={}",
+        base_url, inst_id, FETCH_CANDLE_LIMIT
     );
     let ticker_url = format!("{}/api/v5/market/ticker?instId={}", base_url, inst_id);
 
@@ -843,18 +956,6 @@ async fn fetch_market_signal_okx(
 
     let fallback_price = candles.last().map(|c| c.close).unwrap_or(0.0);
     let current_price = parse_f64(&ticker.last).unwrap_or(fallback_price).max(0.0);
-    let atr_14 = compute_atr14(&candles);
-    let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle_complete("okx", symbol, &candles)?;
-    let trend_score = composite_trend_score(
-        current_price,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_histogram,
-        volume_ratio,
-    );
-    let (regime, trend_slope) = classify_regime(&candles, trend_score);
 
     let bid = parse_f64(&ticker.bid_px).unwrap_or(0.0);
     let ask = parse_f64(&ticker.ask_px).unwrap_or(0.0);
@@ -871,23 +972,13 @@ async fn fetch_market_signal_okx(
 
     let volume_24h = parse_f64(&ticker.vol_ccy_24h).unwrap_or(0.0).round() as i64;
 
-    Ok(ExchangeSignal {
+    Ok(RawExchangeSnapshot {
         source: "okx",
         current_price,
-        atr_14,
         volume_24h,
         funding_rate: 0.0,
-        trend_score,
         spread_pct,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_line,
-        macd_signal,
-        macd_histogram,
-        volume_ratio,
-        regime,
-        trend_slope,
+        candles,
     })
 }
 
@@ -1112,19 +1203,19 @@ async fn fetch_market_signal(
     symbol: &str,
     weights: &HashMap<String, f64>,
 ) -> Result<MarketSignal, String> {
-    let mut exchanges = Vec::<ExchangeSignal>::new();
+    let mut raw_snapshots = Vec::<RawExchangeSnapshot>::new();
     let mut errors = Vec::<String>::new();
 
     match fetch_market_signal_bybit(http, base_url, symbol).await {
-        Ok(v) => exchanges.push(v),
+        Ok(v) => raw_snapshots.push(v),
         Err(e) => errors.push(format!("bybit={}", e)),
     }
     match fetch_market_signal_binance(http, symbol).await {
-        Ok(v) => exchanges.push(v),
+        Ok(v) => raw_snapshots.push(v),
         Err(e) => errors.push(format!("binance={}", e)),
     }
     match fetch_market_signal_okx(http, symbol).await {
-        Ok(v) => exchanges.push(v),
+        Ok(v) => raw_snapshots.push(v),
         Err(e) => errors.push(format!("okx={}", e)),
     }
 
@@ -1136,13 +1227,19 @@ async fn fetch_market_signal(
         ));
     }
 
-    if exchanges.len() != 3 {
+    if raw_snapshots.len() != 3 {
         return Err(format!(
             "incomplete source set for {}: expected 3 exchanges, got {}",
             symbol,
-            exchanges.len()
+            raw_snapshots.len()
         ));
     }
+
+    align_exchange_candles(symbol, &mut raw_snapshots)?;
+    let exchanges = raw_snapshots
+        .into_iter()
+        .map(|snapshot| build_exchange_signal(symbol, snapshot))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let signal = aggregate_signals(symbol, &exchanges, weights)?;
     let used_sources = exchanges

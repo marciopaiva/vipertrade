@@ -1,0 +1,9 @@
+target
+.git
+.github
+services/web/.next
+services/web/node_modules
+node_modules
+logs
+tmp
+.DS_Store

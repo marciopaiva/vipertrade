@@ -78,6 +78,12 @@ struct SignalConfirmationState {
 }
 
 #[derive(Debug, Clone)]
+struct ThesisInvalidationState {
+    side: String,
+    consecutive_invalid_ticks: usize,
+}
+
+#[derive(Debug, Clone)]
 struct InvalidSignalDrop {
     symbol: String,
     stage: String,
@@ -340,6 +346,45 @@ impl StrategyConfig {
             })
     }
 
+    fn thesis_invalidation_enabled(&self) -> bool {
+        self.mode_cfg()
+            .and_then(|value| cfg_get(value, &["entry_filters", "exit_on_thesis_invalidation"]))
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| !self.permissive_entry())
+    }
+
+    fn thesis_invalidation_confirmation_ticks(&self, symbol: &str) -> usize {
+        self.mode_cfg()
+            .and_then(|value| {
+                cfg_get(
+                    value,
+                    &["entry_filters", "thesis_invalidation_confirmation_ticks"],
+                )
+            })
+            .and_then(Value::as_u64)
+            .map(|value| value.max(1) as usize)
+            .or_else(|| {
+                self.pair_cfg(symbol)
+                    .and_then(|value| {
+                        cfg_get(
+                            value,
+                            &["entry_filters", "thesis_invalidation_confirmation_ticks"],
+                        )
+                    })
+                    .and_then(Value::as_u64)
+                    .map(|value| value.max(1) as usize)
+            })
+            .unwrap_or_else(|| {
+                cfg_get(
+                    &self.global,
+                    &["entry_filters", "thesis_invalidation_confirmation_ticks"],
+                )
+                .and_then(Value::as_u64)
+                .map(|value| value.max(1) as usize)
+                .unwrap_or(2)
+            })
+    }
+
     fn stop_loss_cooldown_minutes_for_side(&self, symbol: &str, side: &str) -> i64 {
         let side_key = if side.eq_ignore_ascii_case("short") {
             "stop_loss_cooldown_minutes_short"
@@ -470,7 +515,16 @@ impl StrategyConfig {
     }
 
     fn min_volume_24h_usdt(&self, symbol: &str) -> i64 {
-        self.mode_i64("min_volume_24h_usdt").unwrap_or_else(|| {
+        self.pair_mode_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["entry_filters", "min_volume_24h_usdt"]))
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                self.pair_mode_cfg(symbol)
+                    .and_then(|v| cfg_get(v, &["liquidity", "min_24h_volume_usdt"]))
+                    .and_then(Value::as_i64)
+            })
+            .or_else(|| self.mode_i64("min_volume_24h_usdt"))
+            .unwrap_or_else(|| {
             self.pair_cfg(symbol)
                 .map(|v| cfg_i64(v, &["liquidity", "min_24h_volume_usdt"], 30_000_000))
                 .unwrap_or_else(|| {
@@ -480,7 +534,7 @@ impl StrategyConfig {
                         30_000_000,
                     )
                 })
-        })
+            })
     }
 
     fn max_funding_rate_pct(&self) -> f64 {
@@ -1395,6 +1449,284 @@ fn evaluate_open_trade_exit(
     (None, None)
 }
 
+fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> String {
+    let symbol = signal.symbol.to_uppercase();
+    let entry_side = if signal.trend_score >= 0.0 {
+        "long"
+    } else {
+        "short"
+    };
+    let (rsi_min, rsi_max) = cfg.rsi_bounds_for_side(&symbol, entry_side);
+    let btc_macro_penalty = if cfg.require_btc_macro_alignment() {
+        match cfg.btc_macro_penalty_for_side(
+            &symbol,
+            entry_side,
+            &signal.btc_regime,
+            signal.btc_trend_score,
+            signal.btc_consensus_count,
+        ) {
+            Some(penalty) => penalty,
+            None => return format!("{}_block_btc_macro_misaligned", entry_side),
+        }
+    } else {
+        0.0
+    };
+    let atr_pct = if signal.current_price > 0.0 {
+        signal.atr_14 / signal.current_price
+    } else {
+        1.0
+    };
+    let min_volume_ratio = cfg.min_volume_ratio_for_side(&symbol, entry_side);
+    let min_trend_score = cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty;
+    let consensus_long_ok = if cfg.require_multi_exchange_consensus() {
+        signal.bullish_exchanges >= 2
+            && signal.bearish_exchanges == 0
+            && signal.exchanges_available >= 3
+    } else {
+        signal.bybit_regime.eq_ignore_ascii_case("bullish")
+            || signal.regime.eq_ignore_ascii_case("bullish")
+    };
+    let consensus_short_ok = if cfg.require_multi_exchange_consensus() {
+        signal.bearish_exchanges >= 2
+            && signal.bullish_exchanges == 0
+            && signal.exchanges_available >= 3
+    } else {
+        signal.bybit_regime.eq_ignore_ascii_case("bearish")
+            || signal.regime.eq_ignore_ascii_case("bearish")
+    };
+
+    if signal.spread_pct > cfg.max_spread_pct(&symbol) {
+        return format!(
+            "{}_block_spread_{:.5}_gt_{:.5}",
+            entry_side,
+            signal.spread_pct,
+            cfg.max_spread_pct(&symbol)
+        );
+    }
+    if signal.volume_24h < cfg.min_volume_24h_usdt(&symbol) {
+        return format!(
+            "{}_block_volume_24h_{}_lt_{}",
+            entry_side,
+            signal.volume_24h,
+            cfg.min_volume_24h_usdt(&symbol)
+        );
+    }
+    if atr_pct > cfg.max_atr_pct(&symbol) {
+        return format!(
+            "{}_block_atr_pct_{:.5}_gt_{:.5}",
+            entry_side,
+            atr_pct,
+            cfg.max_atr_pct(&symbol)
+        );
+    }
+    if signal.funding_rate.abs() > cfg.max_funding_rate_pct() {
+        return format!(
+            "{}_block_funding_{:.5}_gt_{:.5}",
+            entry_side,
+            signal.funding_rate.abs(),
+            cfg.max_funding_rate_pct()
+        );
+    }
+
+    if entry_side == "long" {
+        if !cfg.allow_long(&symbol) {
+            return "long_block_disabled".to_string();
+        }
+        if !signal.regime.eq_ignore_ascii_case("bullish") {
+            return format!("long_block_consensus_regime_{}", signal.regime.to_lowercase());
+        }
+        if !signal.bybit_regime.eq_ignore_ascii_case("bullish") {
+            return format!(
+                "long_block_bybit_regime_{}",
+                signal.bybit_regime.to_lowercase()
+            );
+        }
+        if !consensus_long_ok {
+            return format!(
+                "long_block_consensus_{}_of_{}",
+                signal.bullish_exchanges, signal.exchanges_available
+            );
+        }
+        if signal.consensus_trend_slope <= 0.0 {
+            return format!(
+                "long_block_trend_slope_{:.5}_lte_0",
+                signal.consensus_trend_slope
+            );
+        }
+        if signal.consensus_ema_fast <= signal.consensus_ema_slow {
+            return "long_block_ema_alignment".to_string();
+        }
+        if signal.current_price < signal.ema_fast {
+            return format!(
+                "long_block_price_{:.5}_lt_fast_ema_{:.5}",
+                signal.current_price, signal.ema_fast
+            );
+        }
+        if signal.consensus_rsi_14 < rsi_min || signal.consensus_rsi_14 > rsi_max {
+            return format!(
+                "long_block_rsi_{:.2}_outside_{:.2}_{:.2}",
+                signal.consensus_rsi_14, rsi_min, rsi_max
+            );
+        }
+        if signal.consensus_macd_line <= signal.consensus_macd_signal {
+            return "long_block_macd_cross".to_string();
+        }
+        if signal.consensus_macd_histogram <= 0.0 {
+            return format!(
+                "long_block_macd_hist_{:.6}_lte_0",
+                signal.consensus_macd_histogram
+            );
+        }
+        if signal.consensus_volume_ratio < min_volume_ratio {
+            return format!(
+                "long_block_volume_ratio_{:.2}_lt_{:.2}",
+                signal.consensus_volume_ratio, min_volume_ratio
+            );
+        }
+        if signal.consensus_trend_score.abs() < min_trend_score {
+            return format!(
+                "long_block_trend_score_{:.3}_lt_{:.3}",
+                signal.consensus_trend_score.abs(),
+                min_trend_score
+            );
+        }
+    } else {
+        if !cfg.allow_short(&symbol) {
+            return "short_block_disabled".to_string();
+        }
+        if !signal.regime.eq_ignore_ascii_case("bearish") {
+            return format!("short_block_consensus_regime_{}", signal.regime.to_lowercase());
+        }
+        if !signal.bybit_regime.eq_ignore_ascii_case("bearish") {
+            return format!(
+                "short_block_bybit_regime_{}",
+                signal.bybit_regime.to_lowercase()
+            );
+        }
+        if !consensus_short_ok {
+            return format!(
+                "short_block_consensus_{}_of_{}",
+                signal.bearish_exchanges, signal.exchanges_available
+            );
+        }
+        if signal.consensus_trend_slope >= 0.0 {
+            return format!(
+                "short_block_trend_slope_{:.5}_gte_0",
+                signal.consensus_trend_slope
+            );
+        }
+        if signal.consensus_ema_fast >= signal.consensus_ema_slow {
+            return "short_block_ema_alignment".to_string();
+        }
+        if signal.current_price > signal.ema_fast {
+            return format!(
+                "short_block_price_{:.5}_gt_fast_ema_{:.5}",
+                signal.current_price, signal.ema_fast
+            );
+        }
+        if signal.consensus_rsi_14 < rsi_min || signal.consensus_rsi_14 > rsi_max {
+            return format!(
+                "short_block_rsi_{:.2}_outside_{:.2}_{:.2}",
+                signal.consensus_rsi_14, rsi_min, rsi_max
+            );
+        }
+        if signal.consensus_macd_line >= signal.consensus_macd_signal {
+            return "short_block_macd_cross".to_string();
+        }
+        if signal.consensus_macd_histogram >= 0.0 {
+            return format!(
+                "short_block_macd_hist_{:.6}_gte_0",
+                signal.consensus_macd_histogram
+            );
+        }
+        if signal.consensus_volume_ratio < min_volume_ratio {
+            return format!(
+                "short_block_volume_ratio_{:.2}_lt_{:.2}",
+                signal.consensus_volume_ratio, min_volume_ratio
+            );
+        }
+        if signal.consensus_trend_score.abs() < min_trend_score {
+            return format!(
+                "short_block_trend_score_{:.3}_lt_{:.3}",
+                signal.consensus_trend_score.abs(),
+                min_trend_score
+            );
+        }
+    }
+
+    "risk_constraints_not_met".to_string()
+}
+
+fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnapshot) -> bool {
+    if open.side == "Long" {
+        let consensus_lost = !signal.consensus_side.eq_ignore_ascii_case("bullish");
+        let bybit_lost = !signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let trend_flipped = signal.consensus_trend_score <= 0.0 || signal.trend_score <= 0.0;
+
+        (consensus_lost || bybit_lost) && trend_flipped
+    } else if open.side == "Short" {
+        let consensus_lost = !signal.consensus_side.eq_ignore_ascii_case("bearish");
+        let bybit_lost = !signal.bybit_regime.eq_ignore_ascii_case("bearish");
+        let trend_flipped = signal.consensus_trend_score >= 0.0 || signal.trend_score >= 0.0;
+
+        (consensus_lost || bybit_lost) && trend_flipped
+    } else {
+        false
+    }
+}
+
+fn enforce_open_position_thesis_guard(
+    symbol: &str,
+    signal: &MarketSignal,
+    open: &OpenTradeSnapshot,
+    cfg: &StrategyConfig,
+    thesis_invalidations: &mut HashMap<String, ThesisInvalidationState>,
+) -> Option<StrategyDecision> {
+    if !cfg.thesis_invalidation_enabled() {
+        thesis_invalidations.remove(symbol);
+        return None;
+    }
+
+    if !thesis_invalidated_for_open_trade(signal, open) {
+        thesis_invalidations.remove(symbol);
+        return None;
+    }
+
+    let required_ticks = cfg.thesis_invalidation_confirmation_ticks(symbol);
+    let state = thesis_invalidations
+        .entry(symbol.to_string())
+        .or_insert_with(|| ThesisInvalidationState {
+            side: open.side.clone(),
+            consecutive_invalid_ticks: 0,
+        });
+
+    if !state.side.eq_ignore_ascii_case(&open.side) {
+        state.side = open.side.clone();
+        state.consecutive_invalid_ticks = 1;
+    } else {
+        state.consecutive_invalid_ticks += 1;
+    }
+
+    if state.consecutive_invalid_ticks < required_ticks {
+        return Some(create_hold_decision(
+            symbol,
+            &format!(
+                "awaiting_thesis_invalidation_confirmation_{}/{}",
+                state.consecutive_invalid_ticks, required_ticks
+            ),
+        ));
+    }
+
+    thesis_invalidations.remove(symbol);
+    create_close_decision(
+        symbol,
+        &open.side,
+        open.quantity,
+        signal.current_price,
+        "thesis_invalidated",
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn enforce_entry_guards(
     symbol: &str,
@@ -1621,6 +1953,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut messages = pubsub.on_message();
     let mut entry_guards = HashMap::<String, EntryGuardState>::new();
     let mut signal_confirmations = HashMap::<String, SignalConfirmationState>::new();
+    let mut thesis_invalidations = HashMap::<String, ThesisInvalidationState>::new();
     let default_stop_loss_cooldown_minutes = 3_i64;
     let wallet_api_base_url = resolve_wallet_api_base_url();
     let wallet_http = reqwest::Client::builder()
@@ -1752,9 +2085,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
                             }
-                            let decision = close_decision.unwrap_or_else(|| {
+                            let decision = if let Some(decision) = close_decision {
+                                thesis_invalidations.remove(&symbol);
+                                decision
+                            } else if let Some(decision) = enforce_open_position_thesis_guard(
+                                &symbol,
+                                &signal_event.signal,
+                                &open,
+                                cfg.as_ref(),
+                                &mut thesis_invalidations,
+                            ) {
+                                if decision.action != "HOLD" {
+                                    thesis_invalidations.remove(&symbol);
+                                }
+                                decision
+                            } else {
                                 create_hold_decision(&symbol, "open_position_monitoring")
-                            });
+                            };
 
                             if let Err(err) =
                                 publish_decision_event(&mut publish_conn, &signal_event.event_id, decision)
@@ -1764,7 +2111,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                             continue;
                         }
-                        Ok(None) => {}
+                        Ok(None) => {
+                            thesis_invalidations.remove(&symbol);
+                        }
                         Err(err) => {
                             eprintln!(
                                 "Failed to query open trade for symbol={} err={}",
@@ -1852,6 +2201,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             &mut signal_confirmations,
                             min_confirmation_ticks,
                         );
+
+                        let mut decision = decision;
+                        if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
+                        {
+                            decision.reason =
+                                explain_entry_hold_reason(&signal_event.signal, cfg.as_ref());
+                        }
 
                         if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
                             signal_confirmations.remove(&symbol);
