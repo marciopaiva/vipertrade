@@ -342,6 +342,18 @@ function ClosedTradesTable({ trades }: { trades: Array<{
           {paginatedTrades.map(trade => {
             const pnl = trade.pnl || 0;
             const pnlColor = pnl >= 0 ? '#10b981' : '#ef4444';
+            const sideColor = trade.side === 'Long' ? '#10b981' : '#ef4444';
+            const durationLabel = trade.duration_seconds
+              ? `${Math.max(1, Math.round(trade.duration_seconds / 60))}m`
+              : '-';
+            const reasonLabel = titleCase(trade.close_reason || 'closed');
+            const closedAt = trade.closed_at ? new Date(trade.closed_at) : null;
+            const closedDateLabel = closedAt
+              ? closedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              : '-';
+            const closedTimeLabel = closedAt
+              ? closedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '-';
 
             return (
               <div
@@ -349,14 +361,14 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                 className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3"
               >
                 <div className="flex items-center justify-between gap-4">
-                  {/* Left: Symbol + Side */}
-                  <div className="flex items-center gap-2 min-w-[140px]">
+                  {/* Left: Symbol + Side + Meta */}
+                  <div className="flex items-center gap-2 w-[240px] shrink-0">
                     <div>
                       <div className="text-sm font-bold text-slate-200">{trade.symbol}</div>
-                      <div className="text-xs text-slate-500">{trade.side.toUpperCase()}</div>
+                      <div className="mt-1 text-[11px] text-slate-500">{reasonLabel}</div>
                     </div>
                     <Badge
-                      style={{ backgroundColor: (trade.side === 'Long' ? '#10b981' : '#ef4444') + '22', color: trade.side === 'Long' ? '#10b981' : '#ef4444', borderColor: (trade.side === 'Long' ? '#10b981' : '#ef4444') + '55' }}
+                      style={{ backgroundColor: sideColor + '22', color: sideColor, borderColor: sideColor + '55' }}
                       className="text-xs px-1.5 py-0.5 h-5"
                     >
                       {trade.side.toUpperCase()}
@@ -374,29 +386,54 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                   </div>
 
                   {/* Right: Entry/Exit */}
-                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[180px]">
+                  <div className="hidden md:flex items-center gap-4 text-xs min-w-[220px]">
                     <div>
                       <div className="text-slate-500">Entry</div>
-                      <div className="text-slate-300">${trade.entry_price.toFixed(6)}</div>
+                      <Badge
+                        className="h-6 px-2 text-[11px] font-medium"
+                        style={{
+                          backgroundColor: '#0f172acc',
+                          color: '#e2e8f0',
+                          borderColor: '#334155',
+                        }}
+                      >
+                        ${trade.entry_price.toFixed(6)}
+                      </Badge>
                     </div>
                     <div>
                       <div className="text-slate-500">Exit</div>
-                      <div className="text-slate-300">
-                        {trade.exit_price ? `$${trade.exit_price.toFixed(6)}` : '-'}
-                      </div>
+                      {trade.exit_price ? (
+                        <Badge
+                          className="h-6 px-2 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: '#0f172acc',
+                            color: '#e2e8f0',
+                            borderColor: '#334155',
+                          }}
+                        >
+                          ${trade.exit_price.toFixed(6)}
+                        </Badge>
+                      ) : (
+                        <div className="text-slate-300">-</div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Far Right: Duration + Date */}
-                  <div className="hidden lg:flex items-center gap-4 text-xs min-w-[180px]">
-                    <div>
-                      <div className="text-slate-500">Duration</div>
-                      <div className="text-slate-300">{trade.duration_seconds ? `${Math.round(trade.duration_seconds / 60)}m` : '-'}</div>
+                  {/* Far Right: Closed + Summary */}
+                  <div className="hidden lg:flex items-center justify-end gap-6 min-w-[300px]">
+                    <div className="text-right">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Duration</div>
+                      <div className="text-xs mt-1 text-slate-200">{durationLabel}</div>
                     </div>
-                    <div>
-                      <div className="text-slate-500">Closed</div>
-                      <div className="text-slate-300">
-                        {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '-'}
+                    <div className="text-right">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Closed</div>
+                      <div className="text-xs mt-1 text-slate-200">{closedDateLabel}</div>
+                      <div className="text-[11px] text-slate-400">{closedTimeLabel}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Result</div>
+                      <div className="text-xs mt-1" style={{ color: pnlColor }}>
+                        {pnl >= 0 ? 'Winner' : 'Loser'}
                       </div>
                     </div>
                   </div>
