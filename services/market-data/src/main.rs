@@ -297,11 +297,16 @@ fn retain_closed_candles(candles: Vec<Candle>) -> Vec<Candle> {
     let now_ms = unix_time_ms();
     candles
         .into_iter()
-        .filter(|candle| candle.open_time_ms > 0 && candle.open_time_ms + CANDLE_INTERVAL_MS <= now_ms)
+        .filter(|candle| {
+            candle.open_time_ms > 0 && candle.open_time_ms + CANDLE_INTERVAL_MS <= now_ms
+        })
         .collect()
 }
 
-fn align_exchange_candles(symbol: &str, snapshots: &mut [RawExchangeSnapshot]) -> Result<(), String> {
+fn align_exchange_candles(
+    symbol: &str,
+    snapshots: &mut [RawExchangeSnapshot],
+) -> Result<(), String> {
     if snapshots.is_empty() {
         return Err(format!("{} no exchange snapshots available", symbol));
     }
@@ -370,10 +375,9 @@ fn align_exchange_candles(symbol: &str, snapshots: &mut [RawExchangeSnapshot]) -
         .last()
         .map(|candle| candle.open_time_ms)
         .unwrap_or(0);
-    if snapshots
-        .iter()
-        .any(|snapshot| snapshot.candles.last().map(|candle| candle.open_time_ms) != Some(reference_last_ts))
-    {
+    if snapshots.iter().any(|snapshot| {
+        snapshot.candles.last().map(|candle| candle.open_time_ms) != Some(reference_last_ts)
+    }) {
         return Err(format!(
             "{} aligned candle tail mismatch across exchanges",
             symbol
@@ -706,9 +710,15 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
         .map_err(|e| format!("decode failed: {}", e))
 }
 
-fn build_exchange_signal(symbol: &str, snapshot: RawExchangeSnapshot) -> Result<ExchangeSignal, String> {
+fn build_exchange_signal(
+    symbol: &str,
+    snapshot: RawExchangeSnapshot,
+) -> Result<ExchangeSignal, String> {
     if snapshot.candles.is_empty() {
-        return Err(format!("{} {} aligned candles empty", snapshot.source, symbol));
+        return Err(format!(
+            "{} {} aligned candles empty",
+            snapshot.source, symbol
+        ));
     }
 
     let last_closed_price = snapshot
