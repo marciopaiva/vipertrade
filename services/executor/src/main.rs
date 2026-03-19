@@ -170,6 +170,59 @@ impl ExecutorConfig {
     }
 }
 
+async fn connect_executor_db(cfg: &ExecutorConfig) -> Result<Option<PgPool>, Box<dyn Error>> {
+    let attempts = if matches!(cfg.trading_mode, TradingMode::Paper) {
+        10
+    } else {
+        5
+    };
+    let retry_delay = Duration::from_secs(2);
+    let mut last_err: Option<sqlx::Error> = None;
+
+    for attempt in 1..=attempts {
+        match PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&cfg.db_url)
+            .await
+        {
+            Ok(pool) => {
+                println!("Executor database connection: enabled");
+                return Ok(Some(pool));
+            }
+            Err(err) => {
+                eprintln!(
+                    "Executor database connection attempt {}/{} failed: {}",
+                    attempt, attempts, err
+                );
+                last_err = Some(err);
+                if attempt < attempts {
+                    tokio::time::sleep(retry_delay).await;
+                }
+            }
+        }
+    }
+
+    if matches!(cfg.trading_mode, TradingMode::Paper) {
+        let err = last_err
+            .map(|err| err.to_string())
+            .unwrap_or_else(|| "unknown database connection error".to_string());
+        return Err(format!(
+            "Executor requires Postgres in PAPER mode but could not connect after {} attempts: {}",
+            attempts, err
+        )
+        .into());
+    }
+
+    if let Some(err) = last_err {
+        eprintln!(
+            "Executor database connection unavailable (running with in-memory idempotency only): {}",
+            err
+        );
+    }
+
+    Ok(None)
+}
+
 fn parse_allowlist(raw: &str) -> HashSet<String> {
     raw.split(',')
         .map(|s| s.trim().to_uppercase())
@@ -332,20 +385,24 @@ fn close_action_to_position_side(action: &str) -> Option<&'static str> {
     }
 }
 
-fn close_reason_from_decision(reason: &str) -> &'static str {
+fn close_reason_from_decision(reason: &str) -> String {
     let normalized = reason.to_ascii_lowercase();
     if normalized.contains("trailing_stop") {
-        "trailing_stop"
+        "trailing_stop".to_string()
     } else if normalized.contains("stop_loss") {
-        "stop_loss"
+        "stop_loss".to_string()
     } else if normalized.contains("take_profit") {
-        "take_profit"
+        "take_profit".to_string()
     } else if normalized.contains("time_exit") {
-        "time_exit"
+        "time_exit".to_string()
     } else if normalized.contains("circuit_breaker") {
-        "circuit_breaker"
+        "circuit_breaker".to_string()
+    } else if normalized.contains("thesis_invalidated") {
+        "thesis_invalidated".to_string()
+    } else if normalized.trim().is_empty() {
+        "manual".to_string()
     } else {
-        "manual"
+        normalized
     }
 }
 
@@ -2288,23 +2345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let db_pool = match PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&cfg.db_url)
-        .await
-    {
-        Ok(pool) => {
-            println!("Executor database connection: enabled");
-            Some(pool)
-        }
-        Err(err) => {
-            eprintln!(
-                "Executor database connection unavailable (running with in-memory idempotency only): {}",
-                err
-            );
-            None
-        }
-    };
+    let db_pool = connect_executor_db(&cfg).await?;
 
     let state = ExecutorState {
         db_pool,

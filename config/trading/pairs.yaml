@@ -38,7 +38,7 @@ global:
       min_signal_confirmation_ticks_long: 3
       min_signal_confirmation_ticks_short: 5
       min_volume_ratio_long: 0.25
-      min_volume_ratio_short: 0.60
+      min_volume_ratio_short: 0.25
       rsi_long_min: 52
       rsi_long_max: 75
       rsi_short_min: 28
@@ -111,7 +111,7 @@ global:
       min_signal_confirmation_ticks_long: 3
       min_signal_confirmation_ticks_short: 5
       min_volume_ratio_long: 0.25
-      min_volume_ratio_short: 0.60
+      min_volume_ratio_short: 0.25
       rsi_long_min: 52
       rsi_long_max: 75
       rsi_short_min: 28
@@ -242,6 +242,7 @@ DOGEUSDT:
     min_signal_confirmation_ticks_long: 3
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
+    thesis_invalidation_confirmation_ticks: 1
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0055
   
@@ -413,6 +414,7 @@ ADAUSDT:
     min_signal_confirmation_ticks_long: 3
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
+    thesis_invalidation_confirmation_ticks: 1
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0035
   
@@ -430,12 +432,16 @@ XLMUSDT:
   volatility_profile: "medium-high"
   mode_profiles:
     PAPER:
+      entry_filters:
+        min_volume_24h_usdt: 16000000
       risk:
         max_position_wallet_pct: 0.10
     TESTNET:
       risk:
         max_position_wallet_pct: 0.0034
     MAINNET:
+      entry_filters:
+        min_volume_24h_usdt: 16000000
       risk:
         max_position_wallet_pct: 0.10
   
