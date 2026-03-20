@@ -285,35 +285,71 @@ validate-runtime-host:  ## Valida runtime (host mode)
 # HEALTH CHECKS
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: health health-postgres health-redis health-strategy health-executor health-api health-web
+.PHONY: health health-all health-postgres health-redis health-strategy health-executor health-api health-web
 
-health:  ## Roda health checks de todos os serviços
-	@printf "$(YELLOW)→$(NC) Health checks...\n"
-	./scripts/health-check.sh
+HEALTH_SERVICE ?= all
+
+health:  ## Health checks (use: make health, make health-all, make health-redis, etc)
+	@printf "$(YELLOW)ViperTrade Health Checks$(NC)\n"
+	@printf "===========================================\n"
+	@printf "Uso: make health-[serviço]\n\n"
+	@printf "Serviços disponíveis:\n"
+	@printf "  $(CYAN)make health-all$(NC)       - Todos os serviços\n"
+	@printf "  $(CYAN)make health-postgres$(NC)  - PostgreSQL\n"
+	@printf "  $(CYAN)make health-redis$(NC)     - Redis\n"
+	@printf "  $(CYAN)make health-strategy$(NC)  - Strategy Service\n"
+	@printf "  $(CYAN)make health-executor$(NC)  - Executor Service\n"
+	@printf "  $(CYAN)make health-api$(NC)       - API Service\n"
+	@printf "  $(CYAN)make health-web$(NC)       - Web Dashboard\n"
+	@printf "\n"
+	@printf "Dica: Use HEALTH_SERVICE para scripts\n"
+	@printf "  $(CYAN)make health HEALTH_SERVICE=redis$(NC)\n"
+
+health-all:  ## Health check de todos os serviços
+	@printf "$(YELLOW)→$(NC) Health Checks - Todos os serviços...\n\n"
+	@$(MAKE) health-postgres
+	@$(MAKE) health-redis
+	@$(MAKE) health-strategy
+	@$(MAKE) health-executor
+	@$(MAKE) health-api
+	@$(MAKE) health-web
+	@printf "\n$(GREEN)✓$(NC) Health checks completos\n"
 
 health-postgres:  ## Verifica saúde do PostgreSQL
 	@printf "$(YELLOW)→$(NC) Health: PostgreSQL...\n"
-	$(DOCKER) exec vipertrade-postgres pg_isready -U $(DB_USER) -d $(DB_NAME)
+	@$(DOCKER) exec vipertrade-postgres pg_isready -U $(DB_USER) -d $(DB_NAME) && \
+		printf "$(GREEN)✓$(NC) PostgreSQL OK\n" || \
+		printf "$(RED)✗$(NC) PostgreSQL não disponível\n"
 
 health-redis:  ## Verifica saúde do Redis
 	@printf "$(YELLOW)→$(NC) Health: Redis...\n"
-	$(DOCKER) exec vipertrade-redis redis-cli ping
+	@$(DOCKER) exec vipertrade-redis redis-cli ping && \
+		printf "$(GREEN)✓$(NC) Redis OK\n" || \
+		printf "$(RED)✗$(NC) Redis não disponível\n"
 
 health-strategy:  ## Verifica saúde do serviço strategy
 	@printf "$(YELLOW)→$(NC) Health: Strategy...\n"
-	curl -f http://localhost:8082/health || printf "$(RED)✗$(NC) Strategy não disponível\n"
+	@curl -sf http://localhost:8082/health > /dev/null 2>&1 && \
+		printf "$(GREEN)✓$(NC) Strategy OK\n" || \
+		printf "$(RED)✗$(NC) Strategy não disponível\n"
 
 health-executor:  ## Verifica saúde do serviço executor
 	@printf "$(YELLOW)→$(NC) Health: Executor...\n"
-	curl -f http://localhost:8083/health || printf "$(RED)✗$(NC) Executor não disponível\n"
+	@curl -sf http://localhost:8083/health > /dev/null 2>&1 && \
+		printf "$(GREEN)✓$(NC) Executor OK\n" || \
+		printf "$(RED)✗$(NC) Executor não disponível\n"
 
 health-api:  ## Verifica saúde do serviço api
 	@printf "$(YELLOW)→$(NC) Health: API...\n"
-	curl -f http://localhost:8080/health || printf "$(RED)✗$(NC) API não disponível\n"
+	@curl -sf http://localhost:8080/health > /dev/null 2>&1 && \
+		printf "$(GREEN)✓$(NC) API OK\n" || \
+		printf "$(RED)✗$(NC) API não disponível\n"
 
 health-web:  ## Verifica saúde do serviço web
 	@printf "$(YELLOW)→$(NC) Health: Web...\n"
-	curl -f http://localhost:3000 || printf "$(RED)✗$(NC) Web não disponível\n"
+	@curl -sf http://localhost:3000 > /dev/null 2>&1 && \
+		printf "$(GREEN)✓$(NC) Web OK\n" || \
+		printf "$(RED)✗$(NC) Web não disponível\n"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DATABASE
