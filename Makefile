@@ -403,17 +403,40 @@ audit-outdated:  ## Verifica dependências desatualizadas
 # CI/CD
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: ci-local ci-strict ci-docker ci-docker-full
+.PHONY: ci-local ci-strict ci-docker ci-docker-full ci-docker-shell build-builder-image
 
 RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder:1.83
+RUST_BUILDER_OPTIMIZED_IMAGE ?= vipertrade-base-rust-builder-optimized:1.83
+
+build-builder-image:  ## Build da imagem builder padrão (sem otimizações)
+	@printf "$(YELLOW)→$(NC) Build imagem builder...\n"
+	./scripts/build-base-images.sh
+
+build-builder-optimized:  ## Build da imagem builder otimizada (com cache de deps)
+	@printf "$(YELLOW)→$(NC) Build imagem builder otimizada...\n"
+	@printf "$(CYAN)  Dockerfile:$(NC) docker/base/rust-builder-optimized.Dockerfile\n"
+	$(DOCKER) build -f docker/base/rust-builder-optimized.Dockerfile \
+		--build-arg RUST_VERSION=1.83 \
+		-t $(RUST_BUILDER_OPTIMIZED_IMAGE) \
+		.
 
 ci-docker:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
 	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
 	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
+	@printf "$(YELLOW)  Dica: Use 'make build-builder-optimized' para cache de dependências\n"
 	$(DOCKER) run --rm \
 		-v "$$(pwd)":/work \
 		-w /work \
 		$(RUST_BUILDER_IMAGE) \
+		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
+
+ci-docker-optimized:  ## Roda CI usando imagem builder otimizada (deps em cache)
+	@printf "$(YELLOW)→$(NC) CI Local (Docker builder otimizado)...\n"
+	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_OPTIMIZED_IMAGE)\n"
+	$(DOCKER) run --rm \
+		-v "$$(pwd)":/work \
+		-w /work \
+		$(RUST_BUILDER_OPTIMIZED_IMAGE) \
 		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
 
 ci-docker-full:  ## Roda CI completo com Docker (format + clippy + test + pipeline)
