@@ -104,6 +104,13 @@ struct PositionHealthBreakdown {
     components: Vec<HealthScoreComponent>,
 }
 
+#[derive(Debug, Clone)]
+struct ThesisInvalidationEvaluation {
+    invalidated: bool,
+    reason: String,
+    health_score: i32,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct WalletSizingResponse {
     total_equity: Option<f64>,
@@ -1967,10 +1974,6 @@ fn position_health_breakdown(
     }
 }
 
-fn position_health_score(signal: &MarketSignal, open: &OpenTradeSnapshot) -> i32 {
-    position_health_breakdown(signal, open).clamped_score
-}
-
 fn position_health_summary(breakdown: &PositionHealthBreakdown) -> String {
     let mut components = breakdown.components.clone();
     components.sort_by_key(|component| component.contribution.abs());
@@ -1997,8 +2000,12 @@ fn position_health_summary(breakdown: &PositionHealthBreakdown) -> String {
     }
 }
 
-fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnapshot) -> bool {
-    let health_score = position_health_score(signal, open);
+fn evaluate_thesis_invalidation(
+    signal: &MarketSignal,
+    open: &OpenTradeSnapshot,
+) -> ThesisInvalidationEvaluation {
+    let breakdown = position_health_breakdown(signal, open);
+    let health_score = breakdown.clamped_score;
 
     if open.side.eq_ignore_ascii_case("Long") {
         let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bearish")
@@ -2006,16 +2013,48 @@ fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnap
         let both_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bullish");
 
-        health_score <= -35 || (both_not_bullish && health_score <= -15) || opposite_side
+        let (invalidated, reason) = if opposite_side {
+            (true, "thesis_invalidated_opposite_side")
+        } else if health_score <= -35 {
+            (true, "thesis_invalidated_health_threshold")
+        } else if both_not_bullish && health_score <= -15 {
+            (true, "thesis_invalidated_no_bullish_alignment")
+        } else {
+            (false, "thesis_valid")
+        };
+
+        ThesisInvalidationEvaluation {
+            invalidated,
+            reason: format!("{}_{}", reason, position_health_summary(&breakdown)),
+            health_score,
+        }
     } else if open.side.eq_ignore_ascii_case("Short") {
         let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bullish")
             || signal.bybit_regime.eq_ignore_ascii_case("bullish");
         let both_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bearish");
 
-        health_score >= 35 || (both_not_bearish && health_score >= 15) || opposite_side
+        let (invalidated, reason) = if opposite_side {
+            (true, "thesis_invalidated_opposite_side")
+        } else if health_score >= 35 {
+            (true, "thesis_invalidated_health_threshold")
+        } else if both_not_bearish && health_score >= 15 {
+            (true, "thesis_invalidated_no_bearish_alignment")
+        } else {
+            (false, "thesis_valid")
+        };
+
+        ThesisInvalidationEvaluation {
+            invalidated,
+            reason: format!("{}_{}", reason, position_health_summary(&breakdown)),
+            health_score,
+        }
     } else {
-        false
+        ThesisInvalidationEvaluation {
+            invalidated: false,
+            reason: "thesis_valid_unknown_side".to_string(),
+            health_score,
+        }
     }
 }
 
@@ -2031,7 +2070,9 @@ fn enforce_open_position_thesis_guard(
         return None;
     }
 
-    if !thesis_invalidated_for_open_trade(signal, open) {
+    let evaluation = evaluate_thesis_invalidation(signal, open);
+
+    if !evaluation.invalidated {
         thesis_invalidations.remove(symbol);
         return None;
     }
@@ -2052,14 +2093,14 @@ fn enforce_open_position_thesis_guard(
     }
 
     if state.consecutive_invalid_ticks < required_ticks {
-        let breakdown = position_health_breakdown(signal, open);
         return Some(create_hold_decision(
             symbol,
             &format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}_{}",
+                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}_{}",
                 state.consecutive_invalid_ticks,
                 required_ticks,
-                position_health_summary(&breakdown)
+                evaluation.health_score,
+                evaluation.reason
             ),
         ));
     }
@@ -2070,7 +2111,7 @@ fn enforce_open_position_thesis_guard(
         &open.side,
         open.quantity,
         signal.current_price,
-        "thesis_invalidated",
+        &evaluation.reason,
     )
 }
 
