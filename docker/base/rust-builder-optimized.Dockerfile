@@ -1,8 +1,8 @@
 # Dockerfile otimizado para cache de dependências Cargo
-# Uso: docker build -f rust-builder-optimized.Dockerfile -t vipertrade-base-rust-builder:1.83 .
+# Uso: docker build -f rust-builder-optimized.Dockerfile -t vipertrade-base-rust-builder-optimized:1.83 .
 
 ARG RUST_VERSION=1.83
-FROM rust:${RUST_VERSION}-slim-bookworm AS base
+FROM rust:${RUST_VERSION}-slim-bookworm
 
 ENV CARGO_HOME=/usr/local/cargo \
   RUSTUP_HOME=/usr/local/rustup \
@@ -35,60 +35,25 @@ RUN rustup set profile minimal \
 WORKDIR /work
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CAMADA 1: Cache do Cargo.lock e workspace Cargo.toml
-# Isso muda pouco, então o cache é preservado na maioria dos builds
+# CAMADA 1: Cache do Cargo.lock
+# Esta camada muda pouco, então o cache é preservado na maioria dos builds
 # ═══════════════════════════════════════════════════════════════════════════
 
-COPY Cargo.lock Cargo.toml ./
+COPY Cargo.lock ./
 
-# Criar crates e services dummy para pré-build das dependências
-# Isso força o Cargo a baixar todas as deps sem o código fonte real
-RUN mkdir -p crates/viper-domain/src \
-           services/market-data/src \
-           services/analytics/src \
-           services/strategy/src \
-           services/executor/src \
-           services/monitor/src \
-           services/backtest/src \
-           services/api/src \
-           services/web/src
-
-# Copiar apenas Cargo.toml de cada serviço Rust
-COPY crates/viper-domain/Cargo.toml crates/viper-domain/
-COPY services/market-data/Cargo.toml services/market-data/
-COPY services/analytics/Cargo.toml services/analytics/
-COPY services/strategy/Cargo.toml services/strategy/
-COPY services/executor/Cargo.toml services/executor/
-COPY services/monitor/Cargo.toml services/monitor/
-COPY services/backtest/Cargo.toml services/backtest/
-COPY services/api/Cargo.toml services/api/
-# services/web é Node.js, não tem Cargo.toml
-
-# Criar estrutura de diretórios e main.rs dummy em cada serviço Rust
-RUN mkdir -p crates/viper-domain/src && \
-    echo 'fn main() {}' > crates/viper-domain/src/lib.rs && \
-    for svc in market-data analytics strategy executor monitor backtest api; do \
-      mkdir -p services/$$svc/src && \
-      echo 'fn main() {}' > services/$$svc/src/main.rs; \
-    done
-
-# Pré-build das dependências (isso é cacheado!)
-# Usa --message-format=short para output mais limpo
-RUN cargo fetch --locked && \
-    cargo build --workspace --locked --message-format=short 2>&1 | tail -20
-
-# Limpar bins intermediários mas manter deps compiladas
-RUN cargo clean --release 2>/dev/null || true
+# Apenas fetch das dependências (download sem compilar)
+# Isso é cacheado e evita download repetido
+RUN cargo fetch --locked
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CAMADA 2: Código fonte real
-# Esta camada muda frequentemente, mas as deps já estão em cache
+# CAMADA 2: Código fonte
+# Esta camada muda frequentemente
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Agora copiar o código fonte real
 COPY . .
 
-# Build final (usa cache das dependências)
-RUN cargo build --workspace --locked --message-format=short 2>&1 | tail -20
+# Build e testes (usa cache do cargo fetch)
+# Não fazemos build aqui pois o código muda frequentemente
+# O build será feito no runtime do container
 
 CMD ["bash"]
