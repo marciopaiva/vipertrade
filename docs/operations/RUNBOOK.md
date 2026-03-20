@@ -95,8 +95,10 @@ Reconciliation behavior:
 
 Native Bybit trailing stop:
 
-- After a successful exchange entry, executor attempts to configure Bybit native trailing with `POST /v5/position/trading-stop`.
-- Runtime remains hybrid: local trailing state stays visible in API/web and exchange-native trailing is also configured when Bybit position state is ready.
+- After a successful exchange entry, executor attempts to configure Bybit native
+  trailing with `POST /v5/position/trading-stop`.
+- Runtime remains hybrid: local trailing state stays visible in API/web and
+  exchange-native trailing is also configured when Bybit position state is ready.
 - Executor retries short race conditions (`zero position` and validation-window errors) with a short backoff.
 - If Bybit still rejects the trailing setup after retries, local trailing continues to protect the position and logs must be reviewed.
 
@@ -115,7 +117,6 @@ TRADING_MODE=paper
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
 ```
-
 
 ## 9) DB Rollback (fills/idempotency patch)
 
@@ -162,7 +163,7 @@ make health
 ./scripts/compose.sh logs --since=20m monitor | grep -E "reconciliation: symbol=|bybit live query failed|alert suppressed by cooldown"
 ```
 
-2. Check divergence and severity in database:
+1. Check divergence and severity in database:
 
 ```bash
 docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
@@ -179,13 +180,13 @@ LIMIT 20;
 SQL
 ```
 
-3. Operator action matrix:
+1. Operator action matrix:
 
 - `warning`: monitor for 2-3 cycles; no emergency action.
 - `error`: pause new entries if persistent; validate Bybit/account connectivity.
 - `critical`: pause entries immediately and investigate position mismatch before resuming.
 
-4. Validate alert throttling:
+1. Validate alert throttling:
 
 - Ensure repeated same `symbol+severity` events are not flooding Discord.
 - Adjust `ALERT_COOLDOWN_SEC` in `compose/.env` if needed, then restart monitor:
@@ -194,7 +195,7 @@ SQL
 ./scripts/compose.sh up -d --no-deps monitor
 ```
 
-5. Capture evidence bundle:
+1. Capture evidence bundle:
 
 - Follow [RECONCILIATION_EVIDENCE](./evidence/RECONCILIATION_EVIDENCE.md)
 - Attach logs + SQL outputs to release/incident notes.

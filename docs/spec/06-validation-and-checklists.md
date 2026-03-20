@@ -4,7 +4,9 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
 
 ## Pre-Deploy Validation
 
-- Security: `security-check` passes, `compose/.env` uses restricted permissions, `.env` stays out of Git, API keys have minimum required privileges, and 2FA/IP allowlists are enabled.
+- Security: `security-check` passes, `compose/.env` uses restricted permissions,
+  `.env` stays out of Git, API keys have minimum required privileges, and 2FA/IP
+  allowlists are enabled.
 - Database: schema is applied, tables and indexes exist, and backups are defined.
 - Services: containers boot correctly, health checks pass, Redis Pub/Sub works, and WebSocket reconnect behavior is validated.
 - Risk: sizing and limits are validated, stop loss and trailing stop work, and both the circuit breaker and daily-loss protection are tested.
