@@ -69,20 +69,31 @@ LOG_LEVEL ?= info
 
 .PHONY: help
 
+# Targets com ##@ são mostrados no help principal
+# Targets com ## são mostrados apenas com make <target> help
+
 help:  ## Exibir esta mensagem de ajuda
 	@clear
 	@printf "\033c"
 	@printf "$$HEADER\n"
 	@printf "\n"
 	@printf "$(YELLOW)ViperTrade Makefile - Automação de Tarefas$(NC)\n\n"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		sed 's/^\([a-zA-Z_-]*\):.*## \(.*\)/\1|\2/' | \
+	@printf "$(CYAN)Targets Principais (menus):$(NC)\n"
+	@grep -E '^[a-zA-Z_-]+:.*?##@ .*$$' $(MAKEFILE_LIST) | \
+		sed 's/^\([a-zA-Z_-]*\):.*##@ \(.*\)/\1|\2/' | \
 		while IFS='|' read -r target desc; do \
-			printf "$(CYAN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
+			printf "$(GREEN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
 		done
 	@printf "\n"
+	@printf "$(CYAN)Todos os Targets:$(NC)\n"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v '##@' | \
+		sed 's/^\([a-zA-Z_-]*\):.*## \([^@]*\)/\1|\2/' | \
+		while IFS='|' read -r target desc; do \
+			printf "$(CYAN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
+		done | sort
+	@printf "\n"
 	@printf "Uso: $(GREEN)make$(NC) $(BLUE)[alvo]$(NC)\n"
-	@printf "Exemplo: $(GREEN)make$(NC) $(BLUE)build$(NC), $(GREEN)make$(NC) $(BLUE)up$(NC), $(GREEN)make$(NC) $(BLUE)test$(NC)\n\n"
+	@printf "Exemplo: $(GREEN)make$(NC) $(BLUE)build$(NC), $(GREEN)make$(NC) $(BLUE)up$(NC), $(GREEN)make$(NC) $(BLUE)health-all$(NC)\n\n"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP INICIAL
@@ -90,7 +101,7 @@ help:  ## Exibir esta mensagem de ajuda
 
 .PHONY: setup setup-env setup-secrets setup-db
 
-setup: setup-env setup-secrets setup-db  ## Setup inicial completo do ambiente
+setup: setup-env setup-secrets setup-db  ##@ Setup Setup inicial completo do ambiente
 
 setup-env:  ## Copia arquivos de ambiente (.env.example → .env)
 	@printf "$(YELLOW)→$(NC) Copiando arquivos de ambiente...\n"
@@ -114,7 +125,7 @@ setup-db:  ## Inicializa database com schema e migrations
 
 .PHONY: build build-rust build-rust-release build-web build-images build-base-images
 
-build: build-rust build-web  ## Build completo do projeto
+build: build-rust build-web  ##@ Build Build completo do projeto
 
 build-rust:  ## Build do código Rust (workspace completo)
 	@printf "$(YELLOW)→$(NC) Build Rust...\n"
@@ -144,7 +155,7 @@ build-base-images:  ## Build apenas das imagens base (Rust builder/runtime)
 
 .PHONY: up up-host down down-timeout restart ps logs logs-strategy logs-executor logs-market-data logs-api
 
-up:  ## Sobe todos os serviços em background
+up:  ##@ Docker Sobe todos os serviços em background
 	@printf "$(YELLOW)→$(NC) Subindo serviços...\n"
 	$(COMPOSE) up -d
 	@printf "$(GREEN)✓$(NC) Serviços iniciados\n"
@@ -154,7 +165,7 @@ up-host:  ## Sobe serviços em modo host (fallback WSL)
 	$(COMPOSE_HOST) up -d
 	@printf "$(GREEN)✓$(NC) Serviços iniciados (host mode)\n"
 
-down:  ## Derruba todos os serviços
+down:  ##@ Docker Derruba todos os serviços
 	@printf "$(YELLOW)→$(NC) Derrubando serviços...\n"
 	$(COMPOSE) down
 	@printf "$(GREEN)✓$(NC) Serviços derrubados\n"
@@ -191,7 +202,7 @@ logs-api:  ## Mostra logs do serviço api
 
 .PHONY: test test-rust test-rust-lib test-rust-watch test-web
 
-test: test-rust test-web  ## Roda todos os testes
+test: test-rust test-web  ##@ Test Roda todos os testes
 
 test-rust:  ## Roda testes Rust
 	@printf "$(YELLOW)→$(NC) Testes Rust...\n"
@@ -215,7 +226,7 @@ test-web:  ## Roda testes do frontend web
 
 .PHONY: lint lint-rust lint-rust-check lint-web lint-docs format format-rust format-web check-format check-format-rust check-format-web
 
-lint: lint-rust lint-web lint-docs  ## Roda todos os linters
+lint: lint-rust lint-web lint-docs  ##@ Lint Roda todos os linters
 
 lint-rust:  ## Roda linter Rust (clippy)
 	@printf "$(YELLOW)→$(NC) Lint Rust...\n"
@@ -233,7 +244,7 @@ lint-docs:  ## Roda linter de documentação (markdownlint)
 	@printf "$(YELLOW)→$(NC) Lint Docs...\n"
 	./scripts/ci-local.sh
 
-format: format-rust format-web  ## Formata todo o código
+format: format-rust format-web  ##@ Format Formata todo o código
 
 format-rust:  ## Formata código Rust
 	@printf "$(YELLOW)→$(NC) Format Rust...\n"
@@ -259,7 +270,7 @@ check-format-web:  ## Verifica formatação Web
 
 .PHONY: validate validate-workspace validate-db validate-pipeline validate-runtime validate-runtime-host
 
-validate: validate-workspace validate-db validate-pipeline validate-runtime  ## Validações completas
+validate: validate-workspace validate-db validate-pipeline validate-runtime  ##@ Validate Validações completas
 
 validate-workspace:  ## Valida workspace completo
 	@printf "$(YELLOW)→$(NC) Validando workspace...\n"
@@ -289,7 +300,7 @@ validate-runtime-host:  ## Valida runtime (host mode)
 
 HEALTH_SERVICE ?= all
 
-health:  ## Health checks (use: make health, make health-all, make health-redis, etc)
+health:  ##@ Health Health checks (use: make health, make health-all, make health-redis, etc)
 	@printf "$(YELLOW)ViperTrade Health Checks$(NC)\n"
 	@printf "===========================================\n"
 	@printf "Uso: make health-[serviço]\n\n"
@@ -447,7 +458,7 @@ build-builder-image:  ## Build da imagem builder padrão
 	@printf "$(YELLOW)→$(NC) Build imagem builder...\n"
 	./scripts/build-base-images.sh
 
-ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
+ci-local:  ##@ CI/CD Roda CI local usando imagem Docker builder (format + clippy + test)
 	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
 	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
 	@printf "$(YELLOW)  Nota: Execute 'make build-builder-image' antes se necessário\n"
@@ -465,7 +476,7 @@ ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test
 
 .PHONY: clean clean-rust clean-web clean-docker clean-all
 
-clean: clean-rust clean-web  ## Limpa artefatos de build
+clean: clean-rust clean-web  ##@ Cleanup Limpa artefatos de build
 
 clean-rust:  ## Limpa artefatos Rust
 	@printf "$(YELLOW)→$(NC) Clean Rust...\n"
@@ -488,7 +499,7 @@ clean-all: clean clean-docker  ## Limpeza completa
 
 .PHONY: dev dev-rust dev-web
 
-dev: up logs  ## Modo desenvolvimento (sobe serviços e mostra logs)
+dev: up logs  ##@ Dev Modo desenvolvimento (sobe serviços e mostra logs)
 
 dev-rust:  ## Roda cargo watch para desenvolvimento Rust
 	@printf "$(YELLOW)→$(NC) Dev Rust (watch)...\n"
@@ -504,7 +515,7 @@ dev-web:  ## Roda dev server do frontend web
 
 .PHONY: docs docs-open
 
-docs:  ## Gera documentação
+docs: docs-open  ##@ Docs Gera e abre documentação Rust
 	@printf "$(YELLOW)→$(NC) Gerando documentação...\n"
 	$(CARGO) doc --workspace --no-deps
 
