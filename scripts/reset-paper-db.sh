@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/container-runtime.sh"
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/compose/docker-compose.yml}"
@@ -13,23 +12,33 @@ POSTGRES_DB="${POSTGRES_DB:-vipertrade}"
 
 cd "$ROOT_DIR"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo -e "${RED}ERROR:${NC} docker não encontrado"
-  exit 1
-fi
+show_help() {
+  vt_print_header "ViperTrade - Data Reset Paper DB"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/reset-paper-db.sh [--yes]"
+  echo ""
+  echo "Make target:"
+  echo "  make data-reset-paper-db"
+}
 
 run_psql() {
-  docker compose -f "$COMPOSE_FILE" exec -T postgres \
+  compose_exec_t postgres \
     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
 }
 
 run_api() {
-  docker compose -f "$COMPOSE_FILE" exec -T api sh -lc "$1"
+  compose_exec_t api sh -lc "$1"
 }
 
-echo -e "${GREEN}ViperTrade - Reset da base PAPER${NC}"
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  show_help
+  exit 0
+fi
+
+vt_print_header "ViperTrade - Data Reset Paper DB"
 echo "Compose: $COMPOSE_FILE"
-echo
+echo ""
 
 BEFORE_COUNTS="$(run_psql -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades),
@@ -38,17 +47,17 @@ BEFORE_COUNTS="$(run_psql -At -F '|' -c "SELECT
 
 IFS='|' read -r BEFORE_TRADES BEFORE_OPEN BEFORE_SNAPSHOTS <<< "$BEFORE_COUNTS"
 
-echo "Antes da limpeza:"
+echo "Before reset:"
 echo "- trades: $BEFORE_TRADES"
 echo "- open trades: $BEFORE_OPEN"
 echo "- position_snapshots: $BEFORE_SNAPSHOTS"
-echo
+echo ""
 
 if [[ "${1:-}" != "--yes" ]]; then
-  echo -e "${YELLOW}Dica:${NC} para uso não interativo, rode: ./scripts/reset-paper-db.sh --yes"
-  read -r -p "Prosseguir com a limpeza? [y/N] " CONFIRM
+  echo -e "${VT_YELLOW}Tip:${VT_NC} for non-interactive usage, run: ./scripts/reset-paper-db.sh --yes"
+  read -r -p "Proceed with the reset? [y/N] " CONFIRM
   if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "Abortado."
+    echo "Aborted."
     exit 0
   fi
 fi
@@ -67,13 +76,13 @@ IFS='|' read -r AFTER_TRADES AFTER_OPEN AFTER_SNAPSHOTS <<< "$AFTER_COUNTS"
 
 STATUS_JSON="$(run_api 'curl -s http://localhost:8080/api/v1/status || true')"
 
-echo
-echo -e "${GREEN}Limpeza concluída.${NC}"
-echo "Depois da limpeza:"
+echo ""
+vt_ok "Reset completed"
+echo "After reset:"
 echo "- trades: $AFTER_TRADES"
 echo "- open trades: $AFTER_OPEN"
 echo "- position_snapshots: $AFTER_SNAPSHOTS"
-echo
+echo ""
 
-echo "Status do runtime:"
+echo "Runtime status:"
 echo "$STATUS_JSON"

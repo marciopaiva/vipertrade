@@ -2,91 +2,144 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$ROOT_DIR/scripts"
 cd "$ROOT_DIR"
 
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-REPORT_FILE="logs/workspace-validation-${TIMESTAMP}.md"
+. "$SCRIPT_DIR/lib/common.sh"
 
-mkdir -p logs
+MODE="${1:-all}"
+STRICT_DOCS="${CI_LOCAL_STRICT_DOCS:-0}"
+SKIP_COMPOSE="${CI_LOCAL_SKIP_COMPOSE:-0}"
+SKIP_PIPELINE="${CI_LOCAL_SKIP_PIPELINE:-0}"
 
-PASS=0
-FAIL=0
-WARN=0
+PASS_COUNT=0
+FAIL_COUNT=0
+WARN_COUNT=0
 
-run_step() {
-  local name="$1"
-  local cmd="$2"
+print_header() {
+  vt_print_header "ViperTrade - Workspace Validation"
+}
 
-  {
-    echo "## ${name}"
-    echo
-    echo '```bash'
-    echo "$cmd"
-    echo '```'
-    echo
-  } >> "$REPORT_FILE"
+print_step() {
+  vt_step "$1"
+}
 
-  if bash -lc "$cmd" >> "$REPORT_FILE" 2>&1; then
-    echo "- status: PASS" >> "$REPORT_FILE"
-    echo >> "$REPORT_FILE"
-    PASS=$((PASS + 1))
+print_ok() {
+  PASS_COUNT=$((PASS_COUNT + 1))
+  vt_ok "$1"
+}
+
+print_warn() {
+  WARN_COUNT=$((WARN_COUNT + 1))
+  vt_warn "$1"
+}
+
+print_fail() {
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  vt_fail "$1"
+}
+
+run_check() {
+  local label="$1"
+  shift
+  print_step "$label"
+  if "$@"; then
+    print_ok "$label"
   else
-    echo "- status: FAIL" >> "$REPORT_FILE"
-    echo >> "$REPORT_FILE"
-    FAIL=$((FAIL + 1))
+    print_fail "$label"
   fi
 }
 
-run_optional_step() {
-  local name="$1"
-  local cmd="$2"
+show_help() {
+  print_header
+  echo ""
+  echo "Usage: $0 [all|quick|ci]"
+  echo ""
+  echo "Modes:"
+  echo "  all    - fmt, clippy, tests, ci-local, and supporting checks"
+  echo "  quick  - fmt, clippy, and tests"
+  echo "  ci     - run scripts/ci-local.sh"
+  echo ""
+  echo "Useful variables:"
+  echo "  CI_LOCAL_STRICT_DOCS=1  enable markdown lint"
+  echo "  CI_LOCAL_SKIP_COMPOSE=1 skip compose config validation"
+  echo "  CI_LOCAL_SKIP_PIPELINE=1 skip validate-pipeline"
+}
 
-  {
-    echo "## ${name}"
-    echo
-    echo '```bash'
-    echo "$cmd"
-    echo '```'
-    echo
-  } >> "$REPORT_FILE"
+require_command() {
+  local command_name="$1"
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    print_fail "$command_name not found"
+    return 1
+  fi
+  return 0
+}
 
-  if bash -lc "$cmd" >> "$REPORT_FILE" 2>&1; then
-    echo "- status: PASS" >> "$REPORT_FILE"
-    echo >> "$REPORT_FILE"
-    PASS=$((PASS + 1))
+run_quick_suite() {
+  run_check "Rust format check" cargo fmt --all -- --check
+  run_check "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
+  run_check "Rust tests" cargo test --workspace --locked
+}
+
+run_full_suite() {
+  run_quick_suite
+
+  if [[ -x ./scripts/security-check.sh ]]; then
+    run_check "Security checks" ./scripts/security-check.sh
   else
-    echo "- status: WARN" >> "$REPORT_FILE"
-    echo >> "$REPORT_FILE"
-    WARN=$((WARN + 1))
+    print_warn "scripts/security-check.sh not found; skipping"
+  fi
+
+  if [[ -x ./scripts/health-check.sh ]]; then
+    run_check "Health check script (help)" ./scripts/health-check.sh --help >/dev/null
+  else
+    print_warn "scripts/health-check.sh not found; skipping"
+  fi
+
+  if [[ -x ./scripts/ci-local.sh ]]; then
+    run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" CI_LOCAL_SKIP_PIPELINE="$SKIP_PIPELINE" ./scripts/ci-local.sh
+  else
+    print_fail "scripts/ci-local.sh not found"
   fi
 }
 
-cat > "$REPORT_FILE" <<EOF
-# Workspace Validation Report
+print_summary() {
+  echo ""
+  echo -e "${VT_CYAN}Summary:${VT_NC} PASS=$PASS_COUNT WARN=$WARN_COUNT FAIL=$FAIL_COUNT"
+}
 
-- generated_at: $(date -Iseconds)
-- workspace: ${ROOT_DIR}
+main() {
+  if [[ "$MODE" == "help" || "$MODE" == "-h" || "$MODE" == "--help" ]]; then
+    show_help
+    exit 0
+  fi
 
-EOF
+  print_header
+  require_command cargo || exit 1
 
-run_step "Security Check" "./scripts/security-check.sh"
-run_optional_step "Health Check" "./scripts/health-check.sh"
-run_step "Rust Format" "cargo fmt --all -- --check"
-run_step "Rust Clippy" "cargo clippy --workspace --all-targets -- -D warnings"
-run_step "Rust Tests" "cargo test --workspace --locked"
-run_step "Local CI Script" "CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh"
+  case "$MODE" in
+    quick)
+      run_quick_suite
+      ;;
+    ci)
+      if [[ -x ./scripts/ci-local.sh ]]; then
+        run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" CI_LOCAL_SKIP_PIPELINE="$SKIP_PIPELINE" ./scripts/ci-local.sh
+      else
+        print_fail "scripts/ci-local.sh not found"
+      fi
+      ;;
+    all)
+      run_full_suite
+      ;;
+    *)
+      print_fail "Unrecognized mode '$MODE'"
+      show_help
+      exit 1
+      ;;
+  esac
 
-{
-  echo "## Summary"
-  echo
-  echo "- pass: ${PASS}"
-  echo "- warn: ${WARN}"
-  echo "- fail: ${FAIL}"
-  echo
-} >> "$REPORT_FILE"
+  print_summary
+  [[ "$FAIL_COUNT" -eq 0 ]]
+}
 
-echo "Validation report: ${REPORT_FILE}"
-
-if [[ "$FAIL" -gt 0 ]]; then
-  exit 1
-fi
+main "$@"

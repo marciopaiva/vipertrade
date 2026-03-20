@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 ACTION="${1:-}"
 API_URL="${API_URL:-http://localhost:8080}"
 OPERATOR_TOKEN="${OPERATOR_API_TOKEN:-}"
@@ -10,25 +12,31 @@ DB_CONTAINER="${DB_CONTAINER:-vipertrade-postgres}"
 DB_USER="${DB_USER:-viper}"
 DB_NAME="${DB_NAME:-vipertrade}"
 VERIFY_DB="${VERIFY_DB:-1}"
-. "$(dirname "$0")/container-runtime.sh"
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/container-runtime.sh"
 
 usage() {
-  cat <<'USAGE'
-Usage:
-  ./scripts/kill-switch-control.sh status
-  REASON="incident" OPERATOR_API_TOKEN=... ./scripts/kill-switch-control.sh enable
-  REASON="recovered" OPERATOR_API_TOKEN=... ./scripts/kill-switch-control.sh disable
-
-Environment:
-  API_URL            API base URL (default: http://localhost:8080)
-  OPERATOR_API_TOKEN Required for enable/disable
-  OPERATOR_ID        Operator identifier in audit event (default: local-ops)
-  REASON             Reason for enable/disable operation
-  VERIFY_DB          1 to run DB verification query (default), 0 to skip
-  DB_CONTAINER       Postgres container name (default: vipertrade-postgres)
-  DB_USER            Postgres user (default: viper)
-  DB_NAME            Postgres DB name (default: vipertrade)
-USAGE
+  vt_print_header "ViperTrade - Kill Switch Control"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/kill-switch-control.sh status"
+  echo "  REASON=\"incident\" OPERATOR_API_TOKEN=... ./scripts/kill-switch-control.sh enable"
+  echo "  REASON=\"recovered\" OPERATOR_API_TOKEN=... ./scripts/kill-switch-control.sh disable"
+  echo ""
+  echo "Actions:"
+  echo "  status   - show the current kill switch state"
+  echo "  enable   - enable the global execution block"
+  echo "  disable  - disable the global execution block"
+  echo ""
+  echo "Environment:"
+  echo "  API_URL            API base URL (default: http://localhost:8080)"
+  echo "  OPERATOR_API_TOKEN Required for enable/disable"
+  echo "  OPERATOR_ID        Operator identifier for the audit event (default: local-ops)"
+  echo "  REASON             Reason for the operation"
+  echo "  VERIFY_DB          1 to verify in PostgreSQL (default), 0 to skip"
+  echo "  DB_CONTAINER       PostgreSQL container name (default: vipertrade-postgres)"
+  echo "  DB_USER            PostgreSQL user (default: viper)"
+  echo "  DB_NAME            Database name (default: vipertrade)"
 }
 
 need_cmd() {
@@ -87,17 +95,20 @@ db_verify_latest_event() {
 
 case "${ACTION}" in
   status)
-    echo "[api] /api/v1/status"
+    vt_print_header "ViperTrade - Kill Switch Control"
+    echo "[api] querying /api/v1/status"
     api_status | print_json_pretty
     db_verify_latest_event
     ;;
   enable)
-    echo "[api] enabling kill-switch"
+    vt_print_header "ViperTrade - Kill Switch Control"
+    echo "[api] enabling kill switch"
     api_set_kill_switch true | print_json_pretty
     db_verify_latest_event
     ;;
   disable)
-    echo "[api] disabling kill-switch"
+    vt_print_header "ViperTrade - Kill Switch Control"
+    echo "[api] disabling kill switch"
     api_set_kill_switch false | print_json_pretty
     db_verify_latest_event
     ;;
