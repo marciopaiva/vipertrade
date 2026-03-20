@@ -53,7 +53,7 @@ RUN mkdir -p crates/viper-domain/src \
            services/api/src \
            services/web/src
 
-# Copiar apenas Cargo.toml de cada serviço
+# Copiar apenas Cargo.toml de cada serviço Rust
 COPY crates/viper-domain/Cargo.toml crates/viper-domain/
 COPY services/market-data/Cargo.toml services/market-data/
 COPY services/analytics/Cargo.toml services/analytics/
@@ -62,11 +62,11 @@ COPY services/executor/Cargo.toml services/executor/
 COPY services/monitor/Cargo.toml services/monitor/
 COPY services/backtest/Cargo.toml services/backtest/
 COPY services/api/Cargo.toml services/api/
-COPY services/web/Cargo.toml services/web/
+# services/web é Node.js, não tem Cargo.toml
 
-# Criar main.rs dummy em cada serviço
+# Criar main.rs dummy em cada serviço Rust
 RUN echo 'fn main() {}' > crates/viper-domain/src/lib.rs && \
-    for svc in market-data analytics strategy executor monitor backtest api web; do \
+    for svc in market-data analytics strategy executor monitor backtest api; do \
       echo 'fn main() {}' > services/$$svc/src/main.rs; \
     done
 
