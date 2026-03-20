@@ -64,9 +64,11 @@ COPY services/backtest/Cargo.toml services/backtest/
 COPY services/api/Cargo.toml services/api/
 # services/web é Node.js, não tem Cargo.toml
 
-# Criar main.rs dummy em cada serviço Rust
-RUN echo 'fn main() {}' > crates/viper-domain/src/lib.rs && \
+# Criar estrutura de diretórios e main.rs dummy em cada serviço Rust
+RUN mkdir -p crates/viper-domain/src && \
+    echo 'fn main() {}' > crates/viper-domain/src/lib.rs && \
     for svc in market-data analytics strategy executor monitor backtest api; do \
+      mkdir -p services/$$svc/src && \
       echo 'fn main() {}' > services/$$svc/src/main.rs; \
     done
 
