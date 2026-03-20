@@ -153,6 +153,27 @@ health-web:  ## Verifica saúde do Web
 	@./scripts/health-check.sh web
 
 # ═══════════════════════════════════════════════════════════════════════════
+# VALIDATE RUNTIME
+# ═══════════════════════════════════════════════════════════════════════════
+
+.PHONY: validate-runtime validate-runtime-start validate-runtime-check validate-runtime-subscribers validate-runtime-events
+
+validate-runtime:  ##@ Validate Validação completa do runtime (bridge mode)
+	@./scripts/validate-runtime.sh bridge all
+
+validate-runtime-start:  ## Validate Iniciar stack
+	@./scripts/validate-runtime.sh bridge start
+
+validate-runtime-check:  ## Validate Health check
+	@./scripts/validate-runtime.sh bridge check
+
+validate-runtime-subscribers:  ## Validate Redis subscribers
+	@./scripts/validate-runtime.sh bridge subscribers
+
+validate-runtime-events:  ## Validate Event flow
+	@./scripts/validate-runtime.sh bridge events
+
+# ═══════════════════════════════════════════════════════════════════════════
 # DATA MANAGEMENT (Redis + PostgreSQL)
 # ═══════════════════════════════════════════════════════════════════════════
 
