@@ -403,30 +403,45 @@ audit-outdated:  ## Verifica dependências desatualizadas
 # CI/CD
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: ci-local ci-strict pre-commit check-rust-components
+.PHONY: ci-local ci-strict ci-docker ci-docker-full
 
-check-rust-components:  ## Verifica componentes Rust necessários (rustfmt, clippy)
-	@printf "$(YELLOW)→$(NC) Verificando componentes Rust...\n"
-	@if ! cargo fmt --version >/dev/null 2>&1; then \
-		printf "$(RED)✗$(NC) rustfmt não disponível.\n"; \
-		printf "$(YELLOW)  Instale com: rustup component add rustfmt\n"; \
-		printf "$(YELLOW)  Ou: cargo install rustfmt\n"; \
-		exit 1; \
-	fi
-	@if ! cargo clippy --version >/dev/null 2>&1; then \
-		printf "$(RED)✗$(NC) clippy não disponível.\n"; \
-		printf "$(YELLOW)  Instale com: rustup component add clippy\n"; \
-		printf "$(YELLOW)  Ou: cargo install clippy\n"; \
-		exit 1; \
-	fi
-	@printf "$(GREEN)✓$(NC) Componentes Rust verificados\n"
+RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder:1.83
 
-ci-local: check-rust-components  ## Roda CI localmente (paridade com GitHub Actions)
+ci-docker:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
+	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
+	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
+	$(DOCKER) run --rm \
+		-v "$$(pwd)":/work \
+		-w /work \
+		$(RUST_BUILDER_IMAGE) \
+		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
+
+ci-docker-full:  ## Roda CI completo com Docker (format + clippy + test + pipeline)
+	@printf "$(YELLOW)→$(NC) CI Full (Docker builder)...\n"
+	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
+	$(DOCKER) run --rm \
+		-v "$$(pwd)":/work \
+		-w /work \
+		-e CI_LOCAL_SKIP_COMPOSE=1 \
+		$(RUST_BUILDER_IMAGE) \
+		./scripts/ci-local.sh
+
+ci-docker-shell:  ## Shell interativo na imagem builder (para debug)
+	@printf "$(YELLOW)→$(NC) Shell Docker builder...\n"
+	$(DOCKER) run --rm -it \
+		-v "$$(pwd)":/work \
+		-w /work \
+		$(RUST_BUILDER_IMAGE) \
+		bash
+
+ci-local:  ## Roda CI localmente (paridade com GitHub Actions)
 	@printf "$(YELLOW)→$(NC) CI Local...\n"
+	@printf "$(YELLOW)  Recomendação: Use 'make ci-docker' para ambiente consistente\n"
 	./scripts/ci-local.sh
 
-ci-strict: check-rust-components  ## Roda CI local em modo strict (com docs)
+ci-strict:  ## Roda CI local em modo strict (com docs)
 	@printf "$(YELLOW)→$(NC) CI Local (strict)...\n"
+	@printf "$(YELLOW)  Recomendação: Use 'make ci-docker-full' para ambiente consistente\n"
 	CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
 
 pre-commit: format lint test  ## Roda hooks de pre-commit
