@@ -116,50 +116,25 @@ health:  ##@ Health Checks [ + ]
 	@printf "  $(CYAN)make health HEALTH_SERVICE=redis$(NC)\n"
 
 health-all:  ## Health check de todos os serviços
-	@printf "$(YELLOW)→$(NC) Health Checks - Todos os serviços...\n\n"
-	@$(MAKE) -s health-postgres
-	@$(MAKE) -s health-redis
-	@$(MAKE) -s health-strategy
-	@$(MAKE) -s health-executor
-	@$(MAKE) -s health-api
-	@$(MAKE) -s health-web
-	@printf "\n$(GREEN)✓$(NC) Health checks completos\n"
+	@./scripts/health-check.sh all
 
 health-postgres:  ## Verifica saúde do PostgreSQL
-	@printf "$(YELLOW)→$(NC) Health: PostgreSQL...\n"
-	@$(DOCKER) exec vipertrade-postgres pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 && \
-		printf "$(GREEN)✓$(NC) PostgreSQL OK\n" || \
-		printf "$(RED)✗$(NC) PostgreSQL não disponível\n"
+	@./scripts/health-check.sh postgres
 
 health-redis:  ## Verifica saúde do Redis
-	@printf "$(YELLOW)→$(NC) Health: Redis...\n"
-	@$(DOCKER) exec vipertrade-redis redis-cli ping && \
-		printf "$(GREEN)✓$(NC) Redis OK\n" || \
-		printf "$(RED)✗$(NC) Redis não disponível\n"
+	@./scripts/health-check.sh redis
 
 health-strategy:  ## Verifica saúde do serviço strategy
-	@printf "$(YELLOW)→$(NC) Health: Strategy...\n"
-	@curl -sf http://localhost:8082/health > /dev/null 2>&1 && \
-		printf "$(GREEN)✓$(NC) Strategy OK\n" || \
-		printf "$(RED)✗$(NC) Strategy não disponível\n"
+	@./scripts/health-check.sh strategy
 
 health-executor:  ## Verifica saúde do serviço executor
-	@printf "$(YELLOW)→$(NC) Health: Executor...\n"
-	@curl -sf http://localhost:8083/health > /dev/null 2>&1 && \
-		printf "$(GREEN)✓$(NC) Executor OK\n" || \
-		printf "$(RED)✗$(NC) Executor não disponível\n"
+	@./scripts/health-check.sh executor
 
 health-api:  ## Verifica saúde do serviço api
-	@printf "$(YELLOW)→$(NC) Health: API...\n"
-	@curl -sf http://localhost:8080/health > /dev/null 2>&1 && \
-		printf "$(GREEN)✓$(NC) API OK\n" || \
-		printf "$(RED)✗$(NC) API não disponível\n"
+	@./scripts/health-check.sh api
 
 health-web:  ## Verifica saúde do serviço web
-	@printf "$(YELLOW)→$(NC) Health: Web...\n"
-	@curl -sf http://localhost:3000 > /dev/null 2>&1 && \
-		printf "$(GREEN)✓$(NC) Web OK\n" || \
-		printf "$(RED)✗$(NC) Web não disponível\n"
+	@./scripts/health-check.sh web
 
 # ═══════════════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
