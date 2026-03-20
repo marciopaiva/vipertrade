@@ -415,7 +415,7 @@ build-builder-image:  ## Build da imagem builder otimizada (com cache de deps)
 		-t $(RUST_BUILDER_IMAGE) \
 		.
 
-ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
+ci-local: check-builder-image  ## Roda CI local usando imagem Docker builder (format + clippy + test)
 	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
 	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
 	$(DOCKER) run --rm \
@@ -423,6 +423,12 @@ ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test
 		-w /work \
 		$(RUST_BUILDER_IMAGE) \
 		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
+
+check-builder-image:  ## Verifica se imagem builder existe, cria se necessário
+	@if ! $(DOCKER) inspect $(RUST_BUILDER_IMAGE) >/dev/null 2>&1; then \
+		printf "$(YELLOW)!$(NC) Imagem builder não encontrada. Construindo...\n"; \
+		$(MAKE) build-builder-image; \
+	fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLEANUP
