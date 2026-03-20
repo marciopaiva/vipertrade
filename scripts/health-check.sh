@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ViperTrade Health Check Script
-# Uso: ./health-check.sh [all|postgres|redis|strategy|executor|api|web]
+# Uso: ./scripts/health-check.sh [all|postgres|redis|market-data|analytics|strategy|executor|monitor|backtest|api|web]
 # ═══════════════════════════════════════════════════════════════════════════
 
 GREEN="\033[0;32m"
@@ -68,6 +68,28 @@ check_redis() {
   fi
 }
 
+check_market_data() {
+  print_service "Market Data"
+  if curl -sf http://localhost:8081/health >/dev/null 2>&1; then
+    print_ok "Market Data"
+    return 0
+  else
+    print_fail "Market Data"
+    return 1
+  fi
+}
+
+check_analytics() {
+  print_service "Analytics"
+  if curl -sf http://localhost:8086/health >/dev/null 2>&1; then
+    print_ok "Analytics"
+    return 0
+  else
+    print_fail "Analytics"
+    return 1
+  fi
+}
+
 check_strategy() {
   print_service "Strategy"
   if curl -sf http://localhost:8082/health >/dev/null 2>&1; then
@@ -86,6 +108,28 @@ check_executor() {
     return 0
   else
     print_fail "Executor"
+    return 1
+  fi
+}
+
+check_monitor() {
+  print_service "Monitor"
+  if curl -sf http://localhost:8084/health >/dev/null 2>&1; then
+    print_ok "Monitor"
+    return 0
+  else
+    print_fail "Monitor"
+    return 1
+  fi
+}
+
+check_backtest() {
+  print_service "Backtest"
+  if curl -sf http://localhost:8085/health >/dev/null 2>&1; then
+    print_ok "Backtest"
+    return 0
+  else
+    print_fail "Backtest"
     return 1
   fi
 }
@@ -117,8 +161,12 @@ check_all() {
   
   check_postgres || failed=1
   check_redis || failed=1
+  check_market_data || failed=1
+  check_analytics || failed=1
   check_strategy || failed=1
   check_executor || failed=1
+  check_monitor || failed=1
+  check_backtest || failed=1
   check_api || failed=1
   check_web || failed=1
   
@@ -129,18 +177,23 @@ show_help() {
   echo "Uso: $0 [serviço]"
   echo ""
   echo "Serviços disponíveis:"
-  echo "  all       - Todos os serviços (padrão)"
-  echo "  postgres  - PostgreSQL"
-  echo "  redis     - Redis"
-  echo "  strategy  - Strategy Service"
-  echo "  executor  - Executor Service"
-  echo "  api       - API Service"
-  echo "  web       - Web Dashboard"
+  echo "  all        - Todos os serviços (padrão)"
+  echo "  postgres   - PostgreSQL"
+  echo "  redis      - Redis"
+  echo "  market-data - Market Data Service (8081)"
+  echo "  analytics  - Analytics Service (8086)"
+  echo "  strategy   - Strategy Service (8082)"
+  echo "  executor   - Executor Service (8083)"
+  echo "  monitor    - Monitor Service (8084)"
+  echo "  backtest   - Backtest Service (8085)"
+  echo "  api        - API Service (8080)"
+  echo "  web        - Web Dashboard (3000)"
   echo ""
   echo "Exemplos:"
-  echo "  $0          # Todos os serviços"
-  echo "  $0 redis    # Apenas Redis"
-  echo "  $0 api      # Apenas API"
+  echo "  $0              # Todos os serviços"
+  echo "  $0 redis        # Apenas Redis"
+  echo "  $0 api          # Apenas API"
+  echo "  $0 strategy     # Apenas Strategy"
 }
 
 # Main
@@ -157,11 +210,23 @@ case "$SERVICE" in
   redis)
     check_redis
     ;;
+  market-data)
+    check_market_data
+    ;;
+  analytics)
+    check_analytics
+    ;;
   strategy)
     check_strategy
     ;;
   executor)
     check_executor
+    ;;
+  monitor)
+    check_monitor
+    ;;
+  backtest)
+    check_backtest
     ;;
   api)
     check_api

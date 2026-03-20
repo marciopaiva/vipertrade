@@ -104,13 +104,17 @@ health:  ##@ Health Checks [ + ]
 	@printf "$(YELLOW)ViperTrade - Health Checks$(NC)\n\n"
 	@printf "$(CYAN)make health-[serviço]$(NC)\n\n"
 	@printf "Serviços disponíveis:\n"
-	@printf "  $(CYAN)make health-all$(NC)       - Todos os serviços\n"
-	@printf "  $(CYAN)make health-postgres$(NC)  - PostgreSQL\n"
-	@printf "  $(CYAN)make health-redis$(NC)     - Redis\n"
-	@printf "  $(CYAN)make health-strategy$(NC)  - Strategy Service\n"
-	@printf "  $(CYAN)make health-executor$(NC)  - Executor Service\n"
-	@printf "  $(CYAN)make health-api$(NC)       - API Service\n"
-	@printf "  $(CYAN)make health-web$(NC)       - Web Dashboard\n"
+	@printf "  $(CYAN)make health-all$(NC)        - Todos os serviços\n"
+	@printf "  $(CYAN)make health-postgres$(NC)   - PostgreSQL\n"
+	@printf "  $(CYAN)make health-redis$(NC)      - Redis\n"
+	@printf "  $(CYAN)make health-market-data$(NC) - Market Data (8081)\n"
+	@printf "  $(CYAN)make health-analytics$(NC)  - Analytics (8086)\n"
+	@printf "  $(CYAN)make health-strategy$(NC)   - Strategy (8082)\n"
+	@printf "  $(CYAN)make health-executor$(NC)   - Executor (8083)\n"
+	@printf "  $(CYAN)make health-monitor$(NC)    - Monitor (8084)\n"
+	@printf "  $(CYAN)make health-backtest$(NC)   - Backtest (8085)\n"
+	@printf "  $(CYAN)make health-api$(NC)        - API (8080)\n"
+	@printf "  $(CYAN)make health-web$(NC)        - Web (3000)\n"
 	@printf "\n"
 	@printf "Dica: Use HEALTH_SERVICE para scripts\n"
 	@printf "  $(CYAN)make health HEALTH_SERVICE=redis$(NC)\n"
@@ -124,16 +128,28 @@ health-postgres:  ## Verifica saúde do PostgreSQL
 health-redis:  ## Verifica saúde do Redis
 	@./scripts/health-check.sh redis
 
-health-strategy:  ## Verifica saúde do serviço strategy
+health-market-data:  ## Verifica saúde do Market Data
+	@./scripts/health-check.sh market-data
+
+health-analytics:  ## Verifica saúde do Analytics
+	@./scripts/health-check.sh analytics
+
+health-strategy:  ## Verifica saúde do Strategy
 	@./scripts/health-check.sh strategy
 
-health-executor:  ## Verifica saúde do serviço executor
+health-executor:  ## Verifica saúde do Executor
 	@./scripts/health-check.sh executor
 
-health-api:  ## Verifica saúde do serviço api
+health-monitor:  ## Verifica saúde do Monitor
+	@./scripts/health-check.sh monitor
+
+health-backtest:  ## Verifica saúde do Backtest
+	@./scripts/health-check.sh backtest
+
+health-api:  ## Verifica saúde do API
 	@./scripts/health-check.sh api
 
-health-web:  ## Verifica saúde do serviço web
+health-web:  ## Verifica saúde do Web
 	@./scripts/health-check.sh web
 
 # ═══════════════════════════════════════════════════════════════════════════
