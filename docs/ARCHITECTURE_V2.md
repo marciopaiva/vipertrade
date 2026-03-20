@@ -62,8 +62,7 @@ Operational trade-profile labels:
 ## Container Runtime Standards
 
 - Use `./scripts/compose.sh` as default compose entrypoint (bridge mode).
-- Keep `./scripts/compose-host.sh` only as local WSL fallback.
-- Keep Podman support only as legacy fallback path for environments without Docker.
+- Use Docker Desktop + WSL as the standard local runtime.
 - Prefer bridge network over `network_mode: host` for service isolation.
 - Keep volumes explicit for: postgres, redis, audit logs, plan cache.
 - Healthchecks must verify dependencies (DB/Redis/Bybit reachability).

@@ -27,8 +27,8 @@ Define objective criteria and rollback rules before promoting from paper mode to
 
 ## Required Evidence Bundle
 
-- `docs/operations/PHASE4_BACKTEST_RUN_<date>.md`
-- `docs/operations/PHASE4_PAPER_REGRESSION_<date>.md`
+- `docs/operations/evidence/PHASE4_BACKTEST_RUN_<date>.md`
+- `docs/operations/evidence/PHASE4_PAPER_REGRESSION_<date>.md`
 - `docs/operations/artifacts/backtest/*.json`
 - `docs/operations/artifacts/paper/*.json`
 - Relevant runbook notes and incident entries (if any)

@@ -1,43 +1,43 @@
 # 05 - Runtime and Operations
 
-Source: VIPERTRADE_SPEC.md (sections 7-17).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
 
 ## Error Handling and Resilience
 
-- Matriz de erro por dominio: Bybit REST, WebSocket, database e risk engine.
-- Politica de retry com backoff exponencial e jitter.
-- Falhas criticas devem acionar pausa de entradas e alerta imediato.
-- Fallback operacional: polling REST quando WebSocket ficar indisponivel.
+- Error matrix by domain: Bybit REST, WebSocket, database, and risk engine.
+- Retry policy with exponential backoff and jitter.
+- Critical failures must pause new entries and trigger immediate alerting.
+- Operational fallback: REST polling when WebSocket becomes unavailable.
 
 ## WebSocket Reconnection Strategy
 
-- Reconexao progressiva para canais publicos e privados.
-- Heartbeat com timeout e resubscription automatica.
-- Recuperacao de estado apos reconnect.
-- Validar posicoes, ordens e reconciliar via REST.
+- Progressive reconnection for public and private channels.
+- Heartbeat with timeout and automatic resubscription.
+- State recovery after reconnect.
+- Validate positions and orders, then reconcile via REST.
 
 ## Disaster Recovery
 
-- Classificacao de incidentes: critical, high, medium, low.
-- SLOs operacionais definidos por RTO/RPO.
-- Procedimentos obrigatorios.
-- kill_switch para conter perdas.
-- Restauracao de banco com reconciliacao posterior.
-- Revogacao de API key em suspeita de comprometimento.
-- Post-mortem obrigatorio para incidentes critical e high.
+- Incident classification: critical, high, medium, low.
+- Operational SLOs defined by RTO/RPO.
+- Mandatory procedures.
+- `kill_switch` to contain losses.
+- Database restore followed by reconciliation.
+- API key revocation when compromise is suspected.
+- Mandatory post-mortem for critical and high incidents.
 
 ## Secrets and Security Operations
 
-- Segredos em compose/.env e pasta secrets/ com permissoes restritas.
-- Rotacao de keys em ciclo regular (exemplo: 90 dias) com teste em testnet.
-- Checklist de pre-mainnet inclui permissao minima de API key, 2FA, IP whitelist e ausencia de segredos no Git.
+- Secrets stored in `compose/.env` and `secrets/` with restricted permissions.
+- Key rotation on a regular cadence (for example, every 90 days) with testnet validation.
+- Pre-mainnet checklist includes minimum API key permissions, 2FA, IP allowlists, and no secrets committed to Git.
 
 ## Notifications and Monitoring
 
-- Alertas por webhook com niveis critical, warning e info.
-- Dedupe e batching para reduzir ruido operacional.
-- Tipos de alerta principais: circuit breaker, stop loss, trailing stop e resumo diario.
-- Alertas operacionais sao para operador do bot; eventos de copy para followers sao controlados pela Bybit.
+- Webhook alerts with `critical`, `warning`, and `info` levels.
+- Deduplication and batching to reduce operational noise.
+- Main alert types: circuit breaker, stop loss, trailing stop, and daily summary.
+- Operational alerts target the bot operator; copy-trading events for followers remain controlled by Bybit.
 
 ## Tupa Integration Model
 
@@ -70,4 +70,4 @@ Source: VIPERTRADE_SPEC.md (sections 7-17).
 
 ## Referencia Original
 
-- VIPERTRADE_SPEC.md linhas aproximadas 491-1767.
+- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 491-1767.
