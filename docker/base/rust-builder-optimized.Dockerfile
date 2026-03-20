@@ -35,11 +35,19 @@ RUN rustup set profile minimal \
 WORKDIR /work
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CAMADA 1: Cache do Cargo.lock + Cargo.toml
+# CAMADA 1: Cache do Cargo.lock + Cargo.toml + membros do workspace
 # Esta camada muda pouco, então o cache é preservado na maioria dos builds
 # ═══════════════════════════════════════════════════════════════════════════
 
 COPY Cargo.toml Cargo.lock ./
+COPY crates/viper-domain/Cargo.toml crates/viper-domain/
+COPY services/market-data/Cargo.toml services/market-data/
+COPY services/analytics/Cargo.toml services/analytics/
+COPY services/strategy/Cargo.toml services/strategy/
+COPY services/executor/Cargo.toml services/executor/
+COPY services/monitor/Cargo.toml services/monitor/
+COPY services/backtest/Cargo.toml services/backtest/
+COPY services/api/Cargo.toml services/api/
 
 # Apenas fetch das dependências (download sem compilar)
 # Isso é cacheado e evita download repetido
