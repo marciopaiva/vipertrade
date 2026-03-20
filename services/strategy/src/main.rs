@@ -91,6 +91,19 @@ struct InvalidSignalDrop {
     timestamp: String,
 }
 
+#[derive(Debug, Clone)]
+struct HealthScoreComponent {
+    reason: &'static str,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct PositionHealthBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<HealthScoreComponent>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct WalletSizingResponse {
     total_equity: Option<f64>,
@@ -774,6 +787,29 @@ fn get_string(state: &Value, key: &str, default: &str) -> String {
         .to_string()
 }
 
+fn get_record_field<'a>(state: &'a Value, key: &str, field: &str) -> Option<&'a Value> {
+    state.get(key).and_then(|value| value.get(field))
+}
+
+fn get_record_bool(state: &Value, key: &str, field: &str, default: bool) -> bool {
+    get_record_field(state, key, field)
+        .and_then(Value::as_bool)
+        .unwrap_or(default)
+}
+
+fn get_record_f64(state: &Value, key: &str, field: &str, default: f64) -> f64 {
+    get_record_field(state, key, field)
+        .and_then(Value::as_f64)
+        .unwrap_or(default)
+}
+
+fn get_record_string(state: &Value, key: &str, field: &str, default: &str) -> String {
+    get_record_field(state, key, field)
+        .and_then(Value::as_str)
+        .unwrap_or(default)
+        .to_string()
+}
+
 fn side_from_trend(trend: f64) -> &'static str {
     if trend >= 0.0 {
         "Long"
@@ -1229,12 +1265,114 @@ fn execute_strategy_step(
                                     + btc_macro_penalty)
                     }
             };
-            Ok(json!(
-                spread_pct <= cfg.max_spread_pct(&symbol)
-                    && volume_24h >= cfg.min_volume_24h_usdt(&symbol)
-                    && atr_pct <= cfg.max_atr_pct(&symbol)
-                    && directional_ok
-            ))
+            let max_spread_pct = cfg.max_spread_pct(&symbol);
+            let min_volume_24h = cfg.min_volume_24h_usdt(&symbol);
+            let max_atr_pct = cfg.max_atr_pct(&symbol);
+            let min_volume_ratio = cfg.min_volume_ratio_for_side(&symbol, entry_side);
+            let min_trend_score =
+                cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty;
+            let passed = spread_pct <= max_spread_pct
+                && volume_24h >= min_volume_24h
+                && atr_pct <= max_atr_pct
+                && directional_ok;
+            let reason = if passed {
+                "entry_validated".to_string()
+            } else if cfg.require_btc_macro_alignment()
+                && cfg
+                    .btc_macro_penalty_for_side(
+                        &symbol,
+                        entry_side,
+                        &btc_regime,
+                        btc_trend_score,
+                        btc_consensus_count,
+                    )
+                    .is_none()
+            {
+                format!("{}_block_btc_macro_misaligned", entry_side)
+            } else if spread_pct > max_spread_pct {
+                format!("{}_block_spread", entry_side)
+            } else if volume_24h < min_volume_24h {
+                format!("{}_block_volume_24h", entry_side)
+            } else if atr_pct > max_atr_pct {
+                format!("{}_block_atr_pct", entry_side)
+            } else if raw_trend_score >= 0.0 && !cfg.allow_long(&symbol) {
+                "long_block_disabled".to_string()
+            } else if raw_trend_score < 0.0 && !cfg.allow_short(&symbol) {
+                "short_block_disabled".to_string()
+            } else if raw_trend_score >= 0.0 && !regime.eq_ignore_ascii_case("bullish") {
+                format!("long_block_consensus_regime_{}", regime.to_lowercase())
+            } else if raw_trend_score < 0.0 && !regime.eq_ignore_ascii_case("bearish") {
+                format!("short_block_consensus_regime_{}", regime.to_lowercase())
+            } else if raw_trend_score >= 0.0 && !bybit_regime.eq_ignore_ascii_case("bullish") {
+                format!("long_block_bybit_regime_{}", bybit_regime.to_lowercase())
+            } else if raw_trend_score < 0.0 && !bybit_regime.eq_ignore_ascii_case("bearish") {
+                format!("short_block_bybit_regime_{}", bybit_regime.to_lowercase())
+            } else if raw_trend_score >= 0.0 && !consensus_long_ok {
+                format!(
+                    "long_block_consensus_{}_of_{}",
+                    bullish_exchanges, exchanges_available
+                )
+            } else if raw_trend_score < 0.0 && !consensus_short_ok {
+                format!(
+                    "short_block_consensus_{}_of_{}",
+                    bearish_exchanges, exchanges_available
+                )
+            } else if raw_trend_score >= 0.0 && consensus_trend_slope <= 0.0 {
+                format!("long_block_trend_slope_{:.5}_lte_0", consensus_trend_slope)
+            } else if raw_trend_score < 0.0 && consensus_trend_slope >= 0.0 {
+                format!("short_block_trend_slope_{:.5}_gte_0", consensus_trend_slope)
+            } else if raw_trend_score >= 0.0 && consensus_ema_fast <= consensus_ema_slow {
+                "long_block_ema_alignment".to_string()
+            } else if raw_trend_score < 0.0 && consensus_ema_fast >= consensus_ema_slow {
+                "short_block_ema_alignment".to_string()
+            } else if raw_trend_score >= 0.0 && current_price < ema_fast {
+                format!(
+                    "long_block_price_{:.5}_lt_fast_ema_{:.5}",
+                    current_price, ema_fast
+                )
+            } else if raw_trend_score < 0.0 && current_price > ema_fast {
+                format!(
+                    "short_block_price_{:.5}_gt_fast_ema_{:.5}",
+                    current_price, ema_fast
+                )
+            } else if consensus_rsi_14 < rsi_min || consensus_rsi_14 > rsi_max {
+                format!(
+                    "{}_block_rsi_{:.2}_outside_{:.2}_{:.2}",
+                    entry_side, consensus_rsi_14, rsi_min, rsi_max
+                )
+            } else if raw_trend_score >= 0.0 && consensus_macd_line <= consensus_macd_signal {
+                "long_block_macd_cross".to_string()
+            } else if raw_trend_score < 0.0 && consensus_macd_line >= consensus_macd_signal {
+                "short_block_macd_cross".to_string()
+            } else if raw_trend_score >= 0.0 && consensus_macd_histogram <= 0.0 {
+                format!("long_block_macd_hist_{:.6}_lte_0", consensus_macd_histogram)
+            } else if raw_trend_score < 0.0 && consensus_macd_histogram >= 0.0 {
+                format!(
+                    "short_block_macd_hist_{:.6}_gte_0",
+                    consensus_macd_histogram
+                )
+            } else if consensus_volume_ratio < min_volume_ratio {
+                format!(
+                    "{}_block_volume_ratio_{:.2}_lt_{:.2}",
+                    entry_side, consensus_volume_ratio, min_volume_ratio
+                )
+            } else if consensus_trend_score < min_trend_score {
+                format!(
+                    "{}_block_trend_score_{:.3}_lt_{:.3}",
+                    entry_side, consensus_trend_score, min_trend_score
+                )
+            } else if !directional_ok {
+                format!("{}_block_directional_checks", entry_side)
+            } else {
+                "risk_constraints_not_met".to_string()
+            };
+            Ok(json!({
+                "passed": passed,
+                "severity": if passed { "info" } else { "error" },
+                "reason": reason,
+                "side": entry_side,
+                "entry_score": get_f64(&state, "consensus_trend_score", raw_trend_score).abs()
+            }))
         }
         "check_funding" => {
             let funding_rate = get_f64(&state, "funding_rate", 0.0).abs();
@@ -1275,16 +1413,23 @@ fn execute_strategy_step(
         "decision" => {
             let can_enter = get_bool(&state, "check_daily_loss", false)
                 && get_bool(&state, "check_consecutive_losses", false)
-                && get_bool(&state, "validate_entry", false)
+                && get_record_bool(&state, "validate_entry", "passed", false)
                 && get_bool(&state, "check_funding", false)
                 && get_bool(&state, "validate_size", false);
 
             let entry_price = get_f64(&state, "current_price", 0.0);
             let quantity = get_f64(&state, "calc_smart_size", 0.0);
-            let trend = get_f64(&state, "trend_score", 0.0);
+            let entry_side = get_record_string(&state, "validate_entry", "side", "long");
+            let entry_reason = get_record_string(
+                &state,
+                "validate_entry",
+                "reason",
+                "risk_constraints_not_met",
+            );
+            let entry_score = get_record_f64(&state, "validate_entry", "entry_score", 0.0);
 
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
-                let is_long = trend >= 0.0;
+                let is_long = entry_side.eq_ignore_ascii_case("long");
                 let sl_pct = cfg.stop_loss_pct(&symbol);
                 let tp_pct = cfg.take_profit_pct(&symbol);
 
@@ -1307,7 +1452,7 @@ fn execute_strategy_step(
                     "entry_price": entry_price,
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
-                    "reason": "in_process_runtime_profiled",
+                    "reason": format!("entry_confirmed_score_{:.3}", entry_score),
                     "smart_copy_compatible": true
                 }))
             } else {
@@ -1319,7 +1464,7 @@ fn execute_strategy_step(
                     "entry_price": 0.0,
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
-                    "reason": "risk_constraints_not_met",
+                    "reason": entry_reason,
                     "smart_copy_compatible": false
                 }))
             }
@@ -1719,7 +1864,23 @@ fn directional_points(state: &str, favorable: &str, unfavorable: &str, weight: i
     }
 }
 
-fn position_health_score(signal: &MarketSignal, open: &OpenTradeSnapshot) -> i32 {
+fn push_health_component(
+    components: &mut Vec<HealthScoreComponent>,
+    reason: &'static str,
+    contribution: i32,
+) {
+    if contribution != 0 {
+        components.push(HealthScoreComponent {
+            reason,
+            contribution,
+        });
+    }
+}
+
+fn position_health_breakdown(
+    signal: &MarketSignal,
+    open: &OpenTradeSnapshot,
+) -> PositionHealthBreakdown {
     let is_long = open.side.eq_ignore_ascii_case("Long");
     let favorable = if is_long { "bullish" } else { "bearish" };
     let unfavorable = if is_long { "bearish" } else { "bullish" };
@@ -1730,45 +1891,110 @@ fn position_health_score(signal: &MarketSignal, open: &OpenTradeSnapshot) -> i32
         signal.current_price
     };
 
-    let mut score = 0;
-    score += directional_points(&signal.consensus_side, favorable, unfavorable, 30);
-    score += directional_points(&signal.bybit_regime, favorable, unfavorable, 20);
-    score += directional_points(&signal.btc_regime, favorable, unfavorable, 10);
-    score += trend_score_points(signal.consensus_trend_score * sign, 50.0, 20);
-    score += trend_score_points(signal.trend_score * sign, 30.0, 10);
-    score += trend_score_points(signal.btc_trend_score * sign, 25.0, 10);
+    let mut components = Vec::new();
 
-    if signal.consensus_macd_histogram * sign > 0.0 {
-        score += 5;
+    let consensus_side = directional_points(&signal.consensus_side, favorable, unfavorable, 30);
+    push_health_component(&mut components, "consensus_side", consensus_side);
+
+    let bybit_regime = directional_points(&signal.bybit_regime, favorable, unfavorable, 20);
+    push_health_component(&mut components, "bybit_regime", bybit_regime);
+
+    let btc_regime = directional_points(&signal.btc_regime, favorable, unfavorable, 10);
+    push_health_component(&mut components, "btc_regime", btc_regime);
+
+    let consensus_trend = trend_score_points(signal.consensus_trend_score * sign, 50.0, 20);
+    push_health_component(&mut components, "consensus_trend_score", consensus_trend);
+
+    let bybit_trend = trend_score_points(signal.trend_score * sign, 30.0, 10);
+    push_health_component(&mut components, "bybit_trend_score", bybit_trend);
+
+    let btc_trend = trend_score_points(signal.btc_trend_score * sign, 25.0, 10);
+    push_health_component(&mut components, "btc_trend_score", btc_trend);
+
+    let macd_histogram = if signal.consensus_macd_histogram * sign > 0.0 {
+        5
     } else if signal.consensus_macd_histogram * sign < 0.0 {
-        score -= 5;
-    }
+        -5
+    } else {
+        0
+    };
+    push_health_component(&mut components, "consensus_macd_histogram", macd_histogram);
 
     if is_long {
-        if signal.consensus_ema_fast > signal.consensus_ema_slow {
-            score += 5;
+        let ema_alignment = if signal.consensus_ema_fast > signal.consensus_ema_slow {
+            5
         } else if signal.consensus_ema_fast < signal.consensus_ema_slow {
-            score -= 5;
-        }
-        if price >= signal.consensus_ema_fast {
-            score += 5;
-        } else if price < signal.consensus_ema_fast {
-            score -= 5;
-        }
+            -5
+        } else {
+            0
+        };
+        push_health_component(&mut components, "ema_alignment", ema_alignment);
+
+        let price_vs_fast_ema = if price >= signal.consensus_ema_fast {
+            5
+        } else {
+            -5
+        };
+        push_health_component(&mut components, "price_vs_fast_ema", price_vs_fast_ema);
     } else {
-        if signal.consensus_ema_fast < signal.consensus_ema_slow {
-            score += 5;
+        let ema_alignment = if signal.consensus_ema_fast < signal.consensus_ema_slow {
+            5
         } else if signal.consensus_ema_fast > signal.consensus_ema_slow {
-            score -= 5;
-        }
-        if price <= signal.consensus_ema_fast {
-            score += 5;
-        } else if price > signal.consensus_ema_fast {
-            score -= 5;
-        }
+            -5
+        } else {
+            0
+        };
+        push_health_component(&mut components, "ema_alignment", ema_alignment);
+
+        let price_vs_fast_ema = if price <= signal.consensus_ema_fast {
+            5
+        } else {
+            -5
+        };
+        push_health_component(&mut components, "price_vs_fast_ema", price_vs_fast_ema);
     }
 
-    clamp_i32(score, -100, 100)
+    let raw_score = components
+        .iter()
+        .map(|component| component.contribution)
+        .sum();
+    let clamped_score = clamp_i32(raw_score, -100, 100);
+
+    PositionHealthBreakdown {
+        raw_score,
+        clamped_score,
+        components,
+    }
+}
+
+fn position_health_score(signal: &MarketSignal, open: &OpenTradeSnapshot) -> i32 {
+    position_health_breakdown(signal, open).clamped_score
+}
+
+fn position_health_summary(breakdown: &PositionHealthBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| format!("{}:{}", component.reason, component.contribution))
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "health_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "health_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
 }
 
 fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnapshot) -> bool {
@@ -1826,13 +2052,14 @@ fn enforce_open_position_thesis_guard(
     }
 
     if state.consecutive_invalid_ticks < required_ticks {
+        let breakdown = position_health_breakdown(signal, open);
         return Some(create_hold_decision(
             symbol,
             &format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}",
+                "awaiting_thesis_invalidation_confirmation_{}/{}_{}",
                 state.consecutive_invalid_ticks,
                 required_ticks,
-                position_health_score(signal, open)
+                position_health_summary(&breakdown)
             ),
         ));
     }
