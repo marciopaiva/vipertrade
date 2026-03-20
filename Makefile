@@ -403,13 +403,25 @@ audit-outdated:  ## Verifica dependências desatualizadas
 # CI/CD
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: ci-local ci-strict pre-commit
+.PHONY: ci-local ci-strict pre-commit check-rust-components
 
-ci-local:  ## Roda CI localmente (paridade com GitHub Actions)
+check-rust-components:  ## Verifica componentes Rust necessários (rustfmt, clippy)
+	@printf "$(YELLOW)→$(NC) Verificando componentes Rust...\n"
+	@if ! rustup component list --installed | grep -q "rustfmt"; then \
+		printf "$(YELLOW)!$(NC) rustfmt não instalado. Instalando...\n"; \
+		rustup component add rustfmt; \
+	fi
+	@if ! rustup component list --installed | grep -q "clippy"; then \
+		printf "$(YELLOW)!$(NC) clippy não instalado. Instalando...\n"; \
+		rustup component add clippy; \
+	fi
+	@printf "$(GREEN)✓$(NC) Componentes Rust verificados\n"
+
+ci-local: check-rust-components  ## Roda CI localmente (paridade com GitHub Actions)
 	@printf "$(YELLOW)→$(NC) CI Local...\n"
 	./scripts/ci-local.sh
 
-ci-strict:  ## Roda CI local em modo strict (com docs)
+ci-strict: check-rust-components  ## Roda CI local em modo strict (com docs)
 	@printf "$(YELLOW)→$(NC) CI Local (strict)...\n"
 	CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
 
