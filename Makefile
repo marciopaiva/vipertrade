@@ -418,6 +418,8 @@ ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test
 	$(DOCKER) run --rm \
 		-v "$$(pwd)":/work \
 		-w /work \
+		-e PYO3_PYTHON=/usr/bin/python3 \
+		-e PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
 		$(RUST_BUILDER_IMAGE) \
 		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
 
