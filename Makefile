@@ -29,7 +29,7 @@ ____   ____.__                   ___________                  .___
               |__|        \/                           \/      \/    \/ 
 
          VIPERTRADE • Lead Trader Bot for Bybit Copy Trading
-           TupaLang v0.8.0 • Rust 1.83 • Version 0.8.0-rc
+             TupaLang v0.8.1 • Rust 1.83 • Version 0.8.1
 ════════════════════════════════════════════════════════════════════════
 endef
 export HEADER
