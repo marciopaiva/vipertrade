@@ -403,71 +403,26 @@ audit-outdated:  ## Verifica dependências desatualizadas
 # CI/CD
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: ci-local ci-strict ci-docker ci-docker-full ci-docker-shell build-builder-image
+.PHONY: ci-local build-builder-image
 
-RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder:1.83
-RUST_BUILDER_OPTIMIZED_IMAGE ?= vipertrade-base-rust-builder-optimized:1.83
+RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder-optimized:1.83
 
-build-builder-image:  ## Build da imagem builder padrão (sem otimizações)
-	@printf "$(YELLOW)→$(NC) Build imagem builder...\n"
-	./scripts/build-base-images.sh
-
-build-builder-optimized:  ## Build da imagem builder otimizada (com cache de deps)
+build-builder-image:  ## Build da imagem builder otimizada (com cache de deps)
 	@printf "$(YELLOW)→$(NC) Build imagem builder otimizada...\n"
 	@printf "$(CYAN)  Dockerfile:$(NC) docker/base/rust-builder-optimized.Dockerfile\n"
 	$(DOCKER) build -f docker/base/rust-builder-optimized.Dockerfile \
 		--build-arg RUST_VERSION=1.83 \
-		-t $(RUST_BUILDER_OPTIMIZED_IMAGE) \
+		-t $(RUST_BUILDER_IMAGE) \
 		.
 
-ci-docker:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
+ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
 	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
 	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
-	@printf "$(YELLOW)  Dica: Use 'make build-builder-optimized' para cache de dependências\n"
 	$(DOCKER) run --rm \
 		-v "$$(pwd)":/work \
 		-w /work \
 		$(RUST_BUILDER_IMAGE) \
 		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
-
-ci-docker-optimized:  ## Roda CI usando imagem builder otimizada (deps em cache)
-	@printf "$(YELLOW)→$(NC) CI Local (Docker builder otimizado)...\n"
-	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_OPTIMIZED_IMAGE)\n"
-	$(DOCKER) run --rm \
-		-v "$$(pwd)":/work \
-		-w /work \
-		$(RUST_BUILDER_OPTIMIZED_IMAGE) \
-		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
-
-ci-docker-full:  ## Roda CI completo com Docker (format + clippy + test + pipeline)
-	@printf "$(YELLOW)→$(NC) CI Full (Docker builder)...\n"
-	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
-	$(DOCKER) run --rm \
-		-v "$$(pwd)":/work \
-		-w /work \
-		-e CI_LOCAL_SKIP_COMPOSE=1 \
-		$(RUST_BUILDER_IMAGE) \
-		./scripts/ci-local.sh
-
-ci-docker-shell:  ## Shell interativo na imagem builder (para debug)
-	@printf "$(YELLOW)→$(NC) Shell Docker builder...\n"
-	$(DOCKER) run --rm -it \
-		-v "$$(pwd)":/work \
-		-w /work \
-		$(RUST_BUILDER_IMAGE) \
-		bash
-
-ci-local:  ## Roda CI localmente (paridade com GitHub Actions)
-	@printf "$(YELLOW)→$(NC) CI Local...\n"
-	@printf "$(YELLOW)  Recomendação: Use 'make ci-docker' para ambiente consistente\n"
-	./scripts/ci-local.sh
-
-ci-strict:  ## Roda CI local em modo strict (com docs)
-	@printf "$(YELLOW)→$(NC) CI Local (strict)...\n"
-	@printf "$(YELLOW)  Recomendação: Use 'make ci-docker-full' para ambiente consistente\n"
-	CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
-
-pre-commit: format lint test  ## Roda hooks de pre-commit
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLEANUP
