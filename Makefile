@@ -28,8 +28,8 @@ define HEADER
        \/          \/    \/              |__|            \/
 
          VIPERTRADE • Lead Trader Bot for Bybit Copy Trading
-              TupaLang v0.8.0 • Rust 1.83 • Version 0.8.0-rc
-
+           TupaLang v0.8.0 • Rust 1.83 • Version 0.8.0-rc
+═════════════════════════════════════════════════════════════════════
 endef
 export HEADER
 
@@ -78,219 +78,15 @@ help:  ## Exibir esta mensagem de ajuda
 	@printf "$$HEADER\n"
 	@printf "\n"
 	@printf "$(YELLOW)ViperTrade Makefile - Automação de Tarefas$(NC)\n\n"
-	@printf "$(CYAN)Targets Principais (menus):$(NC)\n"
+	@printf "$(CYAN)Targets Principais (menus):$(NC)\n\n"
 	@grep -E '^[a-zA-Z_-]+:.*?##@ .*$$' $(MAKEFILE_LIST) | \
 		sed 's/^\([a-zA-Z_-]*\):.*##@ \(.*\)/\1|\2/' | \
 		while IFS='|' read -r target desc; do \
 			printf "$(GREEN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
 		done
 	@printf "\n"
-	@printf "$(CYAN)Todos os Targets:$(NC)\n"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v '##@' | \
-		sed 's/^\([a-zA-Z_-]*\):.*## \([^@]*\)/\1|\2/' | \
-		while IFS='|' read -r target desc; do \
-			printf "$(CYAN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
-		done | sort
-	@printf "\n"
 	@printf "Uso: $(GREEN)make$(NC) $(BLUE)[alvo]$(NC)\n"
 	@printf "Exemplo: $(GREEN)make$(NC) $(BLUE)build$(NC), $(GREEN)make$(NC) $(BLUE)up$(NC), $(GREEN)make$(NC) $(BLUE)health-all$(NC)\n\n"
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SETUP INICIAL
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: setup setup-env setup-secrets setup-db
-
-setup: setup-env setup-secrets setup-db  ##@ Setup Setup inicial completo do ambiente
-
-setup-env:  ## Copia arquivos de ambiente (.env.example → .env)
-	@printf "$(YELLOW)→$(NC) Copiando arquivos de ambiente...\n"
-	cp -n compose/.env.example compose/.env || true
-	@printf "$(GREEN)✓$(NC) Arquivos de ambiente copiados\n"
-
-setup-secrets:  ## Inicializa secrets do ambiente
-	@printf "$(YELLOW)→$(NC) Inicializando secrets...\n"
-	./scripts/init-secrets.sh
-	@printf "$(GREEN)✓$(NC) Secrets inicializados\n"
-
-setup-db:  ## Inicializa database com schema e migrations
-	@printf "$(YELLOW)→$(NC) Inicializando database...\n"
-	$(COMPOSE) up -d postgres
-	@sleep 5
-	@printf "$(GREEN)✓$(NC) Database inicializada\n"
-
-# ═══════════════════════════════════════════════════════════════════════════
-# BUILD
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: build build-rust build-rust-release build-web build-images build-base-images
-
-build: build-rust build-web  ##@ Build Build completo do projeto
-
-build-rust:  ## Build do código Rust (workspace completo)
-	@printf "$(YELLOW)→$(NC) Build Rust...\n"
-	$(CARGO) build --workspace --locked
-
-build-rust-release:  ## Build Rust em modo release (otimizado)
-	@printf "$(YELLOW)→$(NC) Build Rust (release)...\n"
-	$(CARGO) build --workspace --release --locked
-
-build-web:  ## Build do frontend web (Next.js)
-	@printf "$(YELLOW)→$(NC) Build Web...\n"
-	cd services/web && $(YARN) install --frozen-lockfile
-	cd services/web && $(YARN) build
-
-build-images:  ## Build das imagens Docker
-	@printf "$(YELLOW)→$(NC) Build Docker images...\n"
-	./scripts/build-base-images.sh
-	$(COMPOSE) build
-
-build-base-images:  ## Build apenas das imagens base (Rust builder/runtime)
-	@printf "$(YELLOW)→$(NC) Build base images...\n"
-	./scripts/build-base-images.sh
-
-# ═══════════════════════════════════════════════════════════════════════════
-# DOCKER COMPOSE
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: up up-host down down-timeout restart ps logs logs-strategy logs-executor logs-market-data logs-api
-
-up:  ##@ Docker Sobe todos os serviços em background
-	@printf "$(YELLOW)→$(NC) Subindo serviços...\n"
-	$(COMPOSE) up -d
-	@printf "$(GREEN)✓$(NC) Serviços iniciados\n"
-
-up-host:  ## Sobe serviços em modo host (fallback WSL)
-	@printf "$(YELLOW)→$(NC) Subindo serviços (host mode)...\n"
-	$(COMPOSE_HOST) up -d
-	@printf "$(GREEN)✓$(NC) Serviços iniciados (host mode)\n"
-
-down:  ##@ Docker Derruba todos os serviços
-	@printf "$(YELLOW)→$(NC) Derrubando serviços...\n"
-	$(COMPOSE) down
-	@printf "$(GREEN)✓$(NC) Serviços derrubados\n"
-
-down-timeout:  ## Derruba serviços com timeout (30s)
-	@printf "$(YELLOW)→$(NC) Derrubando serviços (timeout 30s)...\n"
-	COMPOSE_DOWN_TIMEOUT=30 $(COMPOSE) down
-	@printf "$(GREEN)✓$(NC) Serviços derrubados\n"
-
-restart: down up  ## Reinicia todos os serviços
-
-ps:  ## Mostra status dos serviços
-	@printf "$(YELLOW)→$(NC) Status dos serviços:\n"
-	$(COMPOSE) ps
-
-logs:  ## Mostra logs de todos os serviços
-	$(COMPOSE) logs -f
-
-logs-strategy:  ## Mostra logs do serviço strategy
-	$(COMPOSE) logs -f strategy
-
-logs-executor:  ## Mostra logs do serviço executor
-	$(COMPOSE) logs -f executor
-
-logs-market-data:  ## Mostra logs do serviço market-data
-	$(COMPOSE) logs -f market-data
-
-logs-api:  ## Mostra logs do serviço api
-	$(COMPOSE) logs -f api
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TESTS
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: test test-rust test-rust-lib test-rust-watch test-web
-
-test: test-rust test-web  ##@ Test Roda todos os testes
-
-test-rust:  ## Roda testes Rust
-	@printf "$(YELLOW)→$(NC) Testes Rust...\n"
-	$(CARGO) test --workspace --locked
-
-test-rust-lib:  ## Roda apenas testes de bibliotecas (sem bins)
-	@printf "$(YELLOW)→$(NC) Testes Rust (libs)...\n"
-	$(CARGO) test --workspace --lib --locked
-
-test-rust-watch:  ## Roda testes Rust em watch mode (requer cargo-watch)
-	@printf "$(YELLOW)→$(NC) Testes Rust (watch)...\n"
-	$(CARGO) watch test --workspace
-
-test-web:  ## Roda testes do frontend web
-	@printf "$(YELLOW)→$(NC) Testes Web...\n"
-	cd services/web && $(YARN) test
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LINT & FORMAT
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: lint lint-rust lint-rust-check lint-web lint-docs format format-rust format-web check-format check-format-rust check-format-web
-
-lint: lint-rust lint-web lint-docs  ##@ Lint Roda todos os linters
-
-lint-rust:  ## Roda linter Rust (clippy)
-	@printf "$(YELLOW)→$(NC) Lint Rust...\n"
-	$(CARGO) clippy --workspace --all-targets -- -D warnings
-
-lint-rust-check:  ## Roda check Rust (sem clippy)
-	@printf "$(YELLOW)→$(NC) Check Rust...\n"
-	$(CARGO) check --workspace --locked
-
-lint-web:  ## Roda linter do frontend web (ESLint)
-	@printf "$(YELLOW)→$(NC) Lint Web...\n"
-	cd services/web && $(YARN) lint
-
-lint-docs:  ## Roda linter de documentação (markdownlint)
-	@printf "$(YELLOW)→$(NC) Lint Docs...\n"
-	./scripts/ci-local.sh
-
-format: format-rust format-web  ##@ Format Formata todo o código
-
-format-rust:  ## Formata código Rust
-	@printf "$(YELLOW)→$(NC) Format Rust...\n"
-	$(CARGO) fmt --all
-
-format-web:  ## Formata código do frontend web
-	@printf "$(YELLOW)→$(NC) Format Web...\n"
-	cd services/web && $(YARN) format
-
-check-format: check-format-rust check-format-web  ## Verifica formatação
-
-check-format-rust:  ## Verifica formatação Rust
-	@printf "$(YELLOW)→$(NC) Check format Rust...\n"
-	$(CARGO) fmt --all -- --check
-
-check-format-web:  ## Verifica formatação Web
-	@printf "$(YELLOW)→$(NC) Check format Web...\n"
-	cd services/web && $(YARN) format:check
-
-# ═══════════════════════════════════════════════════════════════════════════
-# VALIDATION
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: validate validate-workspace validate-db validate-pipeline validate-runtime validate-runtime-host
-
-validate: validate-workspace validate-db validate-pipeline validate-runtime  ##@ Validate Validações completas
-
-validate-workspace:  ## Valida workspace completo
-	@printf "$(YELLOW)→$(NC) Validando workspace...\n"
-	./scripts/validate-workspace.sh
-
-validate-db:  ## Valida database e conexões
-	@printf "$(YELLOW)→$(NC) Validando database...\n"
-	./scripts/validate-db.sh
-
-validate-pipeline:  ## Valida pipelines TupaLang
-	@printf "$(YELLOW)→$(NC) Validando pipelines...\n"
-	./scripts/validate-pipeline.sh
-
-validate-runtime:  ## Valida runtime (bridge mode)
-	@printf "$(YELLOW)→$(NC) Validando runtime (bridge)...\n"
-	./scripts/validate-runtime.sh bridge
-
-validate-runtime-host:  ## Valida runtime (host mode)
-	@printf "$(YELLOW)→$(NC) Validando runtime (host)...\n"
-	./scripts/validate-runtime.sh host
 
 # ═══════════════════════════════════════════════════════════════════════════
 # HEALTH CHECKS
@@ -300,10 +96,13 @@ validate-runtime-host:  ## Valida runtime (host mode)
 
 HEALTH_SERVICE ?= all
 
-health:  ##@ Health Health checks (use: make health, make health-all, make health-redis, etc)
-	@printf "$(YELLOW)ViperTrade Health Checks$(NC)\n"
-	@printf "===========================================\n"
-	@printf "Uso: make health-[serviço]\n\n"
+health:  ##@ Health Checks [ + ]
+	@clear
+	@printf "\033c"
+	@printf "$$HEADER\n"
+	@printf "\n"
+	@printf "$(YELLOW)ViperTrade - Health Checks$(NC)\n\n"
+	@printf "$(CYAN)make health-[serviço]$(NC)\n\n"
 	@printf "Serviços disponíveis:\n"
 	@printf "  $(CYAN)make health-all$(NC)       - Todos os serviços\n"
 	@printf "  $(CYAN)make health-postgres$(NC)  - PostgreSQL\n"
@@ -318,12 +117,12 @@ health:  ##@ Health Health checks (use: make health, make health-all, make healt
 
 health-all:  ## Health check de todos os serviços
 	@printf "$(YELLOW)→$(NC) Health Checks - Todos os serviços...\n\n"
-	@$(MAKE) health-postgres
-	@$(MAKE) health-redis
-	@$(MAKE) health-strategy
-	@$(MAKE) health-executor
-	@$(MAKE) health-api
-	@$(MAKE) health-web
+	@$(MAKE) -s health-postgres
+	@$(MAKE) -s health-redis
+	@$(MAKE) -s health-strategy
+	@$(MAKE) -s health-executor
+	@$(MAKE) -s health-api
+	@$(MAKE) -s health-web
 	@printf "\n$(GREEN)✓$(NC) Health checks completos\n"
 
 health-postgres:  ## Verifica saúde do PostgreSQL
@@ -363,186 +162,12 @@ health-web:  ## Verifica saúde do serviço web
 		printf "$(RED)✗$(NC) Web não disponível\n"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# DATABASE
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: db-migrate db-reset db-backup db-restore db-shell db-truncate
-
-db-migrate:  ## Roda migrations do database
-	@printf "$(YELLOW)→$(NC) Rodando migrations...\n"
-	sqlx migrate run --database-url postgresql://$(DB_USER)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)
-
-db-reset:  ## Reseta paper database (cuidado: apaga dados!)
-	@printf "$(RED)→$(NC) Resetando paper database...\n"
-	./scripts/reset-paper-db.sh
-
-db-backup:  ## Backup do database
-	@printf "$(YELLOW)→$(NC) Backup database...\n"
-	$(DOCKER) exec vipertrade-postgres pg_dump -U $(DB_USER) $(DB_NAME) > backup_$$(date +%Y%m%d_%H%M%S).sql
-	@printf "$(GREEN)✓$(NC) Backup criado: backup_$$(date +%Y%m%d_%H%M%S).sql\n"
-
-db-restore:  ## Restore do database (requer arquivo .sql)
-	@printf "$(YELLOW)→$(NC) Restore database...\n"
-	@printf "Uso: make db-restore FILE=backup_20260319_120000.sql\n"
-	$(DOCKER) exec -i vipertrade-postgres psql -U $(DB_USER) -d $(DB_NAME) < $(FILE)
-
-db-shell:  ## Acessa shell do PostgreSQL
-	@printf "$(YELLOW)→$(NC) PostgreSQL shell...\n"
-	$(DOCKER) exec -it vipertrade-postgres psql -U $(DB_USER) -d $(DB_NAME)
-
-db-truncate:  ## Trunca todas as tabelas (cuidado: apaga dados!)
-	@printf "$(RED)→$(NC) Truncando tabelas...\n"
-	$(DOCKER) exec vipertrade-postgres psql -U $(DB_USER) -d $(DB_NAME) -c \
-		"TRUNCATE TABLE trades, system_events, bybit_fills, position_snapshots RESTART IDENTITY CASCADE;"
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TRADING OPERATIONS
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: trading-status kill-switch kill-switch-reset phase4-validate phase5-validate phase6-validate
-
-trading-status:  ## Mostra status atual do trading
-	@printf "$(YELLOW)→$(NC) Trading Status:\n"
-	@printf "  $(CYAN)TRADING_MODE:$(NC) $(TRADING_MODE)\n"
-	@printf "  $(CYAN)BYBIT_ENV:$(NC) $(BYBIT_ENV)\n"
-	@printf "  $(CYAN)LOG_LEVEL:$(NC) $(LOG_LEVEL)\n"
-	@curl -s http://localhost:8080/api/v1/status 2>/dev/null | jq . || printf "  $(RED)API não disponível$(NC)\n"
-
-kill-switch:  ## Ativa kill switch (para trading)
-	@printf "$(RED)→$(NC) Ativando kill switch...\n"
-	./scripts/kill-switch-control.sh activate
-
-kill-switch-reset:  ## Desativa kill switch (retoma trading)
-	@printf "$(GREEN)→$(NC) Desativando kill switch...\n"
-	./scripts/kill-switch-control.sh reset
-
-phase4-validate:  ## Validação Phase 4 (Backtest/Paper)
-	@printf "$(YELLOW)→$(NC) Phase 4 Validation...\n"
-	./scripts/phase4-validate.sh
-
-phase5-validate:  ## Validação Phase 5 (Smart Copy/Trailing)
-	@printf "$(YELLOW)→$(NC) Phase 5 Validation...\n"
-	./scripts/phase5-validate.sh
-
-phase6-validate:  ## Validação Phase 6 (Mainnet Readiness)
-	@printf "$(YELLOW)→$(NC) Phase 6 Validation...\n"
-	./scripts/phase6-validate.sh
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SECURITY
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: security-check audit-deps audit-outdated
-
-security-check:  ## Roda check de segurança
-	@printf "$(YELLOW)→$(NC) Security check...\n"
-	./scripts/security-check.sh
-
-audit-deps:  ## Auditoria de dependências Rust
-	@printf "$(YELLOW)→$(NC) Audit dependencies...\n"
-	$(CARGO) audit
-
-audit-outdated:  ## Verifica dependências desatualizadas
-	@printf "$(YELLOW)→$(NC) Check outdated dependencies...\n"
-	$(CARGO) outdated
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CI/CD
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: ci-local build-builder-image
-
-RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder:1.83
-
-build-builder-image:  ## Build da imagem builder padrão
-	@printf "$(YELLOW)→$(NC) Build imagem builder...\n"
-	./scripts/build-base-images.sh
-
-ci-local:  ##@ CI/CD Roda CI local usando imagem Docker builder (format + clippy + test)
-	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
-	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
-	@printf "$(YELLOW)  Nota: Execute 'make build-builder-image' antes se necessário\n"
-	$(DOCKER) run --rm \
-		-v "$$(pwd)":/work \
-		-w /work \
-		-e PYO3_PYTHON=/usr/bin/python3 \
-		-e PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
-		$(RUST_BUILDER_IMAGE) \
-		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CLEANUP
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: clean clean-rust clean-web clean-docker clean-all
-
-clean: clean-rust clean-web  ##@ Cleanup Limpa artefatos de build
-
-clean-rust:  ## Limpa artefatos Rust
-	@printf "$(YELLOW)→$(NC) Clean Rust...\n"
-	$(CARGO) clean
-
-clean-web:  ## Limpa artefatos Web
-	@printf "$(YELLOW)→$(NC) Clean Web...\n"
-	cd services/web && rm -rf .next node_modules
-
-clean-docker:  ## Limpa containers e volumes Docker
-	@printf "$(YELLOW)→$(NC) Clean Docker...\n"
-	$(DOCKER) system prune -f
-	$(DOCKER) volume prune -f
-
-clean-all: clean clean-docker  ## Limpeza completa
-
-# ═══════════════════════════════════════════════════════════════════════════
-# DESENVOLVIMENTO
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: dev dev-rust dev-web
-
-dev: up logs  ##@ Dev Modo desenvolvimento (sobe serviços e mostra logs)
-
-dev-rust:  ## Roda cargo watch para desenvolvimento Rust
-	@printf "$(YELLOW)→$(NC) Dev Rust (watch)...\n"
-	$(CARGO) watch -x check --workspace
-
-dev-web:  ## Roda dev server do frontend web
-	@printf "$(YELLOW)→$(NC) Dev Web...\n"
-	cd services/web && $(YARN) dev
-
-# ═══════════════════════════════════════════════════════════════════════════
-# DOCUMENTAÇÃO
-# ═══════════════════════════════════════════════════════════════════════════
-
-.PHONY: docs docs-open
-
-docs: docs-open  ##@ Docs Gera e abre documentação Rust
-	@printf "$(YELLOW)→$(NC) Gerando documentação...\n"
-	$(CARGO) doc --workspace --no-deps
-
-docs-open: docs  ## Gera e abre documentação
-	@printf "$(YELLOW)→$(NC) Abrindo documentação...\n"
-	$(CARGO) doc --workspace --no-deps --open
-
-# ═══════════════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
 # ═══════════════════════════════════════════════════════════════════════════
 
-.PHONY: git-hooks env version
+.PHONY: version
 
-git-hooks:  ## Setup git hooks
-	@printf "$(YELLOW)→$(NC) Setup git hooks...\n"
-	./scripts/setup-git-hooks.sh
-
-env:  ## Mostra variáveis de ambiente atuais
-	@printf "$(YELLOW)→$(NC) Variáveis de ambiente:\n"
-	@printf "  $(CYAN)COMPOSE:$(NC) $(COMPOSE)\n"
-	@printf "  $(CYAN)CARGO:$(NC) $(CARGO)\n"
-	@printf "  $(CYAN)YARN:$(NC) $(YARN)\n"
-	@printf "  $(CYAN)TRADING_MODE:$(NC) $(TRADING_MODE)\n"
-	@printf "  $(CYAN)BYBIT_ENV:$(NC) $(BYBIT_ENV)\n"
-	@printf "  $(CYAN)LOG_LEVEL:$(NC) $(LOG_LEVEL)\n"
-
-version:  ## Mostra versões das ferramentas
+version:  ##@ Mostra versões das ferramentas
 	@printf "$(YELLOW)→$(NC) Versões:\n"
 	@printf "  $(CYAN)Rust:$(NC) $$($(CARGO) --version)\n"
 	@printf "  $(CYAN)Node:$(NC) $$($(YARN) --version 2>/dev/null || echo 'não instalado')\n"
