@@ -127,7 +127,7 @@ health-all:  ## Health check de todos os serviços
 
 health-postgres:  ## Verifica saúde do PostgreSQL
 	@printf "$(YELLOW)→$(NC) Health: PostgreSQL...\n"
-	@$(DOCKER) exec vipertrade-postgres pg_isready -U $(DB_USER) -d $(DB_NAME) && \
+	@$(DOCKER) exec vipertrade-postgres pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 && \
 		printf "$(GREEN)✓$(NC) PostgreSQL OK\n" || \
 		printf "$(RED)✗$(NC) PostgreSQL não disponível\n"
 
