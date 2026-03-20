@@ -153,6 +153,84 @@ health-web:  ## Verifica saúde do Web
 	@./scripts/health-check.sh web
 
 # ═══════════════════════════════════════════════════════════════════════════
+# DATA MANAGEMENT (Redis + PostgreSQL)
+# ═══════════════════════════════════════════════════════════════════════════
+
+.PHONY: data data-status data-health data-restart data-logs data-backup data-postgres data-redis
+
+data:  ##@ Data Data management menu (Redis + PostgreSQL)
+	@./scripts/data.sh help
+
+data-status:  ## Data Mostrar status de Redis e PostgreSQL
+	@./scripts/data.sh all status
+
+data-health:  ## Data Health check de Redis e PostgreSQL
+	@./scripts/data.sh all health
+
+data-restart:  ## Data Reiniciar Redis e PostgreSQL
+	@./scripts/data.sh all restart
+
+data-logs:  ## Data Mostrar logs de Redis e PostgreSQL
+	@./scripts/data.sh all logs
+
+data-backup:  ## Data Criar backup de Redis e PostgreSQL
+	@./scripts/data.sh all backup
+
+data-postgres:  ## Data PostgreSQL management (use: make data-postgres ACTION=status)
+	@printf "$(YELLOW)PostgreSQL commands:${NC}\n"
+	@printf "  make data-postgres-status   - Status\n"
+	@printf "  make data-postgres-health   - Health check\n"
+	@printf "  make data-postgres-restart  - Restart\n"
+	@printf "  make data-postgres-logs     - Logs\n"
+	@printf "  make data-postgres-shell    - psql shell\n"
+	@printf "  make data-postgres-backup   - Backup\n"
+
+data-postgres-status:  ## PostgreSQL status
+	@./scripts/data.sh postgres status
+
+data-postgres-health:  ## PostgreSQL health check
+	@./scripts/data.sh postgres health
+
+data-postgres-restart:  ## PostgreSQL restart
+	@./scripts/data.sh postgres restart
+
+data-postgres-logs:  ## PostgreSQL logs
+	@./scripts/data.sh postgres logs
+
+data-postgres-shell:  ## PostgreSQL psql shell
+	@./scripts/data.sh postgres shell
+
+data-postgres-backup:  ## PostgreSQL backup
+	@./scripts/data.sh postgres backup
+
+data-redis:  ## Data Redis management (use: make data-redis ACTION=status)
+	@printf "$(YELLOW)Redis commands:${NC}\n"
+	@printf "  make data-redis-status   - Status\n"
+	@printf "  make data-redis-health   - Health check\n"
+	@printf "  make data-redis-restart  - Restart\n"
+	@printf "  make data-redis-logs     - Logs\n"
+	@printf "  make data-redis-shell    - redis-cli\n"
+	@printf "  make data-redis-backup   - RDB snapshot\n"
+
+data-redis-status:  ## Redis status
+	@./scripts/data.sh redis status
+
+data-redis-health:  ## Redis health check
+	@./scripts/data.sh redis health
+
+data-redis-restart:  ## Redis restart
+	@./scripts/data.sh redis restart
+
+data-redis-logs:  ## Redis logs
+	@./scripts/data.sh redis logs
+
+data-redis-shell:  ## Redis CLI
+	@./scripts/data.sh redis shell
+
+data-redis-backup:  ## Redis RDB snapshot
+	@./scripts/data.sh redis backup
+
+# ═══════════════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
 # ═══════════════════════════════════════════════════════════════════════════
 
