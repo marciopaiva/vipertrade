@@ -405,30 +405,21 @@ audit-outdated:  ## Verifica dependências desatualizadas
 
 .PHONY: ci-local build-builder-image
 
-RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder-optimized:1.83
+RUST_BUILDER_IMAGE ?= vipertrade-base-rust-builder:1.83
 
-build-builder-image:  ## Build da imagem builder otimizada (com cache de deps)
-	@printf "$(YELLOW)→$(NC) Build imagem builder otimizada...\n"
-	@printf "$(CYAN)  Dockerfile:$(NC) docker/base/rust-builder-optimized.Dockerfile\n"
-	$(DOCKER) build -f docker/base/rust-builder-optimized.Dockerfile \
-		--build-arg RUST_VERSION=1.83 \
-		-t $(RUST_BUILDER_IMAGE) \
-		.
+build-builder-image:  ## Build da imagem builder padrão
+	@printf "$(YELLOW)→$(NC) Build imagem builder...\n"
+	./scripts/build-base-images.sh
 
-ci-local: check-builder-image  ## Roda CI local usando imagem Docker builder (format + clippy + test)
+ci-local:  ## Roda CI local usando imagem Docker builder (format + clippy + test)
 	@printf "$(YELLOW)→$(NC) CI Local (Docker builder)...\n"
 	@printf "$(CYAN)  Imagem:$(NC) $(RUST_BUILDER_IMAGE)\n"
+	@printf "$(YELLOW)  Nota: Execute 'make build-builder-image' antes se necessário\n"
 	$(DOCKER) run --rm \
 		-v "$$(pwd)":/work \
 		-w /work \
 		$(RUST_BUILDER_IMAGE) \
 		sh -c "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked"
-
-check-builder-image:  ## Verifica se imagem builder existe, cria se necessário
-	@if ! $(DOCKER) inspect $(RUST_BUILDER_IMAGE) >/dev/null 2>&1; then \
-		printf "$(YELLOW)!$(NC) Imagem builder não encontrada. Construindo...\n"; \
-		$(MAKE) build-builder-image; \
-	fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLEANUP
