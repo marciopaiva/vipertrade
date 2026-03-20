@@ -35,11 +35,11 @@ RUN rustup set profile minimal \
 WORKDIR /work
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CAMADA 1: Cache do Cargo.lock
+# CAMADA 1: Cache do Cargo.lock + Cargo.toml
 # Esta camada muda pouco, então o cache é preservado na maioria dos builds
 # ═══════════════════════════════════════════════════════════════════════════
 
-COPY Cargo.lock ./
+COPY Cargo.toml Cargo.lock ./
 
 # Apenas fetch das dependências (download sem compilar)
 # Isso é cacheado e evita download repetido
