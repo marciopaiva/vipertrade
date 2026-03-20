@@ -1,6 +1,6 @@
 # 04 - Bybit Integration
 
-Source: `VIPERTRADE_SPEC.md` (sections 6 and 8).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 6 and 8).
 
 ## Canais de Integracao
 
@@ -26,4 +26,4 @@ Source: `VIPERTRADE_SPEC.md` (sections 6 and 8).
 
 ## Referencia Original
 
-- `VIPERTRADE_SPEC.md` secoes 6 e 8.
+- `docs/legacy/VIPERTRADE_SPEC.md`, sections 6 and 8.

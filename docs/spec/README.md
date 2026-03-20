@@ -4,7 +4,7 @@ This folder contains the modularized technical specification.
 
 ## Current Status
 
-- Source of truth: `VIPERTRADE_SPEC.md`
+- Legacy source reference: `docs/legacy/VIPERTRADE_SPEC.md`
 - Modular docs completed:
   - `01-overview.md`
   - `02-architecture.md`
@@ -12,6 +12,7 @@ This folder contains the modularized technical specification.
   - `04-bybit-integration.md`
   - `05-runtime-and-operations.md`
   - `06-validation-and-checklists.md`
+  - `07-configuration.md`
 
 ## Target Structure
 
@@ -21,8 +22,9 @@ This folder contains the modularized technical specification.
 - `04-bybit-integration.md`
 - `05-runtime-and-operations.md`
 - `06-validation-and-checklists.md`
+- `07-configuration.md`
 
 ## Migration Rule
 
-- Move sections incrementally from `VIPERTRADE_SPEC.md`.
+- Move sections incrementally from `docs/legacy/VIPERTRADE_SPEC.md`.
 - Keep references to original line ranges while migrating.

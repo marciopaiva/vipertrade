@@ -10,11 +10,11 @@ Status: CLOSED (GO)
 
 Evidence:
 
-- `docs/operations/PHASE4_DECISION_PACKAGE_2026-03-08.md`
-- `docs/operations/PHASE4_BACKTEST_RUN_2026-03-08.md`
-- `docs/operations/PHASE4_PAPER_REGRESSION_2026-03-08.md`
-- `docs/operations/PHASE4_TESTNET_MICRO_2026-03-08.md`
-- `docs/operations/PHASE4_CONTROLLED_LIVE_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_DECISION_PACKAGE_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_BACKTEST_RUN_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_PAPER_REGRESSION_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_TESTNET_MICRO_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_CONTROLLED_LIVE_2026-03-08.md`
 
 ## Phase 5 (Smart Copy and Trailing Optimization)
 
@@ -22,8 +22,8 @@ Status: CLOSED (GO)
 
 Evidence:
 
-- `docs/operations/PHASE5_DECISION_PACKAGE_2026-03-08.md`
-- `docs/operations/PHASE5_BASELINE_2026-03-08.md`
+- `docs/operations/evidence/PHASE5_DECISION_PACKAGE_2026-03-08.md`
+- `docs/operations/evidence/PHASE5_BASELINE_2026-03-08.md`
 - `docs/operations/artifacts/phase5/phase5_baseline_20260308T212222Z.json`
 - `docs/operations/artifacts/phase5/phase5_baseline_20260308T212230Z.json`
 
@@ -33,9 +33,9 @@ Status: CLOSED (GO under testnet/simulation policy)
 
 Evidence:
 
-- `docs/operations/PHASE6_DECISION_PACKAGE_2026-03-08.md`
-- `docs/operations/PHASE6_BASELINE_2026-03-08.md`
-- `docs/operations/PHASE6_TESTNET_MICRO_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_DECISION_PACKAGE_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_BASELINE_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_TESTNET_MICRO_2026-03-08.md`
 - `docs/operations/PHASE6_NO_MAINNET_POLICY.md`
 - `docs/operations/artifacts/phase6/phase6_baseline_20260308T220602Z.json`
 - `docs/operations/artifacts/phase6/phase6_testnet_micro_20260308T220853Z.json`

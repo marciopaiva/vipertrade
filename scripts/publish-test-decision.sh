@@ -1,10 +1,30 @@
 #!/bin/bash
 set -euo pipefail
-. "$(dirname "$0")/container-runtime.sh"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/container-runtime.sh"
 
 SYMBOL="${1:-DOGEUSDT}"
 ACTION="${2:-ENTER_LONG}"
 QTY="${3:-10}"
+
+show_help() {
+  vt_print_header "ViperTrade - Publish Test Decision"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/publish-test-decision.sh [SYMBOL] [ACTION] [QTY]"
+  echo ""
+  echo "Examples:"
+  echo "  ./scripts/publish-test-decision.sh"
+  echo "  ./scripts/publish-test-decision.sh DOGEUSDT ENTER_LONG 10"
+  echo "  ./scripts/publish-test-decision.sh XRPUSDT CLOSE_SHORT 5"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  show_help
+  exit 0
+fi
 
 TS="$(date -Iseconds)"
 SRC_ID="manual-src-$(date +%s)"
@@ -32,4 +52,4 @@ JSON
 )
 
 container_exec vipertrade-redis redis-cli PUBLISH viper:decisions "${PAYLOAD}"
-echo "Published test decision event_id=${EVT_ID} action=${ACTION} symbol=${SYMBOL}"
+vt_ok "Published test decision event_id=${EVT_ID} action=${ACTION} symbol=${SYMBOL}"

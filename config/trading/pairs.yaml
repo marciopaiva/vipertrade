@@ -296,10 +296,10 @@ XRPUSDT:
   entry_filters:
     allow_long: true
     allow_short: true
-    min_trend_score_long: 0.26
+    min_trend_score_long: 0.29
     min_trend_score_short: 0.32
     min_trend_score: 0.22
-    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_long: 5
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
@@ -500,10 +500,10 @@ SUIUSDT:
 
   entry_filters:
     min_trend_score_long: 0.34
-    min_trend_score_short: 0.36
+    min_trend_score_short: 0.41
     min_trend_score: 0.34
     min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 5
+    min_signal_confirmation_ticks_short: 7
     min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
     max_atr_pct: 0.0050
@@ -566,10 +566,10 @@ LINKUSDT:
 
   entry_filters:
     min_trend_score_long: 0.32
-    min_trend_score_short: 0.30
+    min_trend_score_short: 0.33
     min_trend_score: 0.28
     min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks_short: 5
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0048
@@ -632,10 +632,10 @@ NEARUSDT:
 
   entry_filters:
     min_trend_score_long: 0.32
-    min_trend_score_short: 0.34
+    min_trend_score_short: 0.37
     min_trend_score: 0.30
     min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 5
+    min_signal_confirmation_ticks_short: 6
     min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
     max_atr_pct: 0.0048
@@ -698,10 +698,10 @@ LTCUSDT:
 
   entry_filters:
     min_trend_score_long: 0.24
-    min_trend_score_short: 0.28
+    min_trend_score_short: 0.31
     min_trend_score: 0.24
     min_signal_confirmation_ticks_long: 3
-    min_signal_confirmation_ticks_short: 4
+    min_signal_confirmation_ticks_short: 5
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0042

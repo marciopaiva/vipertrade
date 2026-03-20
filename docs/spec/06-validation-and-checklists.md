@@ -1,33 +1,35 @@
 # 06 - Validation and Checklists
 
-Source: VIPERTRADE_SPEC.md (sections 18-20).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
 
 ## Pre-Deploy Validation
 
-- Seguranca: security-check passa, compose/.env com permissao restrita, .env fora do Git, API keys com privilegio minimo, 2FA e IP whitelist ativos.
-- Database: schema aplicado, tabelas e indices existentes, rotina de backup definida.
-- Servicos: containers sobem, health checks passam, Redis Pub/Sub operacional e reconnect de WebSocket validado.
-- Risk: sizing e limites validados, stop loss e trailing stop funcionando, circuit breaker e daily loss testados.
-- Notificacoes: webhook configurado, alertas criticos e warning entregues.
-- Testes: paper trading estavel, backtest de estresse aprovado, kill switch e error handling testados.
-- Smart Copy e Lead Trader: sizing no range alvo, leverage por perfil, conta e metricas de leader prontas.
+- Security: `security-check` passes, `compose/.env` uses restricted permissions,
+  `.env` stays out of Git, API keys have minimum required privileges, and 2FA/IP
+  allowlists are enabled.
+- Database: schema is applied, tables and indexes exist, and backups are defined.
+- Services: containers boot correctly, health checks pass, Redis Pub/Sub works, and WebSocket reconnect behavior is validated.
+- Risk: sizing and limits are validated, stop loss and trailing stop work, and both the circuit breaker and daily-loss protection are tested.
+- Notifications: webhook is configured and both critical and warning alerts are delivered.
+- Testing: paper trading is stable, stress backtests are approved, and both kill switch and error handling are exercised.
+- Smart Copy and Lead Trader: sizing is within the target range, leverage matches the selected profile, and leader account plus metrics are ready.
 
 ## Runbook Commands
 
-- Inicializacao e seguranca: ./scripts/init-secrets.sh, ./scripts/security-check.sh
-- Compose (Docker): ./scripts/compose.sh up -d --build, ./scripts/compose.sh ps, ./scripts/compose.sh logs -f, ./scripts/compose.sh down
-- Compose (fallback legado Podman): CONTAINER_ENGINE=podman ./scripts/build-base-images.sh, COMPOSE_PROVIDER=podman-compose ./scripts/compose.sh up -d --build, COMPOSE_PROVIDER=podman-compose ./scripts/compose.sh down
-- Backtest: ./scripts/run-backtest.sh MEDIUM 2025-02-01 2026-02-28
-- API e operacao: status, posicoes, trades, stats do leader e kill-switch via endpoints HTTP
-- Database: acesso SQL no container postgres para consultas operacionais
+- Bootstrap and security: `make build-base-images`, `./scripts/init-secrets.sh`, `./scripts/security-check.sh`
+- Compose runtime: `make compose-up`, `make compose-ps`, `make compose-logs`, `make compose-down`
+- Validation: `make health`, `make validate-runtime`, `make validate-full`, `make validate-ci`
+- Data reset: `make data-reset-paper-db`
+- API operations: system status, positions, trades, leader stats, and kill switch via HTTP endpoints
+- Database: SQL access inside the PostgreSQL container for operational queries
 
 ## API Surface (Current Spec)
 
-- Portfolio, positions, trades e performance.
-- System status e kill-switch.
-- Endpoints de copy trading e leader profile.
-- Eventos WebSocket para portfolio, posicoes, trades e alertas.
+- Portfolio, positions, trades, and performance.
+- System status and kill switch.
+- Copy trading and leader profile endpoints.
+- WebSocket events for portfolio, positions, trades, and alerts.
 
-## Referencia Original
+## Original Reference
 
-- VIPERTRADE_SPEC.md linhas aproximadas 1768-1980.
+- `docs/legacy/VIPERTRADE_SPEC.md`, approximately lines 1768-1980.

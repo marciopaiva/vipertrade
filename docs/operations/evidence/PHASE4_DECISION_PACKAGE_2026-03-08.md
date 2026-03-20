@@ -9,10 +9,10 @@
 
 ## Evidence Index
 
-- `docs/operations/PHASE4_BACKTEST_RUN_2026-03-08.md`
-- `docs/operations/PHASE4_PAPER_REGRESSION_2026-03-08.md`
-- `docs/operations/PHASE4_TESTNET_MICRO_2026-03-08.md`
-- `docs/operations/PHASE4_CONTROLLED_LIVE_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_BACKTEST_RUN_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_PAPER_REGRESSION_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_TESTNET_MICRO_2026-03-08.md`
+- `docs/operations/evidence/PHASE4_CONTROLLED_LIVE_2026-03-08.md`
 - `docs/operations/artifacts/backtest/backtest_20260308T205157Z_seed42.json`
 - `docs/operations/artifacts/paper/paper_regression_20260308T205207Z.json`
 - `docs/operations/artifacts/testnet/testnet_micro_20260308T205334Z.json`

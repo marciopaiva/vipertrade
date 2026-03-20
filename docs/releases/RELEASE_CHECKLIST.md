@@ -3,27 +3,21 @@
 ## Preflight
 
 - Ensure clean workspace: `git status --short`
-- Run local CI: `./scripts/ci-local.sh`
+- Run local CI parity: `make validate-ci`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 - Validate pipeline: `./scripts/validate-pipeline.sh`
-- Phase 4 baseline: `./scripts/phase4-validate.sh`
+- Runtime baseline: `make validate-full`
 
-## Runtime Validation (Bridge Primary)
+## Runtime Validation
 
-- Start and validate bridge mode:
-  - `./scripts/validate-runtime.sh bridge`
+- Start and validate the runtime:
+  - `make compose-up`
+  - `make validate-runtime`
 - Confirm subscribers:
   - `docker exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
 - Confirm strategy/executor activity:
   - `./scripts/compose.sh logs --tail 80 strategy`
   - `./scripts/compose.sh logs --tail 80 executor`
-
-## Runtime Validation (Host Fallback)
-
-- Start and validate host mode:
-  - `./scripts/validate-runtime.sh host`
-- Validate health:
-  - `./scripts/health-check.sh`
 
 ## Rollback Plan
 
@@ -31,15 +25,12 @@
   - `database/migrations/20260308_002_executor_fills_idempotency_down.sql`
 
 - Stop current stack:
-  - `./scripts/compose.sh down`
-  - `./scripts/compose-host.sh down`
+  - `make compose-down`
 - Revert to last known-good commit:
   - `git checkout <known-good-sha>`
-- Reapply env and bring stack up in host fallback:
-  - `./scripts/compose-host.sh up -d`
-  - `./scripts/health-check.sh`
-- If running in legacy Podman mode and bridge issue persists in WSL:
-  - `./scripts/fix-podman-wsl-network.sh`
+- Reapply env and bring the stack back up:
+  - `make compose-up`
+  - `make health`
 
 ## Release Evidence
 
@@ -54,13 +45,12 @@ Phase 1 closure evidence:
 
 Phase 3 closure evidence:
 
-- Validation report published: `docs/operations/PHASE3_VALIDATION_2026-03-08.md`.
+- Validation report published: `docs/operations/evidence/PHASE3_VALIDATION_2026-03-08.md`.
 - `/api/v1` operational read endpoints validated in runtime and CI.
 - Performance parity check script passing against DB aggregates.
 - Kill-switch API validated with deny-by-default (`403`) and positive operator flow (`enable`/`disable`) with DB audit evidence.
 
 - Capture command outputs for:
-  - `./scripts/ci-local.sh`
-  - `./scripts/validate-runtime.sh bridge`
-  - `./scripts/validate-runtime.sh host`
+  - `make validate-ci`
+  - `make validate-runtime`
 - Link passing GitHub CI run for release commit.

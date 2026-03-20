@@ -1,11 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 API_URL="${API_URL:-http://localhost:8080}"
 DB_CONTAINER="${DB_CONTAINER:-vipertrade-postgres}"
 DB_USER="${DB_USER:-viper}"
 DB_NAME="${DB_NAME:-vipertrade}"
-. "$(dirname "$0")/container-runtime.sh"
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/container-runtime.sh"
+
+show_help() {
+  vt_print_header "ViperTrade - API Metrics Consistency"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/check-api-metrics-consistency.sh"
+  echo ""
+  echo "Environment:"
+  echo "  API_URL       API base URL (default: http://localhost:8080)"
+  echo "  DB_CONTAINER  PostgreSQL container name"
+  echo "  DB_USER       PostgreSQL user"
+  echo "  DB_NAME       PostgreSQL database name"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  show_help
+  exit 0
+fi
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -13,6 +35,9 @@ need_cmd() {
     exit 1
   }
 }
+
+vt_cd_root
+vt_print_header "ViperTrade - API Metrics Consistency"
 
 need_cmd curl
 need_cmd python3

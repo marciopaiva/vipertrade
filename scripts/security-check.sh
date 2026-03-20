@@ -1,68 +1,99 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-GREEN="\033[0;32m"
-RED="\033[0;31m"
-YELLOW="\033[1;33m"
-NC="\033[0m"
-
-echo -e "${GREEN}ViperTrade - Security Check${NC}"
-echo "================================================"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
 
 ISSUES=0
 
-# 1) .env exists and has restrictive permissions
-if [[ -f compose/.env ]]; then
-  PERMS=$(stat -c "%a" compose/.env)
-  if [[ "$PERMS" == "600" ]]; then
-    echo -e "${GREEN}OK: compose/.env permission is 600${NC}"
+show_help() {
+  vt_print_header "ViperTrade - Security Check"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/security-check.sh"
+  echo ""
+  echo "Checks:"
+  echo "  - compose/.env permissions"
+  echo "  - .gitignore protection for .env"
+  echo "  - compose/.env not tracked by Git"
+  echo "  - basic hardcoded-secret scan"
+  echo "  - secrets/ directory permissions"
+}
+
+check_env_permissions() {
+  if [[ -f compose/.env ]]; then
+    local perms
+    perms=$(stat -c "%a" compose/.env)
+    if [[ "$perms" == "600" ]]; then
+      vt_ok "compose/.env has 600 permissions"
+    else
+      vt_warn "compose/.env has ${perms} permissions (recommended: 600)"
+    fi
   else
-    echo -e "${YELLOW}WARN: compose/.env permission is ${PERMS} (recommended 600)${NC}"
+    vt_fail "compose/.env not found"
+    ISSUES=$((ISSUES + 1))
   fi
-else
-  echo -e "${RED}ERROR: compose/.env not found${NC}"
-  ISSUES=$((ISSUES + 1))
-fi
+}
 
-# 2) ensure .env is ignored by git
-if grep -q "^\*\*/\.env" .gitignore; then
-  echo -e "${GREEN}OK: .env ignore rule present${NC}"
-else
-  echo -e "${RED}ERROR: .env ignore rule missing in .gitignore${NC}"
-  ISSUES=$((ISSUES + 1))
-fi
-
-# 3) ensure .env is not tracked
-if git ls-files --error-unmatch compose/.env >/dev/null 2>&1; then
-  echo -e "${RED}ERROR: compose/.env is tracked by git${NC}"
-  ISSUES=$((ISSUES + 1))
-else
-  echo -e "${GREEN}OK: compose/.env is not tracked${NC}"
-fi
-
-# 4) quick hardcoded-secret scan in relevant source directories
-echo "Scanning for possible hardcoded secrets..."
-if grep -RInE "(api[_-]?key|api[_-]?secret|password|token)\s*[:=]\s*[\"\x27][^\"\x27]{8,}[\"\x27]" services config 2>/dev/null | grep -v ".env"; then
-  echo -e "${YELLOW}WARN: potential secret-like literals found (review output above)${NC}"
-else
-  echo -e "${GREEN}OK: no obvious hardcoded secrets detected${NC}"
-fi
-
-# 5) secrets dir permission recommendation
-if [[ -d secrets ]]; then
-  SPERMS=$(stat -c "%a" secrets)
-  if [[ "$SPERMS" == "700" ]]; then
-    echo -e "${GREEN}OK: secrets/ permission is 700${NC}"
+check_gitignore() {
+  if grep -q "^\*\*/\.env" .gitignore; then
+    vt_ok ".env is protected in .gitignore"
   else
-    echo -e "${YELLOW}WARN: secrets/ permission is ${SPERMS} (recommended 700)${NC}"
+    vt_fail ".env ignore rule is missing from .gitignore"
+    ISSUES=$((ISSUES + 1))
   fi
-fi
+}
 
-echo ""
-if [[ $ISSUES -eq 0 ]]; then
-  echo -e "${GREEN}SUCCESS: critical security checks passed${NC}"
-else
-  echo -e "${RED}FAILED: ${ISSUES} critical issue(s) found${NC}"
-fi
+check_git_tracking() {
+  if git ls-files --error-unmatch compose/.env >/dev/null 2>&1; then
+    vt_fail "compose/.env is tracked by Git"
+    ISSUES=$((ISSUES + 1))
+  else
+    vt_ok "compose/.env is not tracked"
+  fi
+}
 
-exit $ISSUES
+scan_hardcoded_secrets() {
+  vt_step "Basic hardcoded-secret scan"
+  if grep -RInE "(api[_-]?key|api[_-]?secret|password|token)\s*[:=]\s*[\"\x27][^\"\x27]{8,}[\"\x27]" services config 2>/dev/null | grep -v ".env"; then
+    vt_warn "possible hardcoded secrets found; review the output above"
+  else
+    vt_ok "no obvious hardcoded secrets found"
+  fi
+}
+
+check_secrets_dir() {
+  if [[ -d secrets ]]; then
+    local perms
+    perms=$(stat -c "%a" secrets)
+    if [[ "$perms" == "700" ]]; then
+      vt_ok "secrets/ has 700 permissions"
+    else
+      vt_warn "secrets/ has ${perms} permissions (recommended: 700)"
+    fi
+  fi
+}
+
+main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    show_help
+    exit 0
+  fi
+
+  vt_cd_root
+  vt_print_header "ViperTrade - Security Check"
+  check_env_permissions
+  check_gitignore
+  check_git_tracking
+  scan_hardcoded_secrets
+  check_secrets_dir
+  echo ""
+  if [[ "$ISSUES" -eq 0 ]]; then
+    vt_ok "critical security checks passed"
+  else
+    vt_fail "${ISSUES} critical issue(s) found"
+  fi
+  exit "$ISSUES"
+}
+
+main "$@"

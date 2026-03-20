@@ -1,7 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
+ROOT_DIR="$(vt_root_dir)"
 COMPOSE_DIR="$ROOT_DIR/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 COMPOSE_ENV_FILE="$COMPOSE_DIR/.env"
@@ -11,50 +14,45 @@ if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
   COMPOSE_ENV_FILE="$COMPOSE_DIR/.env.example"
 fi
 
-if [[ "${COMPOSE_PROVIDER:-}" == "docker-compose-plugin" ]]; then
-  PROVIDER="docker-compose-plugin"
-elif [[ "${COMPOSE_PROVIDER:-}" == "podman-compose" ]]; then
-  PROVIDER="podman-compose"
-elif [[ "${COMPOSE_PROVIDER:-}" == "podman-compose-plugin" ]]; then
-  PROVIDER="podman-compose-plugin"
-elif docker compose version >/dev/null 2>&1; then
-  PROVIDER="docker-compose-plugin"
-elif command -v podman-compose >/dev/null 2>&1; then
-  PROVIDER="podman-compose"
-elif podman compose version >/dev/null 2>&1; then
-  PROVIDER="podman-compose-plugin"
-else
-  echo "ERROR: docker compose, podman-compose, or podman compose not found" >&2
-  exit 1
-fi
-
-run_compose() {
-  if [[ "$PROVIDER" == "docker-compose-plugin" ]]; then
-    docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
-  elif [[ "$PROVIDER" == "podman-compose" ]]; then
-    podman-compose -f "$COMPOSE_FILE" "$@"
-  else
-    podman compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
-  fi
+print_header() {
+  vt_print_header "ViperTrade - Compose Bridge"
 }
 
-force_cleanup_viper() {
-  if [[ "$PROVIDER" == "docker-compose-plugin" ]]; then
-    return 0
+print_step() {
+  vt_step "$1"
+}
+
+print_ok() {
+  vt_ok "$1"
+}
+
+print_fail() {
+  vt_fail "$1"
+}
+
+show_help() {
+  print_header
+  echo ""
+  echo "Usage: $0 [compose command]"
+  echo ""
+  echo "Examples:"
+  echo "  $0 up -d --build"
+  echo "  $0 ps"
+  echo "  $0 logs strategy"
+  echo "  $0 config"
+  echo "  $0 down"
+  echo ""
+  echo "Runtime:"
+  echo "  docker compose"
+}
+
+run_compose() {
+  if ! docker compose version >/dev/null 2>&1; then
+    print_fail "docker compose not found"
+    exit 1
   fi
 
-  local names
-  names=$(podman ps -a --format '{{.Names}}' | grep '^vipertrade-' || true)
-  if [[ -n "$names" ]]; then
-    echo "WARN: forcing cleanup for lingering ViperTrade containers" >&2
-    while IFS= read -r name; do
-      [[ -z "$name" ]] && continue
-      podman stop -t 2 "$name" >/dev/null 2>&1 || true
-      podman rm -f "$name" >/dev/null 2>&1 || true
-    done <<< "$names"
-  fi
-
-  podman network rm compose_viper-net >/dev/null 2>&1 || true
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 run_down_tolerant() {
@@ -65,24 +63,34 @@ run_down_tolerant() {
   rc=$?
   set -e
 
-  # Suppress noisy, benign not-found errors common in WSL+Podman down cleanup.
   grep -Ev 'no such container|no pod with name or ID' "$tmp" >&2 || true
   rm -f "$tmp"
-
   return $rc
 }
 
-cd "$COMPOSE_DIR"
+main() {
+  local command="${1:-help}"
 
-if [[ "${1:-}" == "down" ]]; then
-  if ! run_down_tolerant "$@"; then
-    echo "WARN: compose down failed, applying fallback cleanup" >&2
-    force_cleanup_viper
+  if [[ "$command" == "help" || "$command" == "-h" || "$command" == "--help" ]]; then
+    show_help
     exit 0
   fi
 
-  force_cleanup_viper
-  exit 0
-fi
+  cd "$COMPOSE_DIR"
 
-run_compose "$@"
+  print_step "Provider: docker compose"
+  print_step "Compose file: $COMPOSE_FILE"
+
+  if [[ "$command" == "down" ]]; then
+    if ! run_down_tolerant "$@"; then
+      print_fail "compose down failed"
+      exit 1
+    fi
+    print_ok "Compose down completed"
+    exit 0
+  fi
+
+  run_compose "$@"
+}
+
+main "$@"

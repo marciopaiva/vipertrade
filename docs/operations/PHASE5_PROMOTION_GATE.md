@@ -26,6 +26,6 @@ Define objective criteria to promote Phase 5 from baseline validation to optimiz
 
 ## Required Evidence Bundle
 
-- `docs/operations/PHASE5_BASELINE_<date>.md`
+- `docs/operations/evidence/PHASE5_BASELINE_<date>.md`
 - `docs/operations/artifacts/phase5/phase5_baseline_<timestamp>.json`
 - Relevant logs and incident notes (if any)

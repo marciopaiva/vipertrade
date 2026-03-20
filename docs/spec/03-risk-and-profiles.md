@@ -1,6 +1,6 @@
 # 03 - Risk and Profiles
 
-Source: `VIPERTRADE_SPEC.md` (section 4).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 4).
 
 ## Perfis
 
@@ -30,4 +30,4 @@ Source: `VIPERTRADE_SPEC.md` (section 4).
 
 ## Referencia Original
 
-- `VIPERTRADE_SPEC.md` secao 4.
+- `docs/legacy/VIPERTRADE_SPEC.md`, section 4.

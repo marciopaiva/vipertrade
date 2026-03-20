@@ -1,41 +1,43 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-detect_container_engine() {
-  if [[ "${CONTAINER_ENGINE:-}" == "docker" ]]; then
-    echo "docker"
-  elif [[ "${CONTAINER_ENGINE:-}" == "podman" ]]; then
-    echo "podman"
-  elif command -v docker >/dev/null 2>&1; then
-    echo "docker"
-  elif command -v podman >/dev/null 2>&1; then
-    echo "podman"
-  else
-    echo "ERROR: docker or podman not found" >&2
-    return 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
+COMPOSE_FILE="${COMPOSE_FILE:-$(vt_root_dir)/compose/docker-compose.yml}"
+
+require_docker() {
+  vt_require_cmd docker || exit 1
+}
+
+require_docker_compose() {
+  require_docker
+  if ! docker compose version >/dev/null 2>&1; then
+    vt_fail "docker compose not found"
+    exit 1
   fi
 }
 
 container_exec() {
-  local engine
-  engine="$(detect_container_engine)"
-  "$engine" exec "$@"
+  require_docker
+  docker exec "$@"
 }
 
 container_exec_i() {
-  local engine
-  engine="$(detect_container_engine)"
-  "$engine" exec -i "$@"
+  require_docker
+  docker exec -i "$@"
 }
 
 container_logs() {
-  local engine
-  engine="$(detect_container_engine)"
-  "$engine" logs "$@"
+  require_docker
+  docker logs "$@"
 }
 
-container_inspect() {
-  local engine
-  engine="$(detect_container_engine)"
-  "$engine" inspect "$@"
+compose_exec() {
+  require_docker_compose
+  docker compose -f "$COMPOSE_FILE" exec "$@"
+}
+
+compose_exec_t() {
+  require_docker_compose
+  docker compose -f "$COMPOSE_FILE" exec -T "$@"
 }
