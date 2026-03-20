@@ -1,6 +1,6 @@
 [package]
 name = "viper-domain"
-version = "0.8.0-rc"
+version = "0.8.1"
 edition = "2021"
 description = "Shared domain contracts for ViperTrade event streams"
 

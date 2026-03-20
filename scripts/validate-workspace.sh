@@ -6,11 +6,14 @@ SCRIPT_DIR="$ROOT_DIR/scripts"
 cd "$ROOT_DIR"
 
 . "$SCRIPT_DIR/lib/common.sh"
+vt_prepare_host_rust_env
 
 MODE="${1:-all}"
 STRICT_DOCS="${CI_LOCAL_STRICT_DOCS:-0}"
 SKIP_COMPOSE="${CI_LOCAL_SKIP_COMPOSE:-0}"
 SKIP_PIPELINE="${CI_LOCAL_SKIP_PIPELINE:-0}"
+RUST_VERSION="${RUST_VERSION:-1.83}"
+RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:${RUST_VERSION}}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -50,6 +53,16 @@ run_check() {
   fi
 }
 
+run_rust_check() {
+  local label="$1"
+  shift
+  if vt_run_rust_check "$label" "$RUST_BUILDER_IMAGE" "$@"; then
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+}
+
 show_help() {
   print_header
   echo ""
@@ -64,6 +77,8 @@ show_help() {
   echo "  CI_LOCAL_STRICT_DOCS=1  enable markdown lint"
   echo "  CI_LOCAL_SKIP_COMPOSE=1 skip compose config validation"
   echo "  CI_LOCAL_SKIP_PIPELINE=1 skip validate-pipeline"
+  echo "  PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 keep host-side PyO3 checks compatible"
+  echo "  RUST_BUILDER_IMAGE      builder image used when rustfmt/clippy are unavailable"
 }
 
 require_command() {
@@ -76,9 +91,9 @@ require_command() {
 }
 
 run_quick_suite() {
-  run_check "Rust format check" cargo fmt --all -- --check
-  run_check "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
-  run_check "Rust tests" cargo test --workspace --locked
+  run_rust_check "Rust format check" cargo fmt --all -- --check
+  run_rust_check "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
+  run_rust_check "Rust tests" cargo test --workspace --locked
 }
 
 run_full_suite() {
