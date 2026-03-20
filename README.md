@@ -96,6 +96,7 @@ This lets the same system progress from simulation to controlled live operation 
 - WSL Fedora
 - Docker Desktop on Windows with WSL integration enabled for Fedora
 - Git
+- `openssl-devel` installed on the Fedora host for local Rust/OpenSSL builds
 
 The automation in this repository assumes `docker compose` running inside WSL through Docker Desktop.
 The supported compose entrypoint is `compose/docker-compose.yml` through `make compose-*`.
@@ -105,6 +106,7 @@ The supported compose entrypoint is `compose/docker-compose.yml` through `make c
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
+sudo dnf install -y openssl-devel
 cp compose/.env.example compose/.env
 make build-base-images
 ./scripts/init-secrets.sh
@@ -191,6 +193,12 @@ Pre-push validation aligned with GitHub Actions:
 
 ```bash
 make validate-ci
+```
+
+Direct host-side Rust validation on Fedora 43 WSL:
+
+```bash
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo check --workspace --locked
 ```
 
 Strict docs lint on top of local CI:

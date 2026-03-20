@@ -23,6 +23,8 @@ show_help() {
   echo "  CI_LOCAL_STRICT_DOCS=1    enable markdown lint"
   echo "  CI_LOCAL_SKIP_COMPOSE=1   skip compose config validation"
   echo "  CI_LOCAL_SKIP_PIPELINE=1  skip pipeline validation"
+  echo "  PYO3_USE_ABI3_FORWARD_COMPATIBILITY"
+  echo "                           host-side PyO3 compatibility flag (default: 1)"
   echo "  RUST_VERSION              Rust builder version (default: 1.83)"
   echo "  RUST_BUILDER_IMAGE        Rust builder image used when the host toolchain is incomplete"
 }
@@ -48,9 +50,7 @@ run_docs_lint() {
 }
 
 host_rust_ready() {
-  command -v cargo >/dev/null 2>&1 \
-    && cargo fmt --version >/dev/null 2>&1 \
-    && cargo clippy --version >/dev/null 2>&1
+  vt_host_rust_ready
 }
 
 require_docker_compose() {
@@ -58,7 +58,7 @@ require_docker_compose() {
 }
 
 require_rust_builder_image() {
-  docker image inspect "$RUST_BUILDER_IMAGE" >/dev/null 2>&1
+  vt_require_rust_builder_image "$RUST_BUILDER_IMAGE"
 }
 
 run_rust_in_docker() {
@@ -82,6 +82,7 @@ run_rust_in_docker() {
 run_rust_on_host() {
   local label="$1"
   shift
+  vt_prepare_host_rust_env
   vt_step "$label"
   "$@"
   vt_ok "$label"
@@ -90,23 +91,7 @@ run_rust_on_host() {
 run_rust_check() {
   local label="$1"
   shift
-  if host_rust_ready; then
-    run_rust_on_host "$label" "$@"
-    return
-  fi
-
-  if ! command -v docker >/dev/null 2>&1; then
-    vt_fail "cargo fmt/clippy are unavailable on the host and docker was not found"
-    return 1
-  fi
-
-  if ! require_rust_builder_image; then
-    vt_fail "image $RUST_BUILDER_IMAGE not found; run make build-base-images"
-    return 1
-  fi
-
-  vt_warn "rustfmt/clippy are unavailable on the host; using $RUST_BUILDER_IMAGE"
-  run_rust_in_docker "$label" "$@"
+  vt_run_rust_check "$label" "$RUST_BUILDER_IMAGE" "$@"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
