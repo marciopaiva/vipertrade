@@ -1,8 +1,9 @@
+# ViperTrade
+
+<!-- markdownlint-disable MD033 -->
 <p align="center">
   <img src="docs/assets/ViperTrade.png" alt="ViperTrade" width="280" />
 </p>
-
-# ViperTrade
 
 <p align="center">
   <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI" />
@@ -11,10 +12,14 @@
   <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
   <img alt="Modes" src="https://img.shields.io/badge/Modes-paper%20%7C%20testnet%20%7C%20mainnet-0f766e" />
 </p>
+<!-- markdownlint-enable MD033 -->
 
 Production-oriented Lead Trader runtime for Bybit Copy Trading, built with Rust microservices and powered by TupaLang.
 
-ViperTrade is designed to run a deterministic trading decision pipeline with strong operational controls: health checks, replayable validation, paper/testnet/mainnet execution modes, reconciliation, audit-friendly events, operator controls, and a web dashboard for live visibility.
+ViperTrade is designed to run a deterministic trading decision pipeline with strong
+operational controls: health checks, replayable validation, paper/testnet/mainnet
+execution modes, reconciliation, audit-friendly events, operator controls, and a web
+dashboard for live visibility.
 
 ## Why this project exists
 
@@ -266,7 +271,9 @@ Use `mainnet` only when the surrounding operational process is ready for it.
 
 ViperTrade does not guarantee profits, capital preservation, or any specific trading outcome.
 
-This software is an execution and decision-support system. Real results depend on market conditions, exchange behavior, latency, liquidity, slippage, strategy configuration, and operator decisions.
+This software is an execution and decision-support system. Real results depend on
+market conditions, exchange behavior, latency, liquidity, slippage, strategy
+configuration, and operator decisions.
 
 Safe use requires deliberate configuration, including:
 
@@ -280,4 +287,6 @@ Safe use requires deliberate configuration, including:
 
 Different token sets and threshold combinations can materially change runtime behavior and risk.
 
-Use this software entirely at your own risk. The operator is solely responsible for strategy configuration, exchange credentials, capital allocation, and production rollout decisions.
+Use this software entirely at your own risk. The operator is solely responsible for
+strategy configuration, exchange credentials, capital allocation, and production
+rollout decisions.

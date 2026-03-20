@@ -6,7 +6,7 @@
 - Run local CI parity: `make validate-ci`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 - Validate pipeline: `./scripts/validate-pipeline.sh`
-- Phase 4 baseline: `./scripts/phase4-validate.sh`
+- Runtime baseline: `make validate-full`
 
 ## Runtime Validation
 
@@ -31,6 +31,7 @@
 - Reapply env and bring the stack back up:
   - `make compose-up`
   - `make health`
+
 ## Release Evidence
 
 Final release evidence checkpoints (2026-03-08):
