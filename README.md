@@ -1,96 +1,202 @@
-# 🐍 ViperTrade
+<p align="center">
+  <img src="docs/assets/ViperTrade.png" alt="ViperTrade" width="280" />
+</p>
 
-Lead Trader bot para Bybit Copy Trading Classic com engine Tupa.
+# ViperTrade
 
-## Stack
+<p align="center">
+  <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI" />
+  <img alt="Tupa" src="https://img.shields.io/badge/Tupa-Strategy%20Runtime-0ea5e9" />
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-1.83-black?logo=rust" />
+  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
+  <img alt="Modes" src="https://img.shields.io/badge/Modes-paper%20%7C%20testnet%20%7C%20mainnet-0f766e" />
+</p>
 
-- Rust microservices (market-data, strategy, executor, monitor, backtest, api)
-- PostgreSQL + Redis
-- Web dashboard (Next.js)
-- Orquestracao com Docker Compose
+Production-oriented Lead Trader runtime for Bybit Copy Trading, built with Rust microservices and powered by TupaLang.
 
-## Ambiente recomendado (WSL Fedora + Docker Desktop)
+ViperTrade is designed to run a deterministic trading decision pipeline with strong operational controls: health checks, replayable validation, paper/testnet/mainnet execution modes, reconciliation, audit-friendly events, operator controls, and a web dashboard for live visibility.
 
-### Pre-requisitos
+## Why this project exists
+
+Most trading bots fail in production for reasons that go beyond signal quality:
+
+- strategy logic becomes hard to audit
+- runtime behavior drifts from the original design
+- exchange-side edge cases break assumptions
+- operators lack safe controls during incidents
+- validation and release discipline is too weak for real capital
+
+ViperTrade exists to close that gap between strategy design and production execution.
+
+## Why TupaLang matters here
+
+TupaLang gives this project a clear strategy layer instead of forcing all decision logic into application code.
+
+In ViperTrade, Tupa helps by:
+
+- separating strategy intent from runtime plumbing
+- validating the trading pipeline before runtime
+- allowing the strategy service to load a validated plan at startup
+- reducing hot-path complexity inside the Rust strategy service
+- making strategy changes easier to review, audit, and reason about
+- supporting a safer production workflow where pipeline changes can be validated before deployment
+
+Tupa is not used here as a demo integration. It is part of the production architecture of the system.
+
+## Production mindset
+
+This repository is organized around repeatability and operational safety:
+
+- deterministic Rust services
+- Docker-based local/runtime parity
+- health-first operational workflows
+- staged execution modes: `paper`, `testnet`, `mainnet`
+- API-based operator controls
+- kill switch and reconciliation workflows
+- CI validation before commit/push
+- evidence-oriented release documentation
+
+## Architecture
+
+Core services:
+
+- `market-data`
+  - ingests and normalizes exchange signals
+- `strategy`
+  - loads the Tupa-derived runtime plan and produces decisions
+- `executor`
+  - translates decisions into exchange-side actions
+- `monitor`
+  - checks reconciliation, drift, and runtime health
+- `api`
+  - exposes status, positions, trades, performance, and control endpoints
+- `web`
+  - provides the operator dashboard
+- `postgres` and `redis`
+  - persistence and event transport
+
+## Runtime modes
+
+- `paper`
+  - live market prices with wallet and positions simulated in the database
+- `testnet`
+  - real exchange interaction on Bybit testnet
+- `mainnet`
+  - real exchange execution on Bybit mainnet
+
+This lets the same system progress from simulation to controlled live operation without changing the operational model.
+
+## Recommended environment
 
 - WSL Fedora
-- Docker Desktop no Windows com WSL integration habilitada para a distro Fedora
-- Opcional: Podman + podman-compose como fallback legado
+- Docker Desktop on Windows with WSL integration enabled for Fedora
 - Git
 
-Os scripts detectam automaticamente `docker compose` quando ele estiver
-disponivel no WSL. Se o Docker nao estiver instalado, fazem fallback para
-Podman em fluxos legados.
+The automation in this repository assumes `docker compose` running inside WSL through Docker Desktop.
+The supported compose entrypoint is `compose/docker-compose.yml` through `make compose-*`.
 
-### Setup rapido
+## Quick start
 
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
 cp compose/.env.example compose/.env
-./scripts/build-base-images.sh
+make build-base-images
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
+make compose-up
+make health
 ```
 
-### Subir ambiente
+## Daily operator workflow
+
+Start the stack:
 
 ```bash
-./scripts/compose.sh up -d
+make compose-up
 ```
 
-Forcar engine especifico:
+Check health:
 
 ```bash
-COMPOSE_PROVIDER=docker-compose-plugin ./scripts/compose.sh up -d
-CONTAINER_ENGINE=docker ./scripts/build-base-images.sh
+make health
 ```
 
-### Modo host local (fallback de emergencia)
+Validate the runtime end to end:
 
 ```bash
-./scripts/compose-host.sh up -d
-./scripts/health-check.sh
+make validate-runtime
 ```
 
-Para parar:
+Run local CI parity before commit/push:
 
 ```bash
-./scripts/compose-host.sh down
+make validate-ci
 ```
 
-### Fallback legado com Podman no WSL
+Reset paper-trading data:
 
 ```bash
-./scripts/fix-podman-wsl-network.sh
+make data-reset-paper-db
 ```
 
-### Validar runtime end-to-end
+Stop the stack:
 
 ```bash
-./scripts/validate-runtime.sh bridge
-# fallback local
-./scripts/validate-runtime.sh host
+make compose-down
 ```
 
-### Validar saude
+## Make targets
+
+The repository uses `make` as the main operator and developer interface.
+
+Main commands:
+
+- `make health`
+- `make validate-full`
+- `make validate-workspace-quick`
+- `make validate-ci`
+- `make validate-runtime`
+- `make build-base-images`
+- `make compose-up`
+- `make compose-down`
+- `make compose-restart`
+- `make compose-ps`
+- `make compose-logs`
+- `make data-reset-paper-db`
+- `make control-kill-switch-status`
+- `make control-kill-switch-enable`
+- `make control-kill-switch-disable`
+
+## Validation model
+
+Fast local Rust checks:
 
 ```bash
-./scripts/health-check.sh
+make validate-workspace-quick
 ```
 
-### Logs uteis
+Full local validation:
 
 ```bash
-./scripts/compose.sh logs -f strategy
-./scripts/compose.sh logs -f market-data
-./scripts/compose.sh logs -f api
+make validate-full
 ```
 
-### Validar Rust local com a base builder
+Pre-push validation aligned with GitHub Actions:
 
-Depois de gerar as imagens base, voce pode rodar os checks de Rust dentro do
-builder padrao sem depender do toolchain do host:
+```bash
+make validate-ci
+```
+
+Strict docs lint on top of local CI:
+
+```bash
+CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
+```
+
+## Builder-based Rust validation
+
+After building the base images, you can run Rust checks inside the standard builder image without depending on the host toolchain:
 
 ```bash
 docker run --rm \
@@ -108,133 +214,70 @@ docker run --rm \
   cargo clippy --all-targets -- -D warnings
 ```
 
-### Parar ambiente
+## Documentation
 
-```bash
-./scripts/compose.sh down
-```
+Current documentation is organized by intent:
 
-Opcional (timeout de shutdown):
+- `docs/spec/`
+  - modular technical specification
+- `docs/operations/`
+  - live operational procedures, gates, and policies
+- `docs/operations/evidence/`
+  - dated validation and release evidence
+- `docs/releases/`
+  - release-facing documentation
+- `docs/legacy/`
+  - historical source material
 
-```bash
-COMPOSE_DOWN_TIMEOUT=20 ./scripts/compose.sh down
-```
+Recommended entry points:
+
+- `docs/README.md`
+- `docs/spec/README.md`
+- `docs/spec/07-configuration.md`
+- `docs/operations/RUNBOOK.md`
+- `docs/releases/RELEASE_CHECKLIST.md`
 
 ## CI
 
-GitHub Actions ativo em PR/push:
+GitHub Actions runs on push and pull request:
 
 - Rust: `cargo fmt --check` + `cargo check --workspace --locked`
 - Web: `yarn install --frozen-lockfile` + `yarn build`
 
-Workflow: `.github/workflows/ci.yml`
+Workflow:
 
-## Documentacao
+- `.github/workflows/ci.yml`
+- `.github/workflows/ci-local-parity.yml`
 
-- Spec modular index: `docs/spec/README.md`
-- Spec modules:
-  - `docs/spec/01-overview.md`
-  - `docs/spec/02-architecture.md`
-  - `docs/spec/03-risk-and-profiles.md`
-  - `docs/spec/04-bybit-integration.md`
-  - `docs/spec/05-runtime-and-operations.md`
-  - `docs/spec/06-validation-and-checklists.md`
-- Operations runbook: `docs/operations/RUNBOOK.md`
-- Event contract schema: `docs/contracts/strategy-decision-event-v1.schema.json`
-- Legacy spec: `VIPERTRADE_SPEC.md`
-- Architecture: `docs/ARCHITECTURE_V2.md`
-- Phase plans: `docs/PHASE1_PLAN.md`, `docs/PHASE2_RISK_RECON_PLAN.md`, `docs/PHASE3_LEAD_TRADER_API_PLAN.md`
-- Global roadmap: `docs/PROJECT_PHASES.md`
+## Operational note
 
-## Quality Gates
+This project is intended for disciplined operational use.
 
-- Full local validation report:
-  - `./scripts/validate-workspace.sh`
-- Strict local CI parity:
-  - `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
+That means:
 
-## Status atual (RC sem tag)
+- staged rollout through `paper` and `testnet`
+- explicit runtime controls
+- evidence-based release decisions
+- strong handling of exchange credentials and risk settings
 
-- Infra e servicos sobem com Docker Compose
-- Health checks principais respondendo
-- Bridge padrao validado no WSL com netavark + iptables
+Use `mainnet` only when the surrounding operational process is ready for it.
 
-## Release Ops (0.8.0-rc)
+## Risk disclosure
 
-Trading mode semantics:
+ViperTrade does not guarantee profits, capital preservation, or any specific trading outcome.
 
-- `TRADING_MODE=paper`: prices from mainnet, wallet/positions simulated in DB, no exchange orders
-- `TRADING_MODE=testnet`: wallet/prices/positions on Bybit testnet and real testnet orders
-- `TRADING_MODE=mainnet`: wallet/prices/positions on Bybit mainnet and real mainnet orders
+This software is an execution and decision-support system. Real results depend on market conditions, exchange behavior, latency, liquidity, slippage, strategy configuration, and operator decisions.
 
-Mode trade profiles:
+Safe use requires deliberate configuration, including:
 
-- `paper`: keeps guarded entry rules for simulation fidelity
-- `testnet`: applies the most permissive entry overlay for smoke-testing buy/sell flows
-- `mainnet`: keeps guarded entry rules for production-style operation
-- Dashboard labels:
-  - `TESTNET / SMOKE`
-  - `PAPER / STANDARD`
-  - `MAINNET / STANDARD`
+- token universe selection
+- per-token threshold tuning
+- risk profile selection
+- position sizing
+- entry and exit thresholds
+- execution mode selection (`paper`, `testnet`, `mainnet`)
+- operational monitoring and rollback readiness
 
-`TESTNET / SMOKE` runtime specifics:
+Different token sets and threshold combinations can materially change runtime behavior and risk.
 
-- Bybit is the preferred decision/execution source in testnet.
-- Entry filters are relaxed to make buy/sell/reconcile flows easier to exercise.
-- `DOGEUSDT` uses a smaller `TESTNET`-only sizing cap (`8 USDT`) to reduce stop-loss impact during smoke cycles.
-- Mode-level exit policy:
-  - `stop_loss_pct = 3%`
-  - fixed take profit disabled
-  - trailing enabled
-  - arm at `+0.30%`
-  - move to break-even at `+0.40%`
-  - ratchet tighter every `+0.10%`
-  - `min_hold_seconds = 45`
-- The dashboard exposes trailing readiness/activation in `Open Positions`.
-
-Public API source semantics:
-
-- `/api/v1/positions`
-  - `paper`: database
-  - `testnet`: Bybit testnet API
-  - `mainnet`: Bybit mainnet API
-- `/api/v1/trades`
-  - `paper`: database
-  - `testnet`: Bybit testnet closed-PnL history
-  - `mainnet`: Bybit mainnet closed-PnL history
-- `/api/v1/performance`
-  - `paper`: database aggregates
-  - `testnet`: Bybit testnet closed-PnL aggregates
-  - `mainnet`: Bybit mainnet closed-PnL aggregates
-
-Native Bybit trailing stop:
-
-- The executor now configures Bybit native trailing stop via `POST /v5/position/trading-stop` after successful `TESTNET`/`MAINNET` entries.
-- The local trailing engine remains active for observability and fallback, so runtime is currently hybrid:
-  - local trailing state remains visible in API/web
-  - Bybit native trailing is configured on the exchange when position state is ready
-- Executor retries short-lived `zero position` and trailing validation races with a short backoff before giving up.
-- Bybit's `Trailing Stop` tab only shows exchange-native trailing for positions opened after this rollout.
-
-Execution controls:
-
-- `EXECUTOR_ENABLE_LIVE_ORDERS` is legacy; runtime execution is derived from `TRADING_MODE`
-- `EXECUTOR_LIVE_SYMBOL_ALLOWLIST=DOGEUSDT` for gradual rollout
-- `EXECUTOR_RECONCILE_FIX=false` by default (detect/log)
-
-Quick SQL checks after smoke cycle:
-
-```bash
-docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
-SELECT COUNT(*) AS fills_total FROM bybit_fills;
-SELECT COUNT(*) AS duplicate_source_ids
-FROM (
-  SELECT data->>'source_event_id' sid, COUNT(*) c
-  FROM system_events
-  WHERE event_type='executor_event_processed'
-    AND COALESCE(data->>'source_event_id','') <> ''
-  GROUP BY data->>'source_event_id'
-  HAVING COUNT(*) > 1
-) t;
-SQL
-```
+Use this software entirely at your own risk. The operator is solely responsible for strategy configuration, exchange credentials, capital allocation, and production rollout decisions.

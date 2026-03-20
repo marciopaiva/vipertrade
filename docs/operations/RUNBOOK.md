@@ -4,6 +4,7 @@
 
 ```bash
 cp compose/.env.example compose/.env
+make build-base-images
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
 ```
@@ -11,32 +12,20 @@ cp compose/.env.example compose/.env
 ## 2) Start Stack
 
 ```bash
-./scripts/compose.sh up -d
-./scripts/health-check.sh
-```
-
-Fallback host mode:
-
-```bash
-./scripts/compose-host.sh up -d
-./scripts/health-check.sh
+make compose-up
+make health
 ```
 
 ## 3) Validate Runtime
 
 ```bash
-./scripts/validate-runtime.sh bridge
-```
-
-Fallback host:
-
-```bash
-./scripts/validate-runtime.sh host
+make validate-runtime
 ```
 
 ## 4) Logs and Diagnostics
 
 ```bash
+make compose-logs
 ./scripts/compose.sh logs -f strategy
 ./scripts/compose.sh logs -f executor
 ./scripts/compose.sh logs -f monitor
@@ -45,19 +34,13 @@ Fallback host:
 ## 5) Stop Stack
 
 ```bash
-./scripts/compose.sh down
-```
-
-Fallback host:
-
-```bash
-./scripts/compose-host.sh down
+make compose-down
 ```
 
 ## 6) Full Local Validation (release gate)
 
 ```bash
-./scripts/validate-workspace.sh
+make validate-full
 ```
 
 This generates a single report file under `logs/`.
@@ -159,7 +142,7 @@ EXECUTOR_RECONCILE_FIX=false
 
 Go:
 
-- `health-check.sh` without database errors
+- `make health` without database errors
 - executor logs show `Submitted Bybit order` and no `submitted_close_no_persist`
 - `bybit_fills` has rows for the smoke cycle
 - no duplicate `source_event_id` in `executor_event_processed`
@@ -175,7 +158,7 @@ No-Go:
 1. Confirm monitor health and recent cycles:
 
 ```bash
-./scripts/health-check.sh
+make health
 ./scripts/compose.sh logs --since=20m monitor | grep -E "reconciliation: symbol=|bybit live query failed|alert suppressed by cooldown"
 ```
 
@@ -213,7 +196,7 @@ SQL
 
 5. Capture evidence bundle:
 
-- Follow [RECONCILIATION_EVIDENCE](./RECONCILIATION_EVIDENCE.md)
+- Follow [RECONCILIATION_EVIDENCE](./evidence/RECONCILIATION_EVIDENCE.md)
 - Attach logs + SQL outputs to release/incident notes.
 
 ## 12) API Kill-Switch Playbook

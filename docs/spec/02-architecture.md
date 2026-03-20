@@ -1,38 +1,47 @@
 # 02 - Architecture
 
-Source: `VIPERTRADE_SPEC.md` (section 2).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 
-## Topologia
+## Topology
 
-- `market-data`: ingestao de WS da Bybit e normalizacao.
-- `strategy`: avaliacao de estrategia com Tupa.
-- `executor`: execucao de ordens.
-- `monitor`: health, alertas e reconciliacao.
-- `postgres`: estado persistente.
-- `redis`: pub/sub e cache.
+- `market-data`
+  - Bybit and multi-exchange market signal ingestion and normalization
+- `strategy`
+  - Tupa-driven strategy evaluation and decision generation
+- `executor`
+  - exchange-side execution path
+- `monitor`
+  - health checks, alerting, and reconciliation
+- `postgres`
+  - durable runtime state
+- `redis`
+  - pub/sub transport and transient state
 
-## Servicos e Responsabilidades
+## Services and responsibilities
 
-- `postgres`: trades, snapshots de posicao, eventos e metricas.
-- `redis`: transporte de eventos e estado transiente.
-- `api` e `web`: plano de leitura/controle.
+- `postgres`
+  - trades, position snapshots, events, and metrics
+- `redis`
+  - event transport and short-lived runtime state
+- `api` and `web`
+  - read and control surface for operators
 
-## Fluxo de Decisao
+## Decision flow
 
-1. Market data da Bybit entra no `market-data`.
-2. Evento normalizado vai para `redis`.
-3. `strategy` consome, avalia e produz decisao.
-4. `executor` valida/executa ordem na Bybit.
-5. Resultado persiste em banco e alimenta monitoramento.
-6. `monitor` executa reconciliacao periodica.
+1. market data enters `market-data`
+2. normalized events are published through `redis`
+3. `strategy` evaluates the Tupa-backed plan and publishes a decision
+4. `executor` validates and executes the exchange-side action
+5. execution results are persisted and exposed to observability surfaces
+6. `monitor` runs periodic reconciliation and drift checks
 
-## Deploy Local (WSL + Docker Desktop)
+## Local runtime
 
-- Compose bridge e padrao.
-- Compose host e fallback.
-- Podman mantido apenas como caminho legado.
-- Health checks por servico.
+- Docker Desktop + WSL is the standard local environment
+- bridge networking is the standard compose mode
+- `compose/docker-compose.yml` is the only supported compose entrypoint
+- service health checks are part of the default operational flow
 
-## Referencia Original
+## Original reference
 
-- `VIPERTRADE_SPEC.md` linhas aproximadas 87-161.
+- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 87-161.

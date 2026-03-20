@@ -30,8 +30,8 @@ Define objective criteria for promoting from readiness baseline to production-re
 
 ## Required Evidence Bundle
 
-- `docs/operations/PHASE6_BASELINE_<date>.md`
-- `docs/operations/PHASE6_TESTNET_MICRO_<date>.md`
+- `docs/operations/evidence/PHASE6_BASELINE_<date>.md`
+- `docs/operations/evidence/PHASE6_TESTNET_MICRO_<date>.md`
 - `docs/operations/artifacts/phase6/phase6_baseline_<timestamp>.json`
 - `docs/operations/artifacts/phase6/phase6_testnet_micro_<timestamp>.json`
-- `docs/operations/PHASE6_DECISION_PACKAGE_<date>.md`
+- `docs/operations/evidence/PHASE6_DECISION_PACKAGE_<date>.md`

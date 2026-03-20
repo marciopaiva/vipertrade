@@ -1,12 +1,41 @@
 # Contributing
 
+## Preferred workflow
+
+Use the repository `make` interface for the main local workflow:
+
+```bash
+cp compose/.env.example compose/.env
+make build-base-images
+make compose-up
+make health
+make validate-ci
+```
+
+For a fresh clone, run the environment bootstrap first:
+
+```bash
+cp compose/.env.example compose/.env
+make build-base-images
+```
+
+Recommended sequence before commit/push:
+
+1. run `make validate-workspace-quick` during development
+2. run `make validate-ci` before commit/push
+3. use `make health` when touching runtime behavior
+
+Prefer `make` targets over calling lower-level scripts directly unless you are working on an advanced or diagnostic flow.
+
+The supported local runtime path is the bridge-based Docker Desktop workflow exposed through `make compose-*`.
+
 ## Commit Message Convention
 
 Use Conventional Commit with non-empty description:
 
 - `feat(scope): add deterministic risk gate`
 - `fix(scope): handle redis reconnect on startup`
-- `chore(scope): harden podman wrapper cleanup`
+- `chore(scope): simplify compose wrapper cleanup`
 - `docs(scope): update release checklist`
 
 Guidelines:
@@ -16,12 +45,16 @@ Guidelines:
 - Keep subject in imperative mood.
 - Prefer explicit scope (`api`, `strategy`, `executor`, `compose`, `docs`, `ci`).
 
-## Local Hook Setup
+## Local validation
 
-Enable local commit message validation:
+Main validation commands:
 
-```bash
-./scripts/setup-git-hooks.sh
-```
+- `make validate-workspace-quick`
+- `make validate-full`
+- `make validate-ci`
 
-This configures `core.hooksPath=.githooks` and blocks invalid commit subjects.
+Runtime checks:
+
+- `make compose-up`
+- `make health`
+- `make validate-runtime`
