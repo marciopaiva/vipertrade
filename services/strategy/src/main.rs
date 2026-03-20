@@ -1701,31 +1701,93 @@ fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> Str
     "risk_constraints_not_met".to_string()
 }
 
+fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
+    value.max(min).min(max)
+}
+
+fn trend_score_points(score: f64, scale: f64, cap: i32) -> i32 {
+    clamp_i32((score * scale).round() as i32, -cap, cap)
+}
+
+fn directional_points(state: &str, favorable: &str, unfavorable: &str, weight: i32) -> i32 {
+    if state.eq_ignore_ascii_case(favorable) {
+        weight
+    } else if state.eq_ignore_ascii_case(unfavorable) {
+        -weight
+    } else {
+        0
+    }
+}
+
+fn position_health_score(signal: &MarketSignal, open: &OpenTradeSnapshot) -> i32 {
+    let is_long = open.side.eq_ignore_ascii_case("Long");
+    let favorable = if is_long { "bullish" } else { "bearish" };
+    let unfavorable = if is_long { "bearish" } else { "bullish" };
+    let sign = if is_long { 1.0 } else { -1.0 };
+    let price = if signal.bybit_price > 0.0 {
+        signal.bybit_price
+    } else {
+        signal.current_price
+    };
+
+    let mut score = 0;
+    score += directional_points(&signal.consensus_side, favorable, unfavorable, 30);
+    score += directional_points(&signal.bybit_regime, favorable, unfavorable, 20);
+    score += directional_points(&signal.btc_regime, favorable, unfavorable, 10);
+    score += trend_score_points(signal.consensus_trend_score * sign, 50.0, 20);
+    score += trend_score_points(signal.trend_score * sign, 30.0, 10);
+    score += trend_score_points(signal.btc_trend_score * sign, 25.0, 10);
+
+    if signal.consensus_macd_histogram * sign > 0.0 {
+        score += 5;
+    } else if signal.consensus_macd_histogram * sign < 0.0 {
+        score -= 5;
+    }
+
+    if is_long {
+        if signal.consensus_ema_fast > signal.consensus_ema_slow {
+            score += 5;
+        } else if signal.consensus_ema_fast < signal.consensus_ema_slow {
+            score -= 5;
+        }
+        if price >= signal.consensus_ema_fast {
+            score += 5;
+        } else if price < signal.consensus_ema_fast {
+            score -= 5;
+        }
+    } else {
+        if signal.consensus_ema_fast < signal.consensus_ema_slow {
+            score += 5;
+        } else if signal.consensus_ema_fast > signal.consensus_ema_slow {
+            score -= 5;
+        }
+        if price <= signal.consensus_ema_fast {
+            score += 5;
+        } else if price > signal.consensus_ema_fast {
+            score -= 5;
+        }
+    }
+
+    clamp_i32(score, -100, 100)
+}
+
 fn thesis_invalidated_for_open_trade(signal: &MarketSignal, open: &OpenTradeSnapshot) -> bool {
-    const NEUTRAL_THESIS_BREAK_TREND_SCORE: f64 = 0.05;
+    let health_score = position_health_score(signal, open);
 
-    if open.side == "Long" {
-        let consensus_bearish = signal.consensus_side.eq_ignore_ascii_case("bearish");
-        let bybit_bearish = signal.bybit_regime.eq_ignore_ascii_case("bearish");
-        let consensus_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish");
-        let bybit_not_bullish = !signal.bybit_regime.eq_ignore_ascii_case("bullish");
-        let trend_flipped = signal.consensus_trend_score <= 0.0 || signal.trend_score <= 0.0;
-        let neutral_break = signal.consensus_trend_score <= -NEUTRAL_THESIS_BREAK_TREND_SCORE
-            || signal.trend_score <= -NEUTRAL_THESIS_BREAK_TREND_SCORE;
+    if open.side.eq_ignore_ascii_case("Long") {
+        let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bearish")
+            || signal.bybit_regime.eq_ignore_ascii_case("bearish");
+        let both_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish")
+            && !signal.bybit_regime.eq_ignore_ascii_case("bullish");
 
-        ((consensus_bearish || bybit_bearish) && trend_flipped)
-            || (consensus_not_bullish && bybit_not_bullish && neutral_break)
-    } else if open.side == "Short" {
-        let consensus_bullish = signal.consensus_side.eq_ignore_ascii_case("bullish");
-        let bybit_bullish = signal.bybit_regime.eq_ignore_ascii_case("bullish");
-        let consensus_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish");
-        let bybit_not_bearish = !signal.bybit_regime.eq_ignore_ascii_case("bearish");
-        let trend_flipped = signal.consensus_trend_score >= 0.0 || signal.trend_score >= 0.0;
-        let neutral_break = signal.consensus_trend_score >= NEUTRAL_THESIS_BREAK_TREND_SCORE
-            || signal.trend_score >= NEUTRAL_THESIS_BREAK_TREND_SCORE;
+        health_score <= -35 || (both_not_bullish && health_score <= -15) || opposite_side
+    } else if open.side.eq_ignore_ascii_case("Short") {
+        let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bullish")
+            || signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let both_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish")
+            && !signal.bybit_regime.eq_ignore_ascii_case("bearish");
 
-        ((consensus_bullish || bybit_bullish) && trend_flipped)
-            || (consensus_not_bearish && bybit_not_bearish && neutral_break)
+        health_score >= 35 || (both_not_bearish && health_score >= 15) || opposite_side
     } else {
         false
     }
@@ -1767,8 +1829,10 @@ fn enforce_open_position_thesis_guard(
         return Some(create_hold_decision(
             symbol,
             &format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}",
-                state.consecutive_invalid_ticks, required_ticks
+                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}",
+                state.consecutive_invalid_ticks,
+                required_ticks,
+                position_health_score(signal, open)
             ),
         ));
     }
