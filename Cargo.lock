@@ -390,7 +390,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -882,7 +882,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1642,7 +1642,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.37",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1679,9 +1679,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1970,7 +1970,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2632,7 +2632,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3190,7 +3190,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viper-analytics"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "reqwest 0.11.27",
@@ -3203,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "viper-api"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "bcrypt",
  "chrono",
@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "viper-backtest"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "serde",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "viper-domain"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "serde",
@@ -3251,7 +3251,7 @@ dependencies = [
 
 [[package]]
 name = "viper-executor"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3273,7 +3273,7 @@ dependencies = [
 
 [[package]]
 name = "viper-market-data"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "redis 0.27.6",
@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "viper-monitor"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "hex",
@@ -3309,7 +3309,7 @@ dependencies = [
 
 [[package]]
 name = "viper-strategy"
-version = "0.8.0-rc"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "futures-util",
