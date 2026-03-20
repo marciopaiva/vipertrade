@@ -1,6 +1,6 @@
 [package]
 name = "viper-market-data"
-version = "0.8.0-rc"
+version = "0.8.1"
 edition = "2021"
 description = "ViperTrade market-data service"
 

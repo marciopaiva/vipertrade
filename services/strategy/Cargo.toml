@@ -1,6 +1,6 @@
 [package]
 name = "viper-strategy"
-version = "0.8.0-rc"
+version = "0.8.1"
 edition = "2021"
 description = "ViperTrade strategy service"
 
@@ -19,7 +19,7 @@ reqwest = { workspace = true }
 tupa-parser = { workspace = true }
 tupa-codegen = { workspace = true }
 tupa-runtime = { workspace = true }
-tupa-typecheck = "0.8.0"
+tupa-typecheck = { workspace = true }
 viper-domain = { workspace = true }
 
 [features]

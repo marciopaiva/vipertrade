@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.8.0-rc"
+version = "0.8.1"
 edition = "2021"
 license = "MIT"
 authors = ["ViperTrade Team"]
@@ -22,12 +22,13 @@ repository = "https://github.com/seu-usuario/vipertrade"
 [workspace.dependencies]
 viper-domain = { path = "crates/viper-domain" }
 
-# Tupa v0.8.0
-tupa-runtime = "0.8.0"
-tupa-codegen = "0.8.0"
-tupa-audit = "0.8.0"
-tupa-effects = "0.8.0"
-tupa-parser = "0.8.0"
+# Tupa v0.8.1
+tupa-runtime = "0.8.1"
+tupa-codegen = "0.8.1"
+tupa-audit = "0.8.1"
+tupa-effects = "0.8.1"
+tupa-parser = "0.8.1"
+tupa-typecheck = "0.8.1"
 
 # Async runtime
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -62,3 +63,11 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true
+
+[patch.crates-io]
+tupa-runtime = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
+tupa-codegen = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
+tupa-audit = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
+tupa-effects = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
+tupa-parser = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
+tupa-typecheck = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
