@@ -1,26 +1,37 @@
 #!/bin/bash
 set -euo pipefail
 
-GREEN="\033[0;32m"
-YELLOW="\033[1;33m"
-RED="\033[0;31m"
-NC="\033[0m"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$ROOT_DIR/scripts"
+cd "$ROOT_DIR"
 
-step() {
-  echo -e "${GREEN}==>${NC} $1"
-}
+. "$SCRIPT_DIR/lib/common.sh"
 
-warn() {
-  echo -e "${YELLOW}WARN:${NC} $1"
-}
+STRICT_DOCS="${CI_LOCAL_STRICT_DOCS:-0}"
+SKIP_COMPOSE="${CI_LOCAL_SKIP_COMPOSE:-0}"
+SKIP_PIPELINE="${CI_LOCAL_SKIP_PIPELINE:-0}"
+RUST_VERSION="${RUST_VERSION:-1.83}"
+RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:${RUST_VERSION}}"
 
-fail() {
-  echo -e "${RED}ERROR:${NC} $1"
-  exit 1
+show_help() {
+  vt_print_header "ViperTrade - Local CI"
+  echo ""
+  echo "Usage:"
+  echo "  ./scripts/ci-local.sh"
+  echo ""
+  echo "Environment:"
+  echo "  CI_LOCAL_STRICT_DOCS=1    enable markdown lint"
+  echo "  CI_LOCAL_SKIP_COMPOSE=1   skip compose config validation"
+  echo "  CI_LOCAL_SKIP_PIPELINE=1  skip pipeline validation"
+  echo "  RUST_VERSION              Rust builder version (default: 1.83)"
+  echo "  RUST_BUILDER_IMAGE        Rust builder image used when the host toolchain is incomplete"
 }
 
 run_docs_lint() {
-  local -a targets=(README.md docs/*.md VIPERTRADE_SPEC.md CONTRIBUTING.md)
+  local -a targets=(README.md CONTRIBUTING.md)
+  while IFS= read -r file; do
+    targets+=("$file")
+  done < <(find docs -type f -name '*.md' | sort)
 
   if command -v markdownlint >/dev/null 2>&1; then
     markdownlint "${targets[@]}"
@@ -32,50 +43,116 @@ run_docs_lint() {
     return
   fi
 
-  fail "Docs lint requires markdownlint or npx"
+  vt_fail "Docs lint requires markdownlint or npx"
+  return 1
 }
 
-cd "$(dirname "$0")/.."
+host_rust_ready() {
+  command -v cargo >/dev/null 2>&1 \
+    && cargo fmt --version >/dev/null 2>&1 \
+    && cargo clippy --version >/dev/null 2>&1
+}
 
-command -v cargo >/dev/null 2>&1 || fail "cargo not found"
+require_docker_compose() {
+  docker compose version >/dev/null 2>&1
+}
 
-if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
-  if ! docker compose version >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
-    fail "docker compose or podman not found"
+require_rust_builder_image() {
+  docker image inspect "$RUST_BUILDER_IMAGE" >/dev/null 2>&1
+}
+
+run_rust_in_docker() {
+  local label="$1"
+  shift
+
+  vt_step "$label"
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e CARGO_HOME=/tmp/cargo-home \
+    -e CARGO_TARGET_DIR=/tmp/cargo-target \
+    -e RUSTUP_HOME=/usr/local/rustup \
+    -e HOME=/tmp \
+    -v "$ROOT_DIR:/workspace" \
+    -w /workspace \
+    "$RUST_BUILDER_IMAGE" \
+    "$@"
+  vt_ok "$label"
+}
+
+run_rust_on_host() {
+  local label="$1"
+  shift
+  vt_step "$label"
+  "$@"
+  vt_ok "$label"
+}
+
+run_rust_check() {
+  local label="$1"
+  shift
+  if host_rust_ready; then
+    run_rust_on_host "$label" "$@"
+    return
   fi
-  [[ -x scripts/compose.sh ]] || fail "scripts/compose.sh not found or not executable"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    vt_fail "cargo fmt/clippy are unavailable on the host and docker was not found"
+    return 1
+  fi
+
+  if ! require_rust_builder_image; then
+    vt_fail "image $RUST_BUILDER_IMAGE not found; run make build-base-images"
+    return 1
+  fi
+
+  vt_warn "rustfmt/clippy are unavailable on the host; using $RUST_BUILDER_IMAGE"
+  run_rust_in_docker "$label" "$@"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  show_help
+  exit 0
 fi
 
-step "Rust format check"
-cargo fmt --all -- --check
+vt_print_header "ViperTrade - Local CI"
 
-step "Rust clippy (deny warnings)"
-cargo clippy --workspace --all-targets -- -D warnings
+if [[ "$SKIP_COMPOSE" != "1" ]]; then
+  require_docker_compose || { vt_fail "docker compose not found"; exit 1; }
+  [[ -x scripts/compose.sh ]] || { vt_fail "scripts/compose.sh not found or not executable"; exit 1; }
+fi
 
-step "Rust tests"
-cargo test --workspace --locked
+run_rust_check "Rust format check" cargo fmt --all -- --check
+run_rust_check "Rust clippy (deny warnings)" cargo clippy --workspace --all-targets -- -D warnings
+run_rust_check "Rust tests" cargo test --workspace --locked
 
-if [[ "${CI_LOCAL_SKIP_PIPELINE:-0}" == "1" ]]; then
-  warn "Pipeline validation skipped (CI_LOCAL_SKIP_PIPELINE=1)"
+if [[ "$SKIP_PIPELINE" == "1" ]]; then
+  vt_warn "Pipeline validation skipped (CI_LOCAL_SKIP_PIPELINE=1)"
 elif [[ -x scripts/validate-pipeline.sh ]]; then
-  step "Tupa pipeline validation"
+  vt_step "Tupa pipeline validation"
   ./scripts/validate-pipeline.sh
+  vt_ok "Tupa pipeline validation"
 else
-  warn "scripts/validate-pipeline.sh not found; skipping pipeline validation"
+  vt_warn "scripts/validate-pipeline.sh not found; skipping pipeline validation"
 fi
 
-if [[ "${CI_LOCAL_SKIP_COMPOSE:-0}" != "1" ]]; then
-  step "Compose config validation"
+if [[ "$SKIP_COMPOSE" != "1" ]]; then
+  vt_step "Compose config validation"
   ./scripts/compose.sh config >/dev/null
+  vt_ok "Compose config validation"
 else
-  warn "Compose validation skipped (CI_LOCAL_SKIP_COMPOSE=1)"
+  vt_warn "Compose validation skipped (CI_LOCAL_SKIP_COMPOSE=1)"
 fi
 
-if [[ "${CI_LOCAL_STRICT_DOCS:-0}" == "1" ]]; then
-  step "Markdown lint (strict)"
+vt_step "Make help validation"
+make help >/dev/null
+vt_ok "Make help validation"
+
+if [[ "$STRICT_DOCS" == "1" ]]; then
+  vt_step "Markdown lint (strict)"
   run_docs_lint
+  vt_ok "Markdown lint (strict)"
 else
-  warn "Docs lint skipped (set CI_LOCAL_STRICT_DOCS=1 to enable)"
+  vt_warn "Docs lint skipped (set CI_LOCAL_STRICT_DOCS=1 to enable)"
 fi
 
-step "Local CI passed"
+vt_ok "Local CI passed"

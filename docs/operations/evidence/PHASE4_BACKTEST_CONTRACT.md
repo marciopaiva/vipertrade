@@ -35,7 +35,7 @@ Define a deterministic run interface and evidence artifact format for Phase 4.
 - JSON artifact path:
   - `docs/operations/artifacts/backtest/backtest_<timestamp>_seed<seed>.json`
 - Markdown evidence snapshot path:
-  - `docs/operations/PHASE4_BACKTEST_RUN_<YYYY-MM-DD>.md`
+  - `docs/operations/evidence/PHASE4_BACKTEST_RUN_<YYYY-MM-DD>.md`
 
 ## JSON Schema (practical)
 

@@ -4,6 +4,7 @@
 
 ```bash
 cp compose/.env.example compose/.env
+make build-base-images
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
 ```
@@ -11,32 +12,20 @@ cp compose/.env.example compose/.env
 ## 2) Start Stack
 
 ```bash
-./scripts/compose.sh up -d
-./scripts/health-check.sh
-```
-
-Fallback host mode:
-
-```bash
-./scripts/compose-host.sh up -d
-./scripts/health-check.sh
+make compose-up
+make health
 ```
 
 ## 3) Validate Runtime
 
 ```bash
-./scripts/validate-runtime.sh bridge
-```
-
-Fallback host:
-
-```bash
-./scripts/validate-runtime.sh host
+make validate-runtime
 ```
 
 ## 4) Logs and Diagnostics
 
 ```bash
+make compose-logs
 ./scripts/compose.sh logs -f strategy
 ./scripts/compose.sh logs -f executor
 ./scripts/compose.sh logs -f monitor
@@ -45,19 +34,13 @@ Fallback host:
 ## 5) Stop Stack
 
 ```bash
-./scripts/compose.sh down
-```
-
-Fallback host:
-
-```bash
-./scripts/compose-host.sh down
+make compose-down
 ```
 
 ## 6) Full Local Validation (release gate)
 
 ```bash
-./scripts/validate-workspace.sh
+make validate-full
 ```
 
 This generates a single report file under `logs/`.
@@ -112,8 +95,10 @@ Reconciliation behavior:
 
 Native Bybit trailing stop:
 
-- After a successful exchange entry, executor attempts to configure Bybit native trailing with `POST /v5/position/trading-stop`.
-- Runtime remains hybrid: local trailing state stays visible in API/web and exchange-native trailing is also configured when Bybit position state is ready.
+- After a successful exchange entry, executor attempts to configure Bybit native
+  trailing with `POST /v5/position/trading-stop`.
+- Runtime remains hybrid: local trailing state stays visible in API/web and
+  exchange-native trailing is also configured when Bybit position state is ready.
 - Executor retries short race conditions (`zero position` and validation-window errors) with a short backoff.
 - If Bybit still rejects the trailing setup after retries, local trailing continues to protect the position and logs must be reviewed.
 
@@ -132,7 +117,6 @@ TRADING_MODE=paper
 ./scripts/compose.sh up -d --no-deps executor
 ./scripts/compose.sh logs -f executor
 ```
-
 
 ## 9) DB Rollback (fills/idempotency patch)
 
@@ -159,7 +143,7 @@ EXECUTOR_RECONCILE_FIX=false
 
 Go:
 
-- `health-check.sh` without database errors
+- `make health` without database errors
 - executor logs show `Submitted Bybit order` and no `submitted_close_no_persist`
 - `bybit_fills` has rows for the smoke cycle
 - no duplicate `source_event_id` in `executor_event_processed`
@@ -175,11 +159,11 @@ No-Go:
 1. Confirm monitor health and recent cycles:
 
 ```bash
-./scripts/health-check.sh
+make health
 ./scripts/compose.sh logs --since=20m monitor | grep -E "reconciliation: symbol=|bybit live query failed|alert suppressed by cooldown"
 ```
 
-2. Check divergence and severity in database:
+1. Check divergence and severity in database:
 
 ```bash
 docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
@@ -196,13 +180,13 @@ LIMIT 20;
 SQL
 ```
 
-3. Operator action matrix:
+1. Operator action matrix:
 
 - `warning`: monitor for 2-3 cycles; no emergency action.
 - `error`: pause new entries if persistent; validate Bybit/account connectivity.
 - `critical`: pause entries immediately and investigate position mismatch before resuming.
 
-4. Validate alert throttling:
+1. Validate alert throttling:
 
 - Ensure repeated same `symbol+severity` events are not flooding Discord.
 - Adjust `ALERT_COOLDOWN_SEC` in `compose/.env` if needed, then restart monitor:
@@ -211,9 +195,9 @@ SQL
 ./scripts/compose.sh up -d --no-deps monitor
 ```
 
-5. Capture evidence bundle:
+1. Capture evidence bundle:
 
-- Follow [RECONCILIATION_EVIDENCE](./RECONCILIATION_EVIDENCE.md)
+- Follow [RECONCILIATION_EVIDENCE](./evidence/RECONCILIATION_EVIDENCE.md)
 - Attach logs + SQL outputs to release/incident notes.
 
 ## 12) API Kill-Switch Playbook

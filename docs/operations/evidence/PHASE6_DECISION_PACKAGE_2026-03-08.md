@@ -10,14 +10,13 @@
 
 ## Evidence Index
 
-- `docs/operations/PHASE6_BASELINE_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_BASELINE_2026-03-08.md`
 - `docs/operations/artifacts/phase6/phase6_baseline_20260308T220602Z.json`
-- `docs/operations/PHASE6_TESTNET_MICRO_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_TESTNET_MICRO_2026-03-08.md`
 - `docs/operations/artifacts/phase6/phase6_testnet_micro_20260308T220853Z.json`
-- `docs/operations/PHASE6_MAINNET_MICRO_2026-03-08.md`
+- `docs/operations/evidence/PHASE6_MAINNET_MICRO_2026-03-08.md`
 - `docs/operations/artifacts/phase6/phase6_mainnet_micro_20260308T215704Z.json`
 - `docs/operations/PHASE6_PROMOTION_GATE.md`
-- `docs/PHASE6_MAINNET_READINESS_PLAN.md`
 - `docs/operations/PHASE6_NO_MAINNET_POLICY.md`
 
 ## Current Decision

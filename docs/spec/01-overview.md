@@ -1,6 +1,6 @@
 # 01 - Overview
 
-Source: `VIPERTRADE_SPEC.md` (sections 1.1-1.4).
+Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 1.1-1.4).
 
 ## Objetivo
 
@@ -31,4 +31,4 @@ Executa estrategia propria e permite copy via Smart Copy Mode.
 
 ## Referencia Original
 
-- `VIPERTRADE_SPEC.md` linhas aproximadas 42-85.
+- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 42-85.

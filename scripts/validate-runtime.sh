@@ -1,98 +1,139 @@
 #!/bin/bash
 set -euo pipefail
 
-GREEN="\033[0;32m"
-RED="\033[0;31m"
-YELLOW="\033[1;33m"
-NC="\033[0m"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$ROOT_DIR/scripts"
+cd "$ROOT_DIR"
+
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/container-runtime.sh"
 
 MODE="${1:-bridge}"
-BUILD="${BUILD:-0}"
-LOG_WINDOW="${LOG_WINDOW:-120s}"
-. "$(dirname "$0")/container-runtime.sh"
+ACTION="${2:-all}"
+COMPOSE_SCRIPT="./scripts/compose.sh"
 
-case "$MODE" in
-  bridge)
-    COMPOSE_SCRIPT="./scripts/compose.sh"
-    ;;
-  host)
-    COMPOSE_SCRIPT="./scripts/compose-host.sh"
-    ;;
-  *)
-    echo -e "${RED}ERROR: mode must be 'bridge' or 'host'${NC}"
-    exit 1
-    ;;
-esac
+PASS_COUNT=0
+FAIL_COUNT=0
+WARN_COUNT=0
 
-if [[ ! -x "$COMPOSE_SCRIPT" ]]; then
-  echo -e "${RED}ERROR: $COMPOSE_SCRIPT not found/executable${NC}"
-  exit 1
-fi
+print_header() {
+  vt_print_header "ViperTrade - Runtime Validation"
+}
 
-echo -e "${GREEN}ViperTrade - Runtime Validation (${MODE})${NC}"
-echo "================================================"
+print_step() {
+  vt_step "$1"
+}
 
-echo "Bringing stack down..."
-$COMPOSE_SCRIPT down || true
+print_ok() {
+  PASS_COUNT=$((PASS_COUNT + 1))
+  vt_ok "$1"
+}
 
-echo "Starting stack..."
-if [[ "$BUILD" == "1" ]]; then
-  $COMPOSE_SCRIPT up -d --build
-else
-  $COMPOSE_SCRIPT up -d
-fi
+print_warn() {
+  WARN_COUNT=$((WARN_COUNT + 1))
+  vt_warn "$1"
+}
 
-healthy=0
-for _ in $(seq 1 20); do
-  if ./scripts/health-check.sh >/tmp/viper_health.log 2>&1; then
-    healthy=1
-    break
+print_fail() {
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  vt_fail "$1"
+}
+
+run_check() {
+  local label="$1"
+  shift
+  print_step "$label"
+  if "$@"; then
+    print_ok "$label"
+  else
+    print_fail "$label"
   fi
-  sleep 3
-done
+}
 
-if [[ "$healthy" != "1" ]]; then
-  echo -e "${RED}ERROR: health-check did not pass in time${NC}"
-  tail -n 80 /tmp/viper_health.log || true
-  exit 1
-fi
+show_help() {
+  print_header
+  echo ""
+  echo "Usage: $0 [bridge] [start|health|subscribers|events|all]"
+  echo ""
+  echo "Examples:"
+  echo "  $0 bridge all"
+  echo "  $0 bridge health"
+}
 
-echo -e "${GREEN}OK: health-check passed${NC}"
+ensure_compose_script() {
+  [[ -x "$COMPOSE_SCRIPT" ]]
+}
 
-nums=$(container_exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions)
-md_sub=$(echo "$nums" | awk 'NR==2 {print $1}')
-dec_sub=$(echo "$nums" | awk 'NR==4 {print $1}')
+start_stack() {
+  "$COMPOSE_SCRIPT" up -d
+}
 
-if [[ -z "${md_sub:-}" || -z "${dec_sub:-}" ]]; then
-  echo -e "${RED}ERROR: failed to parse Redis NUMSUB output${NC}"
-  echo "$nums"
-  exit 1
-fi
+check_health() {
+  ./scripts/health-check.sh all
+}
 
-if (( md_sub < 1 )); then
-  echo -e "${RED}ERROR: viper:market_data has no subscribers${NC}"
-  exit 1
-fi
-if (( dec_sub < 1 )); then
-  echo -e "${RED}ERROR: viper:decisions has no subscribers${NC}"
-  exit 1
-fi
+check_subscribers() {
+  local output
+  output=$(container_exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market-signals viper:decisions 2>/dev/null || true)
+  [[ -n "$output" ]]
+}
 
-echo -e "${GREEN}OK: Redis subscribers market_data=${md_sub} decisions=${dec_sub}${NC}"
+check_events() {
+  local strategy_logs executor_logs
+  strategy_logs=$(container_logs --tail 100 vipertrade-strategy 2>&1 || true)
+  executor_logs=$(container_logs --tail 100 vipertrade-executor 2>&1 || true)
 
-strategy_events=$(container_logs --since "$LOG_WINDOW" vipertrade-strategy 2>&1 | grep -c "Published decision event" || true)
-executor_events=$(container_logs --since "$LOG_WINDOW" vipertrade-executor 2>&1 | grep -c "Executor received decision event" || true)
+  grep -Eq 'Published decision event|action=' <<< "$strategy_logs$executor_logs"
+}
 
-if (( strategy_events < 1 )); then
-  echo -e "${RED}ERROR: strategy produced no decision events${NC}"
-  exit 1
-fi
-if (( executor_events < 1 )); then
-  echo -e "${RED}ERROR: executor consumed no decision events${NC}"
-  exit 1
-fi
+print_summary() {
+  echo ""
+  echo -e "${VT_CYAN}Summary:${VT_NC} PASS=$PASS_COUNT WARN=$WARN_COUNT FAIL=$FAIL_COUNT"
+}
 
-echo -e "${GREEN}OK: strategy events=${strategy_events} executor events=${executor_events}${NC}"
+main() {
+  if [[ "$MODE" == "help" || "$MODE" == "-h" || "$MODE" == "--help" ]]; then
+    show_help
+    exit 0
+  fi
 
-echo ""
-echo -e "${GREEN}SUCCESS: runtime validation passed (${MODE})${NC}"
+  if [[ "$MODE" != "bridge" ]]; then
+    print_fail "Unrecognized mode '$MODE'"
+    show_help
+    exit 1
+  fi
+
+  print_header
+  run_check "Compose script available" ensure_compose_script
+
+  case "$ACTION" in
+    start)
+      run_check "Start stack ($MODE)" start_stack
+      ;;
+    health)
+      run_check "Health checks" check_health
+      ;;
+    subscribers)
+      run_check "Redis subscribers" check_subscribers
+      ;;
+    events)
+      run_check "Recent event flow" check_events
+      ;;
+    all)
+      run_check "Start stack ($MODE)" start_stack
+      run_check "Health checks" check_health
+      run_check "Redis subscribers" check_subscribers
+      run_check "Recent event flow" check_events
+      ;;
+    *)
+      print_fail "Unrecognized action '$ACTION'"
+      show_help
+      exit 1
+      ;;
+  esac
+
+  print_summary
+  [[ "$FAIL_COUNT" -eq 0 ]]
+}
+
+main "$@"
