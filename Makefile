@@ -76,8 +76,8 @@ help:  ## Exibir esta mensagem de ajuda
 	@printf "\n"
 	@printf "$(YELLOW)ViperTrade Makefile - Automação de Tarefas$(NC)\n\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		sed 's/:.*## / - /' | \
-		while IFS='-' read -r target desc; do \
+		sed 's/^\([a-zA-Z_-]*\):.*## \(.*\)/\1|\2/' | \
+		while IFS='|' read -r target desc; do \
 			printf "$(CYAN)%-$(MARGEM)s$(NC) %s\n" "$$target" "$$desc"; \
 		done
 	@printf "\n"
