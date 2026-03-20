@@ -407,13 +407,17 @@ audit-outdated:  ## Verifica dependências desatualizadas
 
 check-rust-components:  ## Verifica componentes Rust necessários (rustfmt, clippy)
 	@printf "$(YELLOW)→$(NC) Verificando componentes Rust...\n"
-	@if ! rustup component list --installed | grep -q "rustfmt"; then \
-		printf "$(YELLOW)!$(NC) rustfmt não instalado. Instalando...\n"; \
-		rustup component add rustfmt; \
+	@if ! cargo fmt --version >/dev/null 2>&1; then \
+		printf "$(RED)✗$(NC) rustfmt não disponível.\n"; \
+		printf "$(YELLOW)  Instale com: rustup component add rustfmt\n"; \
+		printf "$(YELLOW)  Ou: cargo install rustfmt\n"; \
+		exit 1; \
 	fi
-	@if ! rustup component list --installed | grep -q "clippy"; then \
-		printf "$(YELLOW)!$(NC) clippy não instalado. Instalando...\n"; \
-		rustup component add clippy; \
+	@if ! cargo clippy --version >/dev/null 2>&1; then \
+		printf "$(RED)✗$(NC) clippy não disponível.\n"; \
+		printf "$(YELLOW)  Instale com: rustup component add clippy\n"; \
+		printf "$(YELLOW)  Ou: cargo install clippy\n"; \
+		exit 1; \
 	fi
 	@printf "$(GREEN)✓$(NC) Componentes Rust verificados\n"
 
