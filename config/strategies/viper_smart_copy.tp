@@ -206,10 +206,25 @@ fn step_validate_size(input: { symbol: string }): {
   };
 }
 
-fn step_get_trailing_config(input: { symbol: string }): { activated: bool, distance_pct: f64 } {
+fn step_get_trailing_config(input: { symbol: string }): {
+  enabled: bool,
+  activate_after_profit_pct: f64,
+  initial_trail_pct: f64,
+  move_to_break_even_at: f64,
+  min_move_threshold_pct: f64,
+  ratchet_level_count: i64,
+  trailing_score: f64,
+  reason: string
+} {
   return {
-    activated: false,
-    distance_pct: 0.0
+    enabled: false,
+    activate_after_profit_pct: 0.0,
+    initial_trail_pct: 0.0,
+    move_to_break_even_at: 0.0,
+    min_move_threshold_pct: 0.0,
+    ratchet_level_count: 0,
+    trailing_score: 0.0,
+    reason: "trailing_pending_runtime"
   };
 }
 
