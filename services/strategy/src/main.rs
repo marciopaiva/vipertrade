@@ -2162,218 +2162,59 @@ fn evaluate_open_trade_exit(
     (None, None)
 }
 
-fn explain_entry_hold_reason(signal: &MarketSignal, cfg: &StrategyConfig) -> String {
-    let symbol = signal.symbol.to_uppercase();
-    let entry_side = if signal.trend_score >= 0.0 {
-        "long"
-    } else {
-        "short"
-    };
-    let (rsi_min, rsi_max) = cfg.rsi_bounds_for_side(&symbol, entry_side);
-    let btc_macro_penalty = if cfg.require_btc_macro_alignment() {
-        match cfg.btc_macro_penalty_for_side(
-            &symbol,
-            entry_side,
-            &signal.btc_regime,
-            signal.btc_trend_score,
-            signal.btc_consensus_count,
-        ) {
-            Some(penalty) => penalty,
-            None => return format!("{}_block_btc_macro_misaligned", entry_side),
-        }
-    } else {
-        0.0
-    };
-    let atr_pct = if signal.current_price > 0.0 {
-        signal.atr_14 / signal.current_price
-    } else {
-        1.0
-    };
-    let min_volume_ratio = cfg.min_volume_ratio_for_side(&symbol, entry_side);
-    let min_trend_score = cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty;
-    let consensus_long_ok = if cfg.require_multi_exchange_consensus() {
-        signal.bullish_exchanges >= 2
-            && signal.bearish_exchanges == 0
-            && signal.exchanges_available >= 3
-    } else {
-        signal.bybit_regime.eq_ignore_ascii_case("bullish")
-            || signal.regime.eq_ignore_ascii_case("bullish")
-    };
-    let consensus_short_ok = if cfg.require_multi_exchange_consensus() {
-        signal.bearish_exchanges >= 2
-            && signal.bullish_exchanges == 0
-            && signal.exchanges_available >= 3
-    } else {
-        signal.bybit_regime.eq_ignore_ascii_case("bearish")
-            || signal.regime.eq_ignore_ascii_case("bearish")
-    };
+fn structured_hold_reason_from_state(state: &Value) -> String {
+    let candidate_reasons = [
+        get_record_string(
+            state,
+            "validate_entry",
+            "reason",
+            "risk_constraints_not_met",
+        ),
+        get_record_string(
+            state,
+            "check_funding",
+            "reason",
+            "funding_constraints_not_met",
+        ),
+        get_record_string(
+            state,
+            "calc_smart_size",
+            "reason",
+            "size_proposal_not_available",
+        ),
+        get_record_string(
+            state,
+            "validate_size",
+            "reason",
+            "size_constraints_not_met",
+        ),
+        get_record_string(
+            state,
+            "get_trailing_config",
+            "reason",
+            "trailing_config_not_available",
+        ),
+    ];
 
-    if signal.spread_pct > cfg.max_spread_pct(&symbol) {
-        return format!(
-            "{}_block_spread_{:.5}_gt_{:.5}",
-            entry_side,
-            signal.spread_pct,
-            cfg.max_spread_pct(&symbol)
-        );
-    }
-    if signal.volume_24h < cfg.min_volume_24h_usdt(&symbol) {
-        return format!(
-            "{}_block_volume_24h_{}_lt_{}",
-            entry_side,
-            signal.volume_24h,
-            cfg.min_volume_24h_usdt(&symbol)
-        );
-    }
-    if atr_pct > cfg.max_atr_pct(&symbol) {
-        return format!(
-            "{}_block_atr_pct_{:.5}_gt_{:.5}",
-            entry_side,
-            atr_pct,
-            cfg.max_atr_pct(&symbol)
-        );
-    }
-    if signal.funding_rate.abs() > cfg.max_funding_rate_pct() {
-        return format!(
-            "{}_block_funding_{:.5}_gt_{:.5}",
-            entry_side,
-            signal.funding_rate.abs(),
-            cfg.max_funding_rate_pct()
-        );
-    }
+    let reasons = candidate_reasons
+        .into_iter()
+        .filter(|reason| {
+            !matches!(
+                reason.as_str(),
+                "risk_constraints_not_met"
+                    | "funding_constraints_not_met"
+                    | "size_proposal_not_available"
+                    | "size_constraints_not_met"
+                    | "trailing_config_not_available"
+            )
+        })
+        .collect::<Vec<_>>();
 
-    if entry_side == "long" {
-        if !cfg.allow_long(&symbol) {
-            return "long_block_disabled".to_string();
-        }
-        if !signal.regime.eq_ignore_ascii_case("bullish") {
-            return format!(
-                "long_block_consensus_regime_{}",
-                signal.regime.to_lowercase()
-            );
-        }
-        if !signal.bybit_regime.eq_ignore_ascii_case("bullish") {
-            return format!(
-                "long_block_bybit_regime_{}",
-                signal.bybit_regime.to_lowercase()
-            );
-        }
-        if !consensus_long_ok {
-            return format!(
-                "long_block_consensus_{}_of_{}",
-                signal.bullish_exchanges, signal.exchanges_available
-            );
-        }
-        if signal.consensus_trend_slope <= 0.0 {
-            return format!(
-                "long_block_trend_slope_{:.5}_lte_0",
-                signal.consensus_trend_slope
-            );
-        }
-        if signal.consensus_ema_fast <= signal.consensus_ema_slow {
-            return "long_block_ema_alignment".to_string();
-        }
-        if signal.current_price < signal.ema_fast {
-            return format!(
-                "long_block_price_{:.5}_lt_fast_ema_{:.5}",
-                signal.current_price, signal.ema_fast
-            );
-        }
-        if signal.consensus_rsi_14 < rsi_min || signal.consensus_rsi_14 > rsi_max {
-            return format!(
-                "long_block_rsi_{:.2}_outside_{:.2}_{:.2}",
-                signal.consensus_rsi_14, rsi_min, rsi_max
-            );
-        }
-        if signal.consensus_macd_line <= signal.consensus_macd_signal {
-            return "long_block_macd_cross".to_string();
-        }
-        if signal.consensus_macd_histogram <= 0.0 {
-            return format!(
-                "long_block_macd_hist_{:.6}_lte_0",
-                signal.consensus_macd_histogram
-            );
-        }
-        if signal.consensus_volume_ratio < min_volume_ratio {
-            return format!(
-                "long_block_volume_ratio_{:.2}_lt_{:.2}",
-                signal.consensus_volume_ratio, min_volume_ratio
-            );
-        }
-        if signal.consensus_trend_score.abs() < min_trend_score {
-            return format!(
-                "long_block_trend_score_{:.3}_lt_{:.3}",
-                signal.consensus_trend_score.abs(),
-                min_trend_score
-            );
-        }
+    if reasons.is_empty() {
+        "risk_constraints_not_met".to_string()
     } else {
-        if !cfg.allow_short(&symbol) {
-            return "short_block_disabled".to_string();
-        }
-        if !signal.regime.eq_ignore_ascii_case("bearish") {
-            return format!(
-                "short_block_consensus_regime_{}",
-                signal.regime.to_lowercase()
-            );
-        }
-        if !signal.bybit_regime.eq_ignore_ascii_case("bearish") {
-            return format!(
-                "short_block_bybit_regime_{}",
-                signal.bybit_regime.to_lowercase()
-            );
-        }
-        if !consensus_short_ok {
-            return format!(
-                "short_block_consensus_{}_of_{}",
-                signal.bearish_exchanges, signal.exchanges_available
-            );
-        }
-        if signal.consensus_trend_slope >= 0.0 {
-            return format!(
-                "short_block_trend_slope_{:.5}_gte_0",
-                signal.consensus_trend_slope
-            );
-        }
-        if signal.consensus_ema_fast >= signal.consensus_ema_slow {
-            return "short_block_ema_alignment".to_string();
-        }
-        if signal.current_price > signal.ema_fast {
-            return format!(
-                "short_block_price_{:.5}_gt_fast_ema_{:.5}",
-                signal.current_price, signal.ema_fast
-            );
-        }
-        if signal.consensus_rsi_14 < rsi_min || signal.consensus_rsi_14 > rsi_max {
-            return format!(
-                "short_block_rsi_{:.2}_outside_{:.2}_{:.2}",
-                signal.consensus_rsi_14, rsi_min, rsi_max
-            );
-        }
-        if signal.consensus_macd_line >= signal.consensus_macd_signal {
-            return "short_block_macd_cross".to_string();
-        }
-        if signal.consensus_macd_histogram >= 0.0 {
-            return format!(
-                "short_block_macd_hist_{:.6}_gte_0",
-                signal.consensus_macd_histogram
-            );
-        }
-        if signal.consensus_volume_ratio < min_volume_ratio {
-            return format!(
-                "short_block_volume_ratio_{:.2}_lt_{:.2}",
-                signal.consensus_volume_ratio, min_volume_ratio
-            );
-        }
-        if signal.consensus_trend_score.abs() < min_trend_score {
-            return format!(
-                "short_block_trend_score_{:.3}_lt_{:.3}",
-                signal.consensus_trend_score.abs(),
-                min_trend_score
-            );
-        }
+        reasons.join("_")
     }
-
-    "risk_constraints_not_met".to_string()
 }
 
 fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
@@ -3354,8 +3195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut decision = decision;
                         if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
                         {
-                            decision.reason =
-                                explain_entry_hold_reason(&signal_event.signal, cfg.as_ref());
+                            decision.reason = structured_hold_reason_from_state(&runtime_output);
                         }
 
                         if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
