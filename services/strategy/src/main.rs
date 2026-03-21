@@ -91,6 +91,21 @@ struct InvalidSignalDrop {
     timestamp: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct EntryPolicyComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct EntryPolicyBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<EntryPolicyComponent>,
+}
+
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
@@ -1280,12 +1295,144 @@ fn execute_strategy_step(
             let min_volume_ratio = cfg.min_volume_ratio_for_side(&symbol, entry_side);
             let min_trend_score =
                 cfg.min_trend_score_for_side(&symbol, entry_side) + btc_macro_penalty;
+
+            let mut components = Vec::new();
+            let directional_bias = if entry_side == "long" { 1.0 } else { -1.0 };
+            let consensus_regime_score = directional_points(
+                &regime,
+                if entry_side == "long" {
+                    "bullish"
+                } else {
+                    "bearish"
+                },
+                if entry_side == "long" {
+                    "bearish"
+                } else {
+                    "bullish"
+                },
+                1,
+            ) as f64;
+            push_weighted_entry_component(
+                &mut components,
+                "consensus_regime",
+                consensus_regime_score,
+                20.0,
+            );
+
+            let bybit_regime_score = directional_points(
+                &bybit_regime,
+                if entry_side == "long" {
+                    "bullish"
+                } else {
+                    "bearish"
+                },
+                if entry_side == "long" {
+                    "bearish"
+                } else {
+                    "bullish"
+                },
+                1,
+            ) as f64;
+            push_weighted_entry_component(
+                &mut components,
+                "bybit_regime",
+                bybit_regime_score,
+                20.0,
+            );
+
+            let consensus_score = if entry_side == "long" {
+                if consensus_long_ok {
+                    1.0
+                } else {
+                    -1.0
+                }
+            } else if consensus_short_ok {
+                1.0
+            } else {
+                -1.0
+            };
+            push_weighted_entry_component(
+                &mut components,
+                "exchange_consensus",
+                consensus_score,
+                20.0,
+            );
+
+            let trend_slope_score = (consensus_trend_slope * directional_bias).clamp(-1.0, 1.0);
+            push_weighted_entry_component(&mut components, "trend_slope", trend_slope_score, 10.0);
+
+            let ema_alignment_score = if entry_side == "long" {
+                if consensus_ema_fast > consensus_ema_slow {
+                    1.0
+                } else if consensus_ema_fast < consensus_ema_slow {
+                    -1.0
+                } else {
+                    0.0
+                }
+            } else if consensus_ema_fast < consensus_ema_slow {
+                1.0
+            } else if consensus_ema_fast > consensus_ema_slow {
+                -1.0
+            } else {
+                0.0
+            };
+            push_weighted_entry_component(
+                &mut components,
+                "ema_alignment",
+                ema_alignment_score,
+                10.0,
+            );
+
+            let macd_score = if entry_side == "long" {
+                if consensus_macd_line > consensus_macd_signal {
+                    1.0
+                } else if consensus_macd_line < consensus_macd_signal {
+                    -1.0
+                } else {
+                    0.0
+                }
+            } else if consensus_macd_line < consensus_macd_signal {
+                1.0
+            } else if consensus_macd_line > consensus_macd_signal {
+                -1.0
+            } else {
+                0.0
+            };
+            push_weighted_entry_component(&mut components, "macd_cross", macd_score, 10.0);
+
+            let macd_hist_score = (consensus_macd_histogram * directional_bias).clamp(-1.0, 1.0);
+            push_weighted_entry_component(&mut components, "macd_histogram", macd_hist_score, 5.0);
+
+            let volume_ratio_score = if min_volume_ratio > 0.0 {
+                (consensus_volume_ratio / min_volume_ratio - 1.0).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            push_weighted_entry_component(&mut components, "volume_ratio", volume_ratio_score, 5.0);
+
+            let trend_score_ratio = if min_trend_score > 0.0 {
+                (consensus_trend_score / min_trend_score - 1.0).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            push_weighted_entry_component(&mut components, "trend_score", trend_score_ratio, 10.0);
+
+            let entry_raw_score = components
+                .iter()
+                .map(|component| component.contribution)
+                .sum();
+            let entry_clamped_score = clamp_i32(entry_raw_score, -100, 100);
+            let breakdown = EntryPolicyBreakdown {
+                raw_score: entry_raw_score,
+                clamped_score: entry_clamped_score,
+                components,
+            };
             let passed = spread_pct <= max_spread_pct
                 && volume_24h >= min_volume_24h
                 && atr_pct <= max_atr_pct
                 && directional_ok;
             let reason = if passed {
-                "entry_validated".to_string()
+                format!("entry_validated_{}", entry_policy_summary(&breakdown))
             } else if cfg.require_btc_macro_alignment()
                 && cfg
                     .btc_macro_penalty_for_side(
@@ -1380,7 +1527,12 @@ fn execute_strategy_step(
                 "severity": if passed { "info" } else { "error" },
                 "reason": reason,
                 "side": entry_side,
-                "entry_score": get_f64(&state, "consensus_trend_score", raw_trend_score).abs()
+                "entry_score": breakdown.clamped_score,
+                "entry_breakdown": {
+                    "raw_score": breakdown.raw_score,
+                    "clamped_score": breakdown.clamped_score,
+                    "components": breakdown.components
+                }
             }))
         }
         "check_funding" => {
@@ -1461,7 +1613,7 @@ fn execute_strategy_step(
                     "entry_price": entry_price,
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
-                    "reason": format!("entry_confirmed_score_{:.3}", entry_score),
+                    "reason": format!("entry_confirmed_score_{:.3}_{}", entry_score, entry_reason),
                     "smart_copy_compatible": true
                 }))
             } else {
@@ -1873,6 +2025,23 @@ fn weighted_contribution(score: f64, weight: f64) -> i32 {
     (score * weight).round() as i32
 }
 
+fn push_weighted_entry_component(
+    components: &mut Vec<EntryPolicyComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(EntryPolicyComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
 fn push_weighted_health_component(
     components: &mut Vec<HealthScoreComponent>,
     reason: &'static str,
@@ -1887,6 +2056,37 @@ fn push_weighted_health_component(
             weight,
             contribution,
         });
+    }
+}
+
+fn entry_policy_summary(breakdown: &EntryPolicyBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "entry_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "entry_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
     }
 }
 
