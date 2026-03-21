@@ -106,6 +106,21 @@ struct EntryPolicyBreakdown {
     components: Vec<EntryPolicyComponent>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct SizePolicyComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct SizePolicyBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<SizePolicyComponent>,
+}
+
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
@@ -1625,10 +1640,65 @@ fn execute_strategy_step(
             let price = get_f64(&state, "current_price", 0.0);
             let equity_usdt = get_f64(&state, "account_equity_usdt", 1_000.0);
             let position_usdt = quantity * price;
-            Ok(json!(
-                position_usdt >= cfg.min_position_usdt()
-                    && position_usdt <= cfg.max_position_cap_usdt(&symbol, equity_usdt)
-            ))
+            let min_position_usdt = cfg.min_position_usdt();
+            let max_position_usdt = cfg.max_position_cap_usdt(&symbol, equity_usdt);
+            let min_size_score = if min_position_usdt > 0.0 {
+                (position_usdt / min_position_usdt - 1.0).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            let max_size_score = if max_position_usdt > 0.0 {
+                (1.0 - position_usdt / max_position_usdt).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+
+            let mut components = Vec::new();
+            push_weighted_size_component(&mut components, "min_position", min_size_score, 50.0);
+            push_weighted_size_component(&mut components, "max_position_cap", max_size_score, 50.0);
+
+            let raw_score = components
+                .iter()
+                .map(|component| component.contribution)
+                .sum();
+            let clamped_score = clamp_i32(raw_score, -100, 100);
+            let breakdown = SizePolicyBreakdown {
+                raw_score,
+                clamped_score,
+                components,
+            };
+
+            let passed = position_usdt >= min_position_usdt && position_usdt <= max_position_usdt;
+            let reason = if passed {
+                format!("size_validated_{}", size_policy_summary(&breakdown))
+            } else if position_usdt < min_position_usdt {
+                format!(
+                    "size_below_min_{:.2}_lt_{:.2}_{}",
+                    position_usdt,
+                    min_position_usdt,
+                    size_policy_summary(&breakdown)
+                )
+            } else {
+                format!(
+                    "size_above_cap_{:.2}_gt_{:.2}_{}",
+                    position_usdt,
+                    max_position_usdt,
+                    size_policy_summary(&breakdown)
+                )
+            };
+
+            Ok(json!({
+                "passed": passed,
+                "severity": if passed { "info" } else { "error" },
+                "reason": reason,
+                "position_usdt": position_usdt,
+                "size_score": breakdown.clamped_score,
+                "size_breakdown": {
+                    "raw_score": breakdown.raw_score,
+                    "clamped_score": breakdown.clamped_score,
+                    "components": breakdown.components
+                }
+            }))
         }
         "get_trailing_config" => Ok(cfg.trailing_config(&symbol)),
         "decision" => {
@@ -1636,7 +1706,7 @@ fn execute_strategy_step(
                 && get_bool(&state, "check_consecutive_losses", false)
                 && get_record_bool(&state, "validate_entry", "passed", false)
                 && get_bool(&state, "check_funding", false)
-                && get_bool(&state, "validate_size", false);
+                && get_record_bool(&state, "validate_size", "passed", false);
 
             let entry_price = get_f64(&state, "current_price", 0.0);
             let quantity = get_f64(&state, "calc_smart_size", 0.0);
@@ -1654,6 +1724,13 @@ fn execute_strategy_step(
             } else {
                 entry_reason.clone()
             };
+            let size_reason = get_record_string(
+                &state,
+                "validate_size",
+                "reason",
+                "size_constraints_not_met",
+            );
+            let size_score = get_record_f64(&state, "validate_size", "size_score", 0.0);
 
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
                 let is_long = entry_side.eq_ignore_ascii_case("long");
@@ -1680,8 +1757,8 @@ fn execute_strategy_step(
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "reason": format!(
-                        "entry_confirmed_score_{:.3}_{}",
-                        entry_score, entry_reason_with_breakdown
+                        "entry_confirmed_score_{:.3}_size_{:.3}_{}_{}",
+                        entry_score, size_score, entry_reason_with_breakdown, size_reason
                     ),
                     "smart_copy_compatible": true
                 }))
@@ -1694,7 +1771,7 @@ fn execute_strategy_step(
                     "entry_price": 0.0,
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
-                    "reason": entry_reason_with_breakdown,
+                    "reason": format!("{}_{}", entry_reason_with_breakdown, size_reason),
                     "smart_copy_compatible": false
                 }))
             }
@@ -2111,6 +2188,23 @@ fn push_weighted_entry_component(
     }
 }
 
+fn push_weighted_size_component(
+    components: &mut Vec<SizePolicyComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(SizePolicyComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
 fn push_weighted_health_component(
     components: &mut Vec<HealthScoreComponent>,
     reason: &'static str,
@@ -2152,6 +2246,37 @@ fn entry_policy_summary(breakdown: &EntryPolicyBreakdown) -> String {
     } else {
         format!(
             "entry_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
+}
+
+fn size_policy_summary(breakdown: &SizePolicyBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "size_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "size_raw_{}_clamped_{}_{}",
             breakdown.raw_score,
             breakdown.clamped_score,
             reasons.join("__")
