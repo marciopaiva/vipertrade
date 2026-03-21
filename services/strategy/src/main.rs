@@ -2176,15 +2176,17 @@ fn execute_strategy_step(
             let decision_score = get_record_f64(&state, "decision", "decision_score", 0.0);
             let smart_copy_compatible =
                 get_record_bool(&state, "decision", "smart_copy_compatible", false);
+            let temporal_reason = structured_hold_reason_from_state(&state);
 
             Ok(json!({
                 "ok": true,
                 "reason": format!(
-                    "audit_action_{}_score_{:.3}_smart_copy_{}_{}",
+                    "audit_action_{}_score_{:.3}_smart_copy_{}_{}_{}",
                     decision_action,
                     decision_score,
                     smart_copy_compatible,
-                    decision_reason
+                    decision_reason,
+                    temporal_reason
                 ),
                 "decision_action": decision_action,
                 "decision_score": decision_score,
@@ -2408,6 +2410,24 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
             "reason",
             "trailing_config_not_available",
         ),
+        get_record_string(
+            state,
+            "signal_confirmation",
+            "reason",
+            "signal_confirmation_not_available",
+        ),
+        get_record_string(
+            state,
+            "cooldown_guard",
+            "reason",
+            "cooldown_guard_not_available",
+        ),
+        get_record_string(
+            state,
+            "thesis_confirmation",
+            "reason",
+            "thesis_confirmation_not_available",
+        ),
     ];
 
     let reasons = candidate_reasons
@@ -2420,6 +2440,9 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
                     | "size_proposal_not_available"
                     | "size_constraints_not_met"
                     | "trailing_config_not_available"
+                    | "signal_confirmation_not_available"
+                    | "cooldown_guard_not_available"
+                    | "thesis_confirmation_not_available"
             )
         })
         .collect::<Vec<_>>();
@@ -2428,6 +2451,77 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
         "risk_constraints_not_met".to_string()
     } else {
         reasons.join("_")
+    }
+}
+
+fn structured_temporal_reason_from_state(state: &Value) -> Option<String> {
+    let candidate_reasons = [
+        get_record_string(
+            state,
+            "signal_confirmation",
+            "reason",
+            "signal_confirmation_not_available",
+        ),
+        get_record_string(
+            state,
+            "cooldown_guard",
+            "reason",
+            "cooldown_guard_not_available",
+        ),
+        get_record_string(
+            state,
+            "thesis_confirmation",
+            "reason",
+            "thesis_confirmation_not_available",
+        ),
+    ];
+
+    let reasons = candidate_reasons
+        .into_iter()
+        .filter(|reason| {
+            !matches!(
+                reason.as_str(),
+                "signal_confirmation_not_available"
+                    | "cooldown_guard_not_available"
+                    | "thesis_confirmation_not_available"
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(reasons.join("_"))
+    }
+}
+
+fn temporal_confirmation_reason(
+    prefix: &str,
+    consecutive_hits: usize,
+    required_hits: usize,
+    base_reason: &str,
+) -> String {
+    let remaining_hits = required_hits.saturating_sub(consecutive_hits);
+    format!(
+        "{}_pending_{}_remaining_{}_{}",
+        prefix, consecutive_hits, remaining_hits, base_reason
+    )
+}
+
+fn inferred_confirmation_side(
+    trend: f64,
+    signal_confirmation: Option<&SignalConfirmationState>,
+) -> &'static str {
+    if let Some(state) = signal_confirmation {
+        if state.side.eq_ignore_ascii_case("short") {
+            "short"
+        } else {
+            "long"
+        }
+    } else if trend < 0.0 {
+        "short"
+    } else {
+        "long"
     }
 }
 
@@ -2988,9 +3082,13 @@ fn evaluate_thesis_guard_policy(
         ThesisGuardEvaluation {
             confirmed: false,
             reason: format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}_{}",
-                state.consecutive_invalid_ticks,
-                required_ticks,
+                "{}_health_{}_{}",
+                temporal_confirmation_reason(
+                    "thesis_confirmation",
+                    state.consecutive_invalid_ticks,
+                    required_ticks,
+                    "thesis_invalidation"
+                ),
                 evaluation.health_score,
                 evaluation.reason
             ),
@@ -3054,6 +3152,61 @@ fn apply_hold_block(decision: &mut StrategyDecision, reason: String) {
     decision.take_profit = 0.0;
     decision.reason = reason;
     decision.smart_copy_compatible = false;
+}
+
+fn build_temporal_pipeline_state(
+    symbol: &str,
+    trend: f64,
+    cfg: &StrategyConfig,
+    entry_guards: &HashMap<String, EntryGuardState>,
+    signal_confirmations: &HashMap<String, SignalConfirmationState>,
+    thesis_invalidations: &HashMap<String, ThesisInvalidationState>,
+) -> serde_json::Value {
+    let signal_confirmation = signal_confirmations.get(symbol);
+    let thesis_confirmation = thesis_invalidations.get(symbol);
+    let cooldown_guard = entry_guards.get(symbol);
+    let confirmation_side = inferred_confirmation_side(trend, signal_confirmation);
+
+    let cooldown_active = cooldown_guard
+        .map(|guard| Instant::now() < guard.cooldown_until)
+        .unwrap_or(false);
+    let cooldown_remaining_seconds = if cooldown_active {
+        cooldown_guard
+            .map(|guard| {
+                guard
+                    .cooldown_until
+                    .saturating_duration_since(Instant::now())
+                    .as_secs()
+            })
+            .unwrap_or(0) as i64
+    } else {
+        0
+    };
+
+    json!({
+        "signal_confirmation": {
+            "observed": signal_confirmation
+                .map(|state| state.consecutive_valid_ticks > 0)
+                .unwrap_or(false),
+            "consecutive_hits": signal_confirmation
+            .map(|state| state.consecutive_valid_ticks as i64)
+            .unwrap_or(0),
+            "required_hits": cfg.min_signal_confirmation_ticks_for_side(symbol, confirmation_side) as i64
+        },
+        "cooldown_guard": {
+            "active": cooldown_active,
+            "remaining_seconds": cooldown_remaining_seconds
+        },
+        "thesis_confirmation": {
+            "observed": thesis_confirmation
+                .map(|state| state.consecutive_invalid_ticks > 0)
+                .unwrap_or(false),
+            "consecutive_hits": thesis_confirmation
+                .map(|state| state.consecutive_invalid_ticks as i64)
+                .unwrap_or(0),
+            "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3504,6 +3657,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "account_equity_usdt".to_string(),
                         json!(cached_account_equity_usdt),
                     );
+                    obj.insert(
+                        "temporal".to_string(),
+                        build_temporal_pipeline_state(
+                            &symbol,
+                            trend,
+                            cfg.as_ref(),
+                            &entry_guards,
+                            &signal_confirmations,
+                            &thesis_invalidations,
+                        ),
+                    );
                 }
                 let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
                     Ok(v) => v,
@@ -3571,6 +3735,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
                         {
                             decision.reason = structured_hold_reason_from_state(&runtime_output);
+                        } else if decision.action == "HOLD"
+                            && (decision.reason.starts_with("awaiting_signal_confirmation_")
+                                || decision.reason.starts_with("cooldown_stop_loss_")
+                                || decision.reason.starts_with("blocked_until_trend_flip_"))
+                        {
+                            if let Some(temporal_reason) =
+                                structured_temporal_reason_from_state(&runtime_output)
+                            {
+                                decision.reason =
+                                    format!("{}_{}", decision.reason, temporal_reason);
+                            }
                         }
 
                         if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
@@ -3719,7 +3894,10 @@ mod tests {
                 "reason": "entry_confirmed",
                 "decision_score": 87.0,
                 "smart_copy_compatible": true
-            }
+            },
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
         });
 
         let audit = execute_strategy_step("audit", state, &sample_cfg()).expect("audit step");
@@ -3731,6 +3909,9 @@ mod tests {
         let reason = audit["reason"].as_str().expect("audit reason");
         assert!(reason.contains("audit_action_ENTER_LONG"));
         assert!(reason.contains("entry_confirmed"));
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
     }
 
     #[test]
@@ -3740,7 +3921,10 @@ mod tests {
             "check_funding": { "reason": "funding_validated" },
             "calc_smart_size": { "reason": "size_proposed_proposal_raw_100_clamped_100" },
             "validate_size": { "reason": "size_validated_size_raw_100_clamped_100" },
-            "get_trailing_config": { "reason": "trailing_pending_runtime" }
+            "get_trailing_config": { "reason": "trailing_pending_runtime" },
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
         });
 
         let reason = structured_hold_reason_from_state(&state);
@@ -3749,6 +3933,52 @@ mod tests {
         assert!(reason.contains("funding_validated"));
         assert!(reason.contains("size_proposed_proposal_raw_100_clamped_100"));
         assert!(reason.contains("size_validated_size_raw_100_clamped_100"));
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
         assert!(!reason.contains("risk_constraints_not_met"));
+    }
+
+    #[test]
+    fn structured_temporal_reason_from_state_uses_temporal_steps() {
+        let state = json!({
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
+        });
+
+        let reason =
+            structured_temporal_reason_from_state(&state).expect("temporal reason should exist");
+
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
+    }
+
+    #[test]
+    fn temporal_confirmation_reason_reports_remaining_hits() {
+        let reason = temporal_confirmation_reason("thesis_confirmation", 1, 3, "base_reason");
+
+        assert!(reason.contains("thesis_confirmation_pending_1"));
+        assert!(reason.contains("remaining_2"));
+        assert!(reason.contains("base_reason"));
+    }
+
+    #[test]
+    fn thesis_guard_policy_uses_temporal_confirmation_reason() {
+        let evaluation = ThesisInvalidationEvaluation {
+            invalidated: true,
+            reason: "thesis_invalidated_health_threshold".to_string(),
+            health_score: -42,
+        };
+        let mut invalidations = HashMap::new();
+
+        let guard =
+            evaluate_thesis_guard_policy("DOGEUSDT", "Long", &evaluation, &mut invalidations, 3);
+
+        assert!(!guard.confirmed);
+        assert!(guard.reason.contains("thesis_confirmation_pending_1"));
+        assert!(guard.reason.contains("remaining_2"));
+        assert!(guard.reason.contains("health_-42"));
     }
 }
