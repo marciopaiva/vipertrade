@@ -3056,6 +3056,59 @@ fn apply_hold_block(decision: &mut StrategyDecision, reason: String) {
     decision.smart_copy_compatible = false;
 }
 
+fn build_temporal_pipeline_state(
+    symbol: &str,
+    cfg: &StrategyConfig,
+    entry_guards: &HashMap<String, EntryGuardState>,
+    signal_confirmations: &HashMap<String, SignalConfirmationState>,
+    thesis_invalidations: &HashMap<String, ThesisInvalidationState>,
+) -> serde_json::Value {
+    let signal_confirmation = signal_confirmations.get(symbol);
+    let thesis_confirmation = thesis_invalidations.get(symbol);
+    let cooldown_guard = entry_guards.get(symbol);
+
+    let cooldown_active = cooldown_guard
+        .map(|guard| Instant::now() < guard.cooldown_until)
+        .unwrap_or(false);
+    let cooldown_remaining_ticks = if cooldown_active {
+        cooldown_guard
+            .map(|guard| {
+                guard
+                    .cooldown_until
+                    .saturating_duration_since(Instant::now())
+                    .as_secs()
+            })
+            .unwrap_or(0) as i64
+    } else {
+        0
+    };
+
+    json!({
+        "signal_confirmation": {
+            "observed": signal_confirmation
+                .map(|state| state.consecutive_valid_ticks > 0)
+                .unwrap_or(false),
+            "consecutive_hits": signal_confirmation
+                .map(|state| state.consecutive_valid_ticks as i64)
+                .unwrap_or(0),
+            "required_hits": cfg.min_signal_confirmation_ticks(symbol) as i64
+        },
+        "cooldown_guard": {
+            "active": cooldown_active,
+            "remaining_ticks": cooldown_remaining_ticks
+        },
+        "thesis_confirmation": {
+            "observed": thesis_confirmation
+                .map(|state| state.consecutive_invalid_ticks > 0)
+                .unwrap_or(false),
+            "consecutive_hits": thesis_confirmation
+                .map(|state| state.consecutive_invalid_ticks as i64)
+                .unwrap_or(0),
+            "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate_entry_guard_policy(
     symbol: &str,
@@ -3503,6 +3556,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     obj.insert(
                         "account_equity_usdt".to_string(),
                         json!(cached_account_equity_usdt),
+                    );
+                    obj.insert(
+                        "temporal".to_string(),
+                        build_temporal_pipeline_state(
+                            &symbol,
+                            cfg.as_ref(),
+                            &entry_guards,
+                            &signal_confirmations,
+                            &thesis_invalidations,
+                        ),
                     );
                 }
                 let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
