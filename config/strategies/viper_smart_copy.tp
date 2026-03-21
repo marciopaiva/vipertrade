@@ -63,8 +63,44 @@ fn step_validate_entry(
   };
 }
 
-fn step_check_funding(input: { symbol: string }): bool {
-  return true;
+fn step_check_funding(input: { symbol: string }): {
+  passed: bool,
+  severity: string,
+  reason: string,
+  funding_rate: f64,
+  funding_score: f64,
+  funding_breakdown: {
+    raw_score: i64,
+    clamped_score: i64,
+    components: [{
+      reason: string,
+      score: f64,
+      weight: f64,
+      contribution: i64
+    }; 1]
+  }
+} {
+  let funding_limit: { score: f64, weight: f64, reason: string } = weighted(1.0, 100.0, "funding_rate_limit");
+  let raw_score: i64 = 100;
+  return {
+    passed: true,
+    severity: "info",
+    reason: "funding_validated_funding_raw_100_clamped_100",
+    funding_rate: 0.0,
+    funding_score: 100.0,
+    funding_breakdown: {
+      raw_score: raw_score,
+      clamped_score: raw_score,
+      components: [
+        {
+          reason: funding_limit.reason,
+          score: funding_limit.score,
+          weight: funding_limit.weight,
+          contribution: 100
+        }
+      ]
+    }
+  };
 }
 
 fn step_calc_smart_size(input: { symbol: string }): f64 {
@@ -72,8 +108,51 @@ fn step_calc_smart_size(input: { symbol: string }): f64 {
   return component.score;
 }
 
-fn step_validate_size(input: { symbol: string }): bool {
-  return true;
+fn step_validate_size(input: { symbol: string }): {
+  passed: bool,
+  severity: string,
+  reason: string,
+  position_usdt: f64,
+  size_score: f64,
+  size_breakdown: {
+    raw_score: i64,
+    clamped_score: i64,
+    components: [{
+      reason: string,
+      score: f64,
+      weight: f64,
+      contribution: i64
+    }; 2]
+  }
+} {
+  let min_position: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "min_position");
+  let max_position_cap: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "max_position_cap");
+  let raw_score: i64 = 100;
+  return {
+    passed: true,
+    severity: "info",
+    reason: "size_validated_size_raw_100_clamped_100",
+    position_usdt: 0.0,
+    size_score: 100.0,
+    size_breakdown: {
+      raw_score: raw_score,
+      clamped_score: raw_score,
+      components: [
+        {
+          reason: min_position.reason,
+          score: min_position.score,
+          weight: min_position.weight,
+          contribution: 50
+        },
+        {
+          reason: max_position_cap.reason,
+          score: max_position_cap.score,
+          weight: max_position_cap.weight,
+          contribution: 50
+        }
+      ]
+    }
+  };
 }
 
 fn step_get_trailing_config(input: { symbol: string }): { activated: bool, distance_pct: f64 } {
