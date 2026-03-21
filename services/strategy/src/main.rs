@@ -834,6 +834,66 @@ fn get_record_string(state: &Value, key: &str, field: &str, default: &str) -> St
         .to_string()
 }
 
+fn summarize_entry_breakdown(state: &Value) -> Option<String> {
+    let breakdown = get_record_field(state, "validate_entry", "entry_breakdown")?;
+    let raw_score = breakdown
+        .get("raw_score")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let clamped_score = breakdown
+        .get("clamped_score")
+        .and_then(Value::as_i64)
+        .unwrap_or(raw_score);
+
+    let mut components = breakdown
+        .get("components")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    components.sort_by_key(|component| {
+        component
+            .get("contribution")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .abs()
+    });
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| {
+            let reason = component
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let score = component
+                .get("score")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let weight = component
+                .get("weight")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let contribution = component
+                .get("contribution")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            format!("{reason}:{score:.3}x{weight:.1}={contribution}")
+        })
+        .collect::<Vec<_>>();
+
+    Some(if reasons.is_empty() {
+        format!("entry_raw_{raw_score}_clamped_{clamped_score}")
+    } else {
+        format!(
+            "entry_raw_{raw_score}_clamped_{clamped_score}_{}",
+            reasons.join("__")
+        )
+    })
+}
+
 fn side_from_trend(trend: f64) -> &'static str {
     if trend >= 0.0 {
         "Long"
@@ -1588,6 +1648,12 @@ fn execute_strategy_step(
                 "risk_constraints_not_met",
             );
             let entry_score = get_record_f64(&state, "validate_entry", "entry_score", 0.0);
+            let entry_breakdown_summary = summarize_entry_breakdown(&state);
+            let entry_reason_with_breakdown = if let Some(summary) = entry_breakdown_summary {
+                format!("{}_{}", entry_reason, summary)
+            } else {
+                entry_reason.clone()
+            };
 
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
                 let is_long = entry_side.eq_ignore_ascii_case("long");
@@ -1613,7 +1679,10 @@ fn execute_strategy_step(
                     "entry_price": entry_price,
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
-                    "reason": format!("entry_confirmed_score_{:.3}_{}", entry_score, entry_reason),
+                    "reason": format!(
+                        "entry_confirmed_score_{:.3}_{}",
+                        entry_score, entry_reason_with_breakdown
+                    ),
                     "smart_copy_compatible": true
                 }))
             } else {
@@ -1625,7 +1694,7 @@ fn execute_strategy_step(
                     "entry_price": 0.0,
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
-                    "reason": entry_reason,
+                    "reason": entry_reason_with_breakdown,
                     "smart_copy_compatible": false
                 }))
             }
