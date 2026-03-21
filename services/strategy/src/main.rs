@@ -2182,12 +2182,7 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
             "reason",
             "size_proposal_not_available",
         ),
-        get_record_string(
-            state,
-            "validate_size",
-            "reason",
-            "size_constraints_not_met",
-        ),
+        get_record_string(state, "validate_size", "reason", "size_constraints_not_met"),
         get_record_string(
             state,
             "get_trailing_config",
