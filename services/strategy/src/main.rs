@@ -2495,6 +2495,19 @@ fn structured_temporal_reason_from_state(state: &Value) -> Option<String> {
     }
 }
 
+fn temporal_confirmation_reason(
+    prefix: &str,
+    consecutive_hits: usize,
+    required_hits: usize,
+    base_reason: &str,
+) -> String {
+    let remaining_hits = required_hits.saturating_sub(consecutive_hits);
+    format!(
+        "{}_pending_{}_remaining_{}_{}",
+        prefix, consecutive_hits, remaining_hits, base_reason
+    )
+}
+
 fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
 }
@@ -3052,9 +3065,13 @@ fn evaluate_thesis_guard_policy(
         ThesisGuardEvaluation {
             confirmed: false,
             reason: format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}_{}",
-                state.consecutive_invalid_ticks,
-                required_ticks,
+                "{}_health_{}_{}",
+                temporal_confirmation_reason(
+                    "thesis_confirmation",
+                    state.consecutive_invalid_ticks,
+                    required_ticks,
+                    "thesis_invalidation"
+                ),
                 evaluation.health_score,
                 evaluation.reason
             ),
@@ -3916,5 +3933,37 @@ mod tests {
         assert!(reason.contains("signal_confirmation"));
         assert!(reason.contains("cooldown_guard"));
         assert!(reason.contains("thesis_confirmation"));
+    }
+
+    #[test]
+    fn temporal_confirmation_reason_reports_remaining_hits() {
+        let reason = temporal_confirmation_reason("thesis_confirmation", 1, 3, "base_reason");
+
+        assert!(reason.contains("thesis_confirmation_pending_1"));
+        assert!(reason.contains("remaining_2"));
+        assert!(reason.contains("base_reason"));
+    }
+
+    #[test]
+    fn thesis_guard_policy_uses_temporal_confirmation_reason() {
+        let evaluation = ThesisInvalidationEvaluation {
+            invalidated: true,
+            reason: "thesis_invalidated_health_threshold".to_string(),
+            health_score: -42,
+        };
+        let mut invalidations = HashMap::new();
+
+        let guard = evaluate_thesis_guard_policy(
+            "DOGEUSDT",
+            "Long",
+            &evaluation,
+            &mut invalidations,
+            3,
+        );
+
+        assert!(!guard.confirmed);
+        assert!(guard.reason.contains("thesis_confirmation_pending_1"));
+        assert!(guard.reason.contains("remaining_2"));
+        assert!(guard.reason.contains("health_-42"));
     }
 }
