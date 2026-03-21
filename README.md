@@ -48,6 +48,12 @@ In ViperTrade, Tupa helps by:
 
 Tupa is not used here as a demo integration. It is part of the production architecture of the system.
 
+Today, the `.tp` pipeline acts as a validated strategy contract and execution-plan shape for the
+runtime. The strategy service loads that plan in-process and combines it with Rust-side runtime
+state, market data, and guard logic. That means the pipeline is already part of the real
+production path, but some strategy semantics still live in Rust while the migration to richer
+Tupa-native policy logic continues.
+
 ## Production mindset
 
 This repository is organized around repeatability and operational safety:
@@ -68,7 +74,7 @@ Core services:
 - `market-data`
   - ingests and normalizes exchange signals
 - `strategy`
-  - loads the Tupa-derived runtime plan and produces decisions
+  - loads the Tupa-derived runtime plan in-process and produces decisions
 - `executor`
   - translates decisions into exchange-side actions
 - `monitor`
