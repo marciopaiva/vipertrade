@@ -2115,13 +2115,7 @@ fn evaluate_open_trade_exit(
             hard_stop, current_price
         );
         return ExitEvaluation {
-            decision: create_close_decision(
-                symbol,
-                side,
-                open.quantity,
-                current_price,
-                &reason,
-            ),
+            decision: create_close_decision(symbol, side, open.quantity, current_price, &reason),
             trailing: None,
             trigger: "stop_loss".to_string(),
             reason,
