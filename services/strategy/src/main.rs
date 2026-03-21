@@ -3632,3 +3632,123 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration as ChronoDuration;
+
+    fn sample_cfg() -> StrategyConfig {
+        StrategyConfig {
+            profile: "TEST".to_string(),
+            trading_mode: "PAPER".to_string(),
+            global: json!({
+                "mode_profiles": {
+                    "PAPER": {
+                        "stop_loss_pct": 0.01,
+                        "fixed_take_profit_enabled": true,
+                        "take_profit_pct": 0.02,
+                        "min_hold_seconds": 0,
+                        "trailing_enabled": true,
+                        "trailing_stop": {
+                            "activate_after_profit_pct": 0.01,
+                            "initial_trail_pct": 0.005,
+                            "ratchet_levels": [
+                                { "at_profit_pct": 0.02, "trail_pct": 0.004 }
+                            ],
+                            "move_to_break_even_at": 0.015
+                        }
+                    }
+                },
+                "trailing_stop": {
+                    "min_move_threshold_pct": 0.002
+                }
+            }),
+            pairs: HashMap::new(),
+            profiles: json!({}),
+        }
+    }
+
+    fn sample_open_trade() -> OpenTradeSnapshot {
+        OpenTradeSnapshot {
+            trade_id: "trade-1".to_string(),
+            side: "Long".to_string(),
+            quantity: 10.0,
+            entry_price: 100.0,
+            opened_at: Utc::now() - ChronoDuration::seconds(600),
+            trailing_stop_activated: false,
+            trailing_stop_peak_price: 0.0,
+            trailing_stop_final_distance_pct: 0.0,
+        }
+    }
+
+    #[test]
+    fn evaluate_trailing_returns_score_and_reason_summary() {
+        let open = sample_open_trade();
+        let trailing = sample_cfg().trailing_runtime_config("DOGEUSDT");
+
+        let eval = evaluate_trailing(&open, 103.0, &trailing).expect("trailing evaluation");
+
+        assert!(eval.activated);
+        assert!(eval.trailing_score > 0);
+        assert!(eval.reason.contains("trailing_raw_"));
+        assert!(eval.reason.contains("activation_progress"));
+        assert!(eval.reason.contains("break_even"));
+    }
+
+    #[test]
+    fn evaluate_open_trade_exit_returns_take_profit_trigger() {
+        let open = sample_open_trade();
+        let cfg = sample_cfg();
+
+        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg);
+
+        assert_eq!(eval.trigger, "take_profit");
+        assert!(eval.reason.contains("take_profit_triggered"));
+        let decision = eval.decision.expect("close decision");
+        assert_eq!(decision.action, "CLOSE_LONG");
+        assert!(decision.reason.contains("take_profit_triggered"));
+    }
+
+    #[test]
+    fn audit_step_summarizes_decision_state() {
+        let state = json!({
+            "symbol": "DOGEUSDT",
+            "decision": {
+                "action": "ENTER_LONG",
+                "reason": "entry_confirmed",
+                "decision_score": 87.0,
+                "smart_copy_compatible": true
+            }
+        });
+
+        let audit = execute_strategy_step("audit", state, &sample_cfg()).expect("audit step");
+
+        assert_eq!(audit["ok"], json!(true));
+        assert_eq!(audit["decision_action"], json!("ENTER_LONG"));
+        assert_eq!(audit["decision_score"], json!(87.0));
+        assert_eq!(audit["smart_copy_compatible"], json!(true));
+        let reason = audit["reason"].as_str().expect("audit reason");
+        assert!(reason.contains("audit_action_ENTER_LONG"));
+        assert!(reason.contains("entry_confirmed"));
+    }
+
+    #[test]
+    fn structured_hold_reason_from_state_uses_non_default_reasons() {
+        let state = json!({
+            "validate_entry": { "reason": "entry_blocked_low_volume" },
+            "check_funding": { "reason": "funding_validated" },
+            "calc_smart_size": { "reason": "size_proposed_proposal_raw_100_clamped_100" },
+            "validate_size": { "reason": "size_validated_size_raw_100_clamped_100" },
+            "get_trailing_config": { "reason": "trailing_pending_runtime" }
+        });
+
+        let reason = structured_hold_reason_from_state(&state);
+
+        assert!(reason.contains("entry_blocked_low_volume"));
+        assert!(reason.contains("funding_validated"));
+        assert!(reason.contains("size_proposed_proposal_raw_100_clamped_100"));
+        assert!(reason.contains("size_validated_size_raw_100_clamped_100"));
+        assert!(!reason.contains("risk_constraints_not_met"));
+    }
+}
