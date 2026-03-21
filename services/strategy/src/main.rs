@@ -3031,6 +3031,7 @@ fn apply_hold_block(decision: &mut StrategyDecision, reason: String) {
     decision.smart_copy_compatible = false;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_entry_guard_policy(
     symbol: &str,
     trend: f64,
