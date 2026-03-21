@@ -213,6 +213,12 @@ struct ThesisInvalidationEvaluation {
     health_score: i32,
 }
 
+#[derive(Debug, Clone)]
+struct EntryGuardEvaluation {
+    blocked: bool,
+    reason: String,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct WalletSizingResponse {
     total_equity: Option<f64>,
@@ -2983,6 +2989,102 @@ fn enforce_open_position_thesis_guard(
     )
 }
 
+fn apply_hold_block(decision: &mut StrategyDecision, reason: String) {
+    decision.action = "HOLD".to_string();
+    decision.quantity = 0.0;
+    decision.leverage = 0.0;
+    decision.entry_price = 0.0;
+    decision.stop_loss = 0.0;
+    decision.take_profit = 0.0;
+    decision.reason = reason;
+    decision.smart_copy_compatible = false;
+}
+
+fn evaluate_entry_guard_policy(
+    symbol: &str,
+    trend: f64,
+    proposed_side: &str,
+    proposed_reason: &str,
+    entry_guards: &mut HashMap<String, EntryGuardState>,
+    cooldown_minutes: i64,
+    recent_stop_loss_same_symbol: bool,
+    signal_confirmations: &mut HashMap<String, SignalConfirmationState>,
+    min_confirmation_ticks: usize,
+) -> EntryGuardEvaluation {
+    if recent_stop_loss_same_symbol {
+        return EntryGuardEvaluation {
+            blocked: true,
+            reason: format!(
+                "cooldown_stop_loss_{}m_{}",
+                cooldown_minutes, proposed_reason
+            ),
+        };
+    }
+
+    let confirmation = signal_confirmations
+        .entry(symbol.to_string())
+        .or_insert_with(|| SignalConfirmationState {
+            side: proposed_side.to_string(),
+            consecutive_valid_ticks: 0,
+        });
+
+    if !confirmation.side.eq_ignore_ascii_case(proposed_side) {
+        confirmation.side = proposed_side.to_string();
+        confirmation.consecutive_valid_ticks = 1;
+    } else {
+        confirmation.consecutive_valid_ticks += 1;
+    }
+
+    if confirmation.consecutive_valid_ticks < min_confirmation_ticks {
+        return EntryGuardEvaluation {
+            blocked: true,
+            reason: format!(
+                "awaiting_signal_confirmation_{}/{}_{}",
+                confirmation.consecutive_valid_ticks, min_confirmation_ticks, proposed_reason
+            ),
+        };
+    }
+
+    if let Some(guard) = entry_guards.get_mut(symbol) {
+        if Instant::now() < guard.cooldown_until {
+            return EntryGuardEvaluation {
+                blocked: true,
+                reason: format!(
+                    "cooldown_stop_loss_{}m_{}",
+                    cooldown_minutes, proposed_reason
+                ),
+            };
+        }
+
+        if !guard.awaiting_flip {
+            return EntryGuardEvaluation {
+                blocked: false,
+                reason: proposed_reason.to_string(),
+            };
+        }
+
+        if !is_same_direction(&guard.blocked_side, trend) {
+            guard.awaiting_flip = false;
+            return EntryGuardEvaluation {
+                blocked: false,
+                reason: proposed_reason.to_string(),
+            };
+        }
+
+        if guard.blocked_side.eq_ignore_ascii_case(proposed_side) {
+            return EntryGuardEvaluation {
+                blocked: true,
+                reason: format!("blocked_until_trend_flip_{}", proposed_reason),
+            };
+        }
+    }
+
+    EntryGuardEvaluation {
+        blocked: false,
+        reason: proposed_reason.to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn enforce_entry_guards(
     symbol: &str,
@@ -3005,85 +3107,20 @@ fn enforce_entry_guards(
         "Short"
     };
 
-    if recent_stop_loss_same_symbol {
-        decision.action = "HOLD".to_string();
-        decision.quantity = 0.0;
-        decision.leverage = 0.0;
-        decision.entry_price = 0.0;
-        decision.stop_loss = 0.0;
-        decision.take_profit = 0.0;
-        decision.reason = format!(
-            "cooldown_stop_loss_{}m_{}",
-            cooldown_minutes, proposed_reason
-        );
-        decision.smart_copy_compatible = false;
-        return decision;
-    }
+    let evaluation = evaluate_entry_guard_policy(
+        symbol,
+        trend,
+        proposed_side,
+        &proposed_reason,
+        entry_guards,
+        cooldown_minutes,
+        recent_stop_loss_same_symbol,
+        signal_confirmations,
+        min_confirmation_ticks,
+    );
 
-    let confirmation = signal_confirmations
-        .entry(symbol.to_string())
-        .or_insert_with(|| SignalConfirmationState {
-            side: proposed_side.to_string(),
-            consecutive_valid_ticks: 0,
-        });
-
-    if !confirmation.side.eq_ignore_ascii_case(proposed_side) {
-        confirmation.side = proposed_side.to_string();
-        confirmation.consecutive_valid_ticks = 1;
-    } else {
-        confirmation.consecutive_valid_ticks += 1;
-    }
-
-    if confirmation.consecutive_valid_ticks < min_confirmation_ticks {
-        decision.action = "HOLD".to_string();
-        decision.quantity = 0.0;
-        decision.leverage = 0.0;
-        decision.entry_price = 0.0;
-        decision.stop_loss = 0.0;
-        decision.take_profit = 0.0;
-        decision.reason = format!(
-            "awaiting_signal_confirmation_{}/{}_{}",
-            confirmation.consecutive_valid_ticks, min_confirmation_ticks, proposed_reason
-        );
-        decision.smart_copy_compatible = false;
-        return decision;
-    }
-
-    if let Some(guard) = entry_guards.get_mut(symbol) {
-        if Instant::now() < guard.cooldown_until {
-            decision.action = "HOLD".to_string();
-            decision.quantity = 0.0;
-            decision.leverage = 0.0;
-            decision.entry_price = 0.0;
-            decision.stop_loss = 0.0;
-            decision.take_profit = 0.0;
-            decision.reason = format!(
-                "cooldown_stop_loss_{}m_{}",
-                cooldown_minutes, proposed_reason
-            );
-            decision.smart_copy_compatible = false;
-            return decision;
-        }
-
-        if !guard.awaiting_flip {
-            return decision;
-        }
-
-        if !is_same_direction(&guard.blocked_side, trend) {
-            guard.awaiting_flip = false;
-            return decision;
-        }
-
-        if guard.blocked_side.eq_ignore_ascii_case(proposed_side) {
-            decision.action = "HOLD".to_string();
-            decision.quantity = 0.0;
-            decision.leverage = 0.0;
-            decision.entry_price = 0.0;
-            decision.stop_loss = 0.0;
-            decision.take_profit = 0.0;
-            decision.reason = format!("blocked_until_trend_flip_{}", proposed_reason);
-            decision.smart_copy_compatible = false;
-        }
+    if evaluation.blocked {
+        apply_hold_block(&mut decision, evaluation.reason);
     }
 
     decision
