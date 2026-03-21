@@ -121,6 +121,21 @@ struct SizePolicyBreakdown {
     components: Vec<SizePolicyComponent>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct FundingPolicyComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct FundingPolicyBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<FundingPolicyComponent>,
+}
+
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
@@ -1612,7 +1627,56 @@ fn execute_strategy_step(
         }
         "check_funding" => {
             let funding_rate = get_f64(&state, "funding_rate", 0.0).abs();
-            Ok(json!(funding_rate <= cfg.max_funding_rate_pct()))
+            let max_funding_rate_pct = cfg.max_funding_rate_pct();
+            let funding_score = if max_funding_rate_pct > 0.0 {
+                (1.0 - funding_rate / max_funding_rate_pct).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+
+            let mut components = Vec::new();
+            push_weighted_funding_component(
+                &mut components,
+                "funding_rate_limit",
+                funding_score,
+                100.0,
+            );
+
+            let raw_score = components
+                .iter()
+                .map(|component| component.contribution)
+                .sum();
+            let clamped_score = clamp_i32(raw_score, -100, 100);
+            let breakdown = FundingPolicyBreakdown {
+                raw_score,
+                clamped_score,
+                components,
+            };
+
+            let passed = funding_rate <= max_funding_rate_pct;
+            let reason = if passed {
+                format!("funding_validated_{}", funding_policy_summary(&breakdown))
+            } else {
+                format!(
+                    "funding_above_limit_{:.6}_gt_{:.6}_{}",
+                    funding_rate,
+                    max_funding_rate_pct,
+                    funding_policy_summary(&breakdown)
+                )
+            };
+
+            Ok(json!({
+                "passed": passed,
+                "severity": if passed { "info" } else { "error" },
+                "reason": reason,
+                "funding_rate": funding_rate,
+                "funding_score": breakdown.clamped_score,
+                "funding_breakdown": {
+                    "raw_score": breakdown.raw_score,
+                    "clamped_score": breakdown.clamped_score,
+                    "components": breakdown.components
+                }
+            }))
         }
         "calc_smart_size" => {
             let price = get_f64(&state, "current_price", 0.0);
@@ -1705,7 +1769,7 @@ fn execute_strategy_step(
             let can_enter = get_bool(&state, "check_daily_loss", false)
                 && get_bool(&state, "check_consecutive_losses", false)
                 && get_record_bool(&state, "validate_entry", "passed", false)
-                && get_bool(&state, "check_funding", false)
+                && get_record_bool(&state, "check_funding", "passed", false)
                 && get_record_bool(&state, "validate_size", "passed", false);
 
             let entry_price = get_f64(&state, "current_price", 0.0);
@@ -1731,6 +1795,13 @@ fn execute_strategy_step(
                 "size_constraints_not_met",
             );
             let size_score = get_record_f64(&state, "validate_size", "size_score", 0.0);
+            let funding_reason = get_record_string(
+                &state,
+                "check_funding",
+                "reason",
+                "funding_constraints_not_met",
+            );
+            let funding_score = get_record_f64(&state, "check_funding", "funding_score", 0.0);
 
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
                 let is_long = entry_side.eq_ignore_ascii_case("long");
@@ -1757,8 +1828,13 @@ fn execute_strategy_step(
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "reason": format!(
-                        "entry_confirmed_score_{:.3}_size_{:.3}_{}_{}",
-                        entry_score, size_score, entry_reason_with_breakdown, size_reason
+                        "entry_confirmed_score_{:.3}_funding_{:.3}_size_{:.3}_{}_{}_{}",
+                        entry_score,
+                        funding_score,
+                        size_score,
+                        entry_reason_with_breakdown,
+                        funding_reason,
+                        size_reason
                     ),
                     "smart_copy_compatible": true
                 }))
@@ -1771,7 +1847,10 @@ fn execute_strategy_step(
                     "entry_price": 0.0,
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
-                    "reason": format!("{}_{}", entry_reason_with_breakdown, size_reason),
+                    "reason": format!(
+                        "{}_{}_{}",
+                        entry_reason_with_breakdown, funding_reason, size_reason
+                    ),
                     "smart_copy_compatible": false
                 }))
             }
@@ -2205,6 +2284,23 @@ fn push_weighted_size_component(
     }
 }
 
+fn push_weighted_funding_component(
+    components: &mut Vec<FundingPolicyComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(FundingPolicyComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
 fn push_weighted_health_component(
     components: &mut Vec<HealthScoreComponent>,
     reason: &'static str,
@@ -2246,6 +2342,37 @@ fn entry_policy_summary(breakdown: &EntryPolicyBreakdown) -> String {
     } else {
         format!(
             "entry_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
+}
+
+fn funding_policy_summary(breakdown: &FundingPolicyBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "funding_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "funding_raw_{}_clamped_{}_{}",
             breakdown.raw_score,
             breakdown.clamped_score,
             reasons.join("__")
