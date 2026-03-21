@@ -62,6 +62,7 @@ struct TrailingEval {
     peak_price: f64,
     trail_pct: f64,
     trailing_stop_price: f64,
+    reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1182,9 +1183,11 @@ fn evaluate_trailing(
     }
 
     let mut trail_pct = trailing.initial_trail_pct;
-    for level in &trailing.ratchet_levels {
+    let mut ratchet_level = 0_i32;
+    for (idx, level) in trailing.ratchet_levels.iter().enumerate() {
         if profit_pct >= level.at_profit_pct {
             trail_pct = level.trail_pct;
+            ratchet_level = (idx + 1) as i32;
         }
     }
 
@@ -1199,7 +1202,8 @@ fn evaluate_trailing(
         peak_price * (1.0 + trail_pct)
     };
 
-    if profit_pct >= trailing.move_to_break_even_at {
+    let break_even_armed = profit_pct >= trailing.move_to_break_even_at;
+    if break_even_armed {
         if open.side == "Long" {
             trailing_stop_price = trailing_stop_price.max(open.entry_price);
         } else {
@@ -1213,6 +1217,15 @@ fn evaluate_trailing(
         peak_price,
         trail_pct,
         trailing_stop_price,
+        reason: format!(
+            "trailing_eval_profit_{:.5}_peak_{:.5}_trail_{:.5}_stop_{:.5}_ratchet_{}_breakeven_{}",
+            profit_pct,
+            peak_price,
+            trail_pct,
+            trailing_stop_price,
+            ratchet_level,
+            break_even_armed
+        ),
     })
 }
 
@@ -2160,10 +2173,7 @@ fn evaluate_open_trade_exit(
         };
 
         if trailing_hit {
-            let reason = format!(
-                "trailing_stop_triggered_stop_{:.5}_peak_{:.5}_trail_{:.5}_current_{:.5}",
-                eval.trailing_stop_price, eval.peak_price, eval.trail_pct, current_price
-            );
+            let reason = format!("trailing_stop_triggered_{}_current_{:.5}", eval.reason, current_price);
             return ExitEvaluation {
                 decision: create_close_decision(
                     symbol,
@@ -2178,10 +2188,7 @@ fn evaluate_open_trade_exit(
             };
         }
 
-        let reason = format!(
-            "trailing_monitoring_stop_{:.5}_peak_{:.5}_trail_{:.5}",
-            eval.trailing_stop_price, eval.peak_price, eval.trail_pct
-        );
+        let reason = format!("trailing_monitoring_{}", eval.reason);
         return ExitEvaluation {
             decision: None,
             trailing: Some(eval),
