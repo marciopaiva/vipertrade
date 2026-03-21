@@ -283,9 +283,21 @@ fn step_decision(
   };
 }
 
-fn step_audit(input: { symbol: string }): bool {
+fn step_audit(input: { symbol: string }): {
+  ok: bool,
+  reason: string,
+  decision_action: string,
+  decision_score: f64,
+  smart_copy_compatible: bool
+} {
   let outcome: { passed: bool, severity: string, reason: string } = pass("audit_ok");
-  return outcome.passed;
+  return {
+    ok: outcome.passed,
+    reason: outcome.reason,
+    decision_action: "HOLD",
+    decision_score: 100.0,
+    smart_copy_compatible: false
+  };
 }
 
 pipeline ViperSmartCopy @deterministic(seed=42) {
