@@ -1,15 +1,86 @@
+fn step_check_daily_loss(input: { symbol: string }): bool {
+  return true;
+}
+
+fn step_check_consecutive_losses(input: { symbol: string }): bool {
+  return true;
+}
+
+fn step_validate_entry(
+  input: { symbol: string }
+): { passed: bool, severity: string, reason: string, side: string, entry_score: f64 } {
+  let outcome: { passed: bool, severity: string, reason: string } = warn("entry_pending_runtime");
+  return {
+    passed: outcome.passed,
+    severity: outcome.severity,
+    reason: outcome.reason,
+    side: "long",
+    entry_score: 0.0
+  };
+}
+
+fn step_check_funding(input: { symbol: string }): bool {
+  return true;
+}
+
+fn step_calc_smart_size(input: { symbol: string }): f64 {
+  let component: { score: f64, weight: f64, reason: string } = score(0.0, "size_pending_runtime");
+  return component.score;
+}
+
+fn step_validate_size(input: { symbol: string }): bool {
+  return true;
+}
+
+fn step_get_trailing_config(input: { symbol: string }): { activated: bool, distance_pct: f64 } {
+  return {
+    activated: false,
+    distance_pct: 0.0
+  };
+}
+
+fn step_decision(
+  input: { symbol: string }
+): {
+  action: string,
+  symbol: string,
+  quantity: f64,
+  leverage: f64,
+  entry_price: f64,
+  stop_loss: f64,
+  take_profit: f64,
+  reason: string,
+  smart_copy_compatible: bool
+} {
+  return {
+    action: "HOLD",
+    symbol: input.symbol,
+    quantity: 0.0,
+    leverage: 0.0,
+    entry_price: 0.0,
+    stop_loss: 0.0,
+    take_profit: 0.0,
+    reason: "decision_pending_runtime",
+    smart_copy_compatible: false
+  };
+}
+
+fn step_audit(input: { symbol: string }): bool {
+  let outcome: { passed: bool, severity: string, reason: string } = pass("audit_ok");
+  return outcome.passed;
+}
+
 pipeline ViperSmartCopy @deterministic(seed=42) {
-    input: string,
-    steps: [
-        step("check_daily_loss") { true },
-        step("check_consecutive_losses") { true },
-        step("validate_entry") { true },
-        step("check_funding") { true },
-        step("calc_smart_size") { 0.0 },
-        step("validate_size") { true },
-        step("get_trailing_config") { null },
-        step("decision") { null },
-        step("audit") { true }
-    ],
-    output: string
+  input: { symbol: string },
+  steps: [
+    step("check_daily_loss") { step_check_daily_loss(input) },
+    step("check_consecutive_losses") { step_check_consecutive_losses(input) },
+    step("validate_entry") { step_validate_entry(input) },
+    step("check_funding") { step_check_funding(input) },
+    step("calc_smart_size") { step_calc_smart_size(input) },
+    step("validate_size") { step_validate_size(input) },
+    step("get_trailing_config") { step_get_trailing_config(input) },
+    step("decision") { step_decision(input) },
+    step("audit") { step_audit(input) }
+  ],
 }
