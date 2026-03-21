@@ -136,6 +136,21 @@ struct FundingPolicyBreakdown {
     components: Vec<FundingPolicyComponent>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct SizeProposalComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct SizeProposalBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<SizeProposalComponent>,
+}
+
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
@@ -1681,7 +1696,19 @@ fn execute_strategy_step(
         "calc_smart_size" => {
             let price = get_f64(&state, "current_price", 0.0);
             if price <= 0.0 {
-                return Ok(json!(0.0));
+                return Ok(json!({
+                    "quantity": 0.0,
+                    "desired_usdt": 0.0,
+                    "risk_budget_usdt": 0.0,
+                    "volatility_discount": 0.0,
+                    "proposal_score": -100,
+                    "reason": "size_proposal_invalid_price",
+                    "proposal_breakdown": {
+                        "raw_score": -100,
+                        "clamped_score": -100,
+                        "components": []
+                    }
+                }));
             }
 
             let equity_usdt = get_f64(&state, "account_equity_usdt", 1_000.0);
@@ -1696,11 +1723,67 @@ fn execute_strategy_step(
                 cfg.min_position_usdt(),
                 max_position_usdt.max(cfg.min_position_usdt()),
             );
+            let quantity = desired_usdt / price;
 
-            Ok(json!(desired_usdt / price))
+            let discount_score = ((volatility_discount - 0.2) / 0.8).clamp(0.0, 1.0);
+            let budget_score = if equity_usdt > 0.0 {
+                (risk_budget_usdt / equity_usdt / cfg.risk_per_trade_fraction()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let cap_score = if max_position_usdt > 0.0 {
+                (desired_usdt / max_position_usdt).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+
+            let mut components = Vec::new();
+            push_weighted_size_proposal_component(
+                &mut components,
+                "volatility_discount",
+                discount_score,
+                40.0,
+            );
+            push_weighted_size_proposal_component(
+                &mut components,
+                "risk_budget",
+                budget_score,
+                30.0,
+            );
+            push_weighted_size_proposal_component(
+                &mut components,
+                "position_cap_fit",
+                cap_score,
+                30.0,
+            );
+
+            let raw_score = components
+                .iter()
+                .map(|component| component.contribution)
+                .sum();
+            let clamped_score = clamp_i32(raw_score, -100, 100);
+            let breakdown = SizeProposalBreakdown {
+                raw_score,
+                clamped_score,
+                components,
+            };
+
+            Ok(json!({
+                "quantity": quantity,
+                "desired_usdt": desired_usdt,
+                "risk_budget_usdt": risk_budget_usdt,
+                "volatility_discount": volatility_discount,
+                "proposal_score": breakdown.clamped_score,
+                "reason": format!("size_proposed_{}", size_proposal_summary(&breakdown)),
+                "proposal_breakdown": {
+                    "raw_score": breakdown.raw_score,
+                    "clamped_score": breakdown.clamped_score,
+                    "components": breakdown.components
+                }
+            }))
         }
         "validate_size" => {
-            let quantity = get_f64(&state, "calc_smart_size", 0.0);
+            let quantity = get_record_f64(&state, "calc_smart_size", "quantity", 0.0);
             let price = get_f64(&state, "current_price", 0.0);
             let equity_usdt = get_f64(&state, "account_equity_usdt", 1_000.0);
             let position_usdt = quantity * price;
@@ -1795,6 +1878,14 @@ fn execute_strategy_step(
                 "size_constraints_not_met",
             );
             let size_score = get_record_f64(&state, "validate_size", "size_score", 0.0);
+            let size_proposal_reason = get_record_string(
+                &state,
+                "calc_smart_size",
+                "reason",
+                "size_proposal_not_available",
+            );
+            let size_proposal_score =
+                get_record_f64(&state, "calc_smart_size", "proposal_score", 0.0);
             let funding_reason = get_record_string(
                 &state,
                 "check_funding",
@@ -1828,12 +1919,14 @@ fn execute_strategy_step(
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "reason": format!(
-                        "entry_confirmed_score_{:.3}_funding_{:.3}_size_{:.3}_{}_{}_{}",
+                        "entry_confirmed_score_{:.3}_funding_{:.3}_proposal_{:.3}_size_{:.3}_{}_{}_{}_{}",
                         entry_score,
                         funding_score,
+                        size_proposal_score,
                         size_score,
                         entry_reason_with_breakdown,
                         funding_reason,
+                        size_proposal_reason,
                         size_reason
                     ),
                     "smart_copy_compatible": true
@@ -1848,8 +1941,11 @@ fn execute_strategy_step(
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
                     "reason": format!(
-                        "{}_{}_{}",
-                        entry_reason_with_breakdown, funding_reason, size_reason
+                        "{}_{}_{}_{}",
+                        entry_reason_with_breakdown,
+                        funding_reason,
+                        size_proposal_reason,
+                        size_reason
                     ),
                     "smart_copy_compatible": false
                 }))
@@ -2301,6 +2397,23 @@ fn push_weighted_funding_component(
     }
 }
 
+fn push_weighted_size_proposal_component(
+    components: &mut Vec<SizeProposalComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(SizeProposalComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
 fn push_weighted_health_component(
     components: &mut Vec<HealthScoreComponent>,
     reason: &'static str,
@@ -2342,6 +2455,37 @@ fn entry_policy_summary(breakdown: &EntryPolicyBreakdown) -> String {
     } else {
         format!(
             "entry_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
+}
+
+fn size_proposal_summary(breakdown: &SizeProposalBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(3)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "proposal_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "proposal_raw_{}_clamped_{}_{}",
             breakdown.raw_score,
             breakdown.clamped_score,
             reasons.join("__")

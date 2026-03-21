@@ -103,9 +103,60 @@ fn step_check_funding(input: { symbol: string }): {
   };
 }
 
-fn step_calc_smart_size(input: { symbol: string }): f64 {
-  let component: { score: f64, weight: f64, reason: string } = score(0.0, "size_pending_runtime");
-  return component.score;
+fn step_calc_smart_size(input: { symbol: string }): {
+  quantity: f64,
+  desired_usdt: f64,
+  risk_budget_usdt: f64,
+  volatility_discount: f64,
+  proposal_score: f64,
+  reason: string,
+  proposal_breakdown: {
+    raw_score: i64,
+    clamped_score: i64,
+    components: [{
+      reason: string,
+      score: f64,
+      weight: f64,
+      contribution: i64
+    }; 3]
+  }
+} {
+  let volatility_discount: { score: f64, weight: f64, reason: string } = weighted(1.0, 40.0, "volatility_discount");
+  let risk_budget: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "risk_budget");
+  let position_cap_fit: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "position_cap_fit");
+  let raw_score: i64 = 100;
+  return {
+    quantity: 0.0,
+    desired_usdt: 0.0,
+    risk_budget_usdt: 0.0,
+    volatility_discount: 1.0,
+    proposal_score: 100.0,
+    reason: "size_proposed_proposal_raw_100_clamped_100",
+    proposal_breakdown: {
+      raw_score: raw_score,
+      clamped_score: raw_score,
+      components: [
+        {
+          reason: volatility_discount.reason,
+          score: volatility_discount.score,
+          weight: volatility_discount.weight,
+          contribution: 40
+        },
+        {
+          reason: risk_budget.reason,
+          score: risk_budget.score,
+          weight: risk_budget.weight,
+          contribution: 30
+        },
+        {
+          reason: position_cap_fit.reason,
+          score: position_cap_fit.score,
+          weight: position_cap_fit.weight,
+          contribution: 30
+        }
+      ]
+    }
+  };
 }
 
 fn step_validate_size(input: { symbol: string }): {
