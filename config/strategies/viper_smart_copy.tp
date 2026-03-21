@@ -8,14 +8,58 @@ fn step_check_consecutive_losses(input: { symbol: string }): bool {
 
 fn step_validate_entry(
   input: { symbol: string }
-): { passed: bool, severity: string, reason: string, side: string, entry_score: f64 } {
+): {
+  passed: bool,
+  severity: string,
+  reason: string,
+  side: string,
+  entry_score: f64,
+  entry_breakdown: {
+    raw_score: i64,
+    clamped_score: i64,
+    components: [{
+      reason: string,
+      score: f64,
+      weight: f64,
+      contribution: i64
+    }; 3]
+  }
+} {
   let outcome: { passed: bool, severity: string, reason: string } = warn("entry_pending_runtime");
+  let consensus_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "consensus_regime");
+  let bybit_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "bybit_regime");
+  let exchange_consensus: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "exchange_consensus");
+  let raw_score: i64 = 60;
   return {
     passed: outcome.passed,
     severity: outcome.severity,
     reason: outcome.reason,
     side: "long",
-    entry_score: 0.0
+    entry_score: 60.0,
+    entry_breakdown: {
+      raw_score: raw_score,
+      clamped_score: raw_score,
+      components: [
+        {
+          reason: consensus_regime.reason,
+          score: consensus_regime.score,
+          weight: consensus_regime.weight,
+          contribution: 20
+        },
+        {
+          reason: bybit_regime.reason,
+          score: bybit_regime.score,
+          weight: bybit_regime.weight,
+          contribution: 20
+        },
+        {
+          reason: exchange_consensus.reason,
+          score: exchange_consensus.score,
+          weight: exchange_consensus.weight,
+          contribution: 20
+        }
+      ]
+    }
   };
 }
 
