@@ -3973,13 +3973,8 @@ mod tests {
         };
         let mut invalidations = HashMap::new();
 
-        let guard = evaluate_thesis_guard_policy(
-            "DOGEUSDT",
-            "Long",
-            &evaluation,
-            &mut invalidations,
-            3,
-        );
+        let guard =
+            evaluate_thesis_guard_policy("DOGEUSDT", "Long", &evaluation, &mut invalidations, 3);
 
         assert!(!guard.confirmed);
         assert!(guard.reason.contains("thesis_confirmation_pending_1"));
