@@ -31,7 +31,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3.11 && rm -rf /var/lib/apt/lists/*
 
 # Install Tupã CLI
-ARG TUPA_VERSION=v0.8.0
+ARG TUPA_VERSION=v0.8.1
 ADD https://github.com/marciopaiva/tupalang/releases/download/${TUPA_VERSION}/tupa-linux-x86_64 /usr/local/bin/tupa
 RUN chmod +x /usr/local/bin/tupa && ls -l /usr/local/bin/tupa
 
