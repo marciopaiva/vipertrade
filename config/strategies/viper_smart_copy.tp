@@ -239,8 +239,25 @@ fn step_decision(
   stop_loss: f64,
   take_profit: f64,
   reason: string,
-  smart_copy_compatible: bool
+  smart_copy_compatible: bool,
+  decision_score: f64,
+  decision_breakdown: {
+    raw_score: i64,
+    clamped_score: i64,
+    components: [{
+      reason: string,
+      score: f64,
+      weight: f64,
+      contribution: i64
+    }; 5]
+  }
 } {
+  let entry_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 40.0, "entry_policy");
+  let funding_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "funding_policy");
+  let size_proposal: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "size_proposal");
+  let size_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "size_policy");
+  let trailing_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "trailing_policy");
+  let raw_score: i64 = 100;
   return {
     action: "HOLD",
     symbol: input.symbol,
@@ -250,7 +267,19 @@ fn step_decision(
     stop_loss: 0.0,
     take_profit: 0.0,
     reason: "decision_pending_runtime",
-    smart_copy_compatible: false
+    smart_copy_compatible: false,
+    decision_score: 100.0,
+    decision_breakdown: {
+      raw_score: raw_score,
+      clamped_score: raw_score,
+      components: [
+        { reason: entry_policy.reason, score: entry_policy.score, weight: entry_policy.weight, contribution: 40 },
+        { reason: funding_policy.reason, score: funding_policy.score, weight: funding_policy.weight, contribution: 20 },
+        { reason: size_proposal.reason, score: size_proposal.score, weight: size_proposal.weight, contribution: 20 },
+        { reason: size_policy.reason, score: size_policy.score, weight: size_policy.weight, contribution: 10 },
+        { reason: trailing_policy.reason, score: trailing_policy.score, weight: trailing_policy.weight, contribution: 10 }
+      ]
+    }
   };
 }
 
