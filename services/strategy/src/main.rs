@@ -94,6 +94,8 @@ struct InvalidSignalDrop {
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
+    score: f64,
+    weight: f64,
     contribution: i32,
 }
 
@@ -1857,10 +1859,6 @@ fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
 }
 
-fn trend_score_points(score: f64, scale: f64, cap: i32) -> i32 {
-    clamp_i32((score * scale).round() as i32, -cap, cap)
-}
-
 fn directional_points(state: &str, favorable: &str, unfavorable: &str, weight: i32) -> i32 {
     if state.eq_ignore_ascii_case(favorable) {
         weight
@@ -1871,14 +1869,22 @@ fn directional_points(state: &str, favorable: &str, unfavorable: &str, weight: i
     }
 }
 
-fn push_health_component(
+fn weighted_contribution(score: f64, weight: f64) -> i32 {
+    (score * weight).round() as i32
+}
+
+fn push_weighted_health_component(
     components: &mut Vec<HealthScoreComponent>,
     reason: &'static str,
-    contribution: i32,
+    score: f64,
+    weight: f64,
 ) {
+    let contribution = weighted_contribution(score, weight);
     if contribution != 0 {
         components.push(HealthScoreComponent {
             reason,
+            score,
+            weight,
             contribution,
         });
     }
@@ -1900,65 +1906,95 @@ fn position_health_breakdown(
 
     let mut components = Vec::new();
 
-    let consensus_side = directional_points(&signal.consensus_side, favorable, unfavorable, 30);
-    push_health_component(&mut components, "consensus_side", consensus_side);
+    let consensus_side = directional_points(&signal.consensus_side, favorable, unfavorable, 1);
+    push_weighted_health_component(
+        &mut components,
+        "consensus_side",
+        consensus_side as f64,
+        30.0,
+    );
 
-    let bybit_regime = directional_points(&signal.bybit_regime, favorable, unfavorable, 20);
-    push_health_component(&mut components, "bybit_regime", bybit_regime);
+    let bybit_regime = directional_points(&signal.bybit_regime, favorable, unfavorable, 1);
+    push_weighted_health_component(&mut components, "bybit_regime", bybit_regime as f64, 20.0);
 
-    let btc_regime = directional_points(&signal.btc_regime, favorable, unfavorable, 10);
-    push_health_component(&mut components, "btc_regime", btc_regime);
+    let btc_regime = directional_points(&signal.btc_regime, favorable, unfavorable, 1);
+    push_weighted_health_component(&mut components, "btc_regime", btc_regime as f64, 10.0);
 
-    let consensus_trend = trend_score_points(signal.consensus_trend_score * sign, 50.0, 20);
-    push_health_component(&mut components, "consensus_trend_score", consensus_trend);
+    let consensus_trend_score = (signal.consensus_trend_score * sign).clamp(-0.4, 0.4);
+    push_weighted_health_component(
+        &mut components,
+        "consensus_trend_score",
+        consensus_trend_score,
+        50.0,
+    );
 
-    let bybit_trend = trend_score_points(signal.trend_score * sign, 30.0, 10);
-    push_health_component(&mut components, "bybit_trend_score", bybit_trend);
+    let bybit_trend_score = (signal.trend_score * sign).clamp(-10.0 / 30.0, 10.0 / 30.0);
+    push_weighted_health_component(
+        &mut components,
+        "bybit_trend_score",
+        bybit_trend_score,
+        30.0,
+    );
 
-    let btc_trend = trend_score_points(signal.btc_trend_score * sign, 25.0, 10);
-    push_health_component(&mut components, "btc_trend_score", btc_trend);
+    let btc_trend_score = (signal.btc_trend_score * sign).clamp(-10.0 / 25.0, 10.0 / 25.0);
+    push_weighted_health_component(&mut components, "btc_trend_score", btc_trend_score, 25.0);
 
     let macd_histogram = if signal.consensus_macd_histogram * sign > 0.0 {
-        5
+        1.0
     } else if signal.consensus_macd_histogram * sign < 0.0 {
-        -5
+        -1.0
     } else {
-        0
+        0.0
     };
-    push_health_component(&mut components, "consensus_macd_histogram", macd_histogram);
+    push_weighted_health_component(
+        &mut components,
+        "consensus_macd_histogram",
+        macd_histogram,
+        5.0,
+    );
 
     if is_long {
         let ema_alignment = if signal.consensus_ema_fast > signal.consensus_ema_slow {
-            5
+            1.0
         } else if signal.consensus_ema_fast < signal.consensus_ema_slow {
-            -5
+            -1.0
         } else {
-            0
+            0.0
         };
-        push_health_component(&mut components, "ema_alignment", ema_alignment);
+        push_weighted_health_component(&mut components, "ema_alignment", ema_alignment, 5.0);
 
         let price_vs_fast_ema = if price >= signal.consensus_ema_fast {
-            5
+            1.0
         } else {
-            -5
+            -1.0
         };
-        push_health_component(&mut components, "price_vs_fast_ema", price_vs_fast_ema);
+        push_weighted_health_component(
+            &mut components,
+            "price_vs_fast_ema",
+            price_vs_fast_ema,
+            5.0,
+        );
     } else {
         let ema_alignment = if signal.consensus_ema_fast < signal.consensus_ema_slow {
-            5
+            1.0
         } else if signal.consensus_ema_fast > signal.consensus_ema_slow {
-            -5
+            -1.0
         } else {
-            0
+            0.0
         };
-        push_health_component(&mut components, "ema_alignment", ema_alignment);
+        push_weighted_health_component(&mut components, "ema_alignment", ema_alignment, 5.0);
 
         let price_vs_fast_ema = if price <= signal.consensus_ema_fast {
-            5
+            1.0
         } else {
-            -5
+            -1.0
         };
-        push_health_component(&mut components, "price_vs_fast_ema", price_vs_fast_ema);
+        push_weighted_health_component(
+            &mut components,
+            "price_vs_fast_ema",
+            price_vs_fast_ema,
+            5.0,
+        );
     }
 
     let raw_score = components
@@ -1982,7 +2018,12 @@ fn position_health_summary(breakdown: &PositionHealthBreakdown) -> String {
     let reasons = components
         .into_iter()
         .take(3)
-        .map(|component| format!("{}:{}", component.reason, component.contribution))
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
         .collect::<Vec<_>>();
 
     if reasons.is_empty() {
