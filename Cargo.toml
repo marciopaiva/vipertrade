@@ -63,11 +63,3 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true
-
-[patch.crates-io]
-tupa-runtime = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
-tupa-codegen = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
-tupa-audit = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
-tupa-effects = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
-tupa-parser = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }
-tupa-typecheck = { git = "https://github.com/marciopaiva/tupalang.git", rev = "021ffcfba7910ff7fba43047d371a394abe3055d" }

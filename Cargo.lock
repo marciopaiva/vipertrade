@@ -390,7 +390,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1681,7 +1681,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1970,7 +1970,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2632,7 +2632,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2983,7 +2983,8 @@ dependencies = [
 [[package]]
 name = "tupa-codegen"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0922a1d2198733459d23087e1661fb47ca0da910011c8248dcbef135d1a31383"
 dependencies = [
  "serde",
  "serde_json",
@@ -2995,12 +2996,14 @@ dependencies = [
 [[package]]
 name = "tupa-effects"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efaa397cd1f76458ebef301daa2d616daebb5461fe4e1b70b1849bb62066cbcb"
 
 [[package]]
 name = "tupa-lexer"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5271e30b4eb7489fcfb9ac9e1bf24ceaaed5d3a83ac3303ec1da6b66a43a035"
 dependencies = [
  "nom",
  "serde",
@@ -3011,7 +3014,8 @@ dependencies = [
 [[package]]
 name = "tupa-parser"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47a763b6b69b8964cbb52be83f80588f5aab38764cd8465adc7b1c348d261ddf"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -3021,7 +3025,8 @@ dependencies = [
 [[package]]
 name = "tupa-pyffi"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f1845dd077d62944cfde14bab0e7fe6ec8edf166197273c4980a6ad2b471793"
 dependencies = [
  "once_cell",
  "pyo3",
@@ -3035,7 +3040,8 @@ dependencies = [
 [[package]]
 name = "tupa-runtime"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18399d3600efb6c9ea6bffa67eababfce920bf42c74cbe6a2d75db89c55cdf2b"
 dependencies = [
  "async-trait",
  "futures",
@@ -3053,7 +3059,8 @@ dependencies = [
 [[package]]
 name = "tupa-typecheck"
 version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6ab42445a38fead75049e2a0650b421fb49347a9bb9103ea34516a85c25498a"
 dependencies = [
  "thiserror 1.0.69",
  "tupa-effects",
@@ -3925,8 +3932,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "tupa-audit"
-version = "0.8.1"
-source = "git+https://github.com/marciopaiva/tupalang.git?rev=021ffcfba7910ff7fba43047d371a394abe3055d#021ffcfba7910ff7fba43047d371a394abe3055d"
