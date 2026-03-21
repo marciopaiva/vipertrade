@@ -2454,6 +2454,47 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
     }
 }
 
+fn structured_temporal_reason_from_state(state: &Value) -> Option<String> {
+    let candidate_reasons = [
+        get_record_string(
+            state,
+            "signal_confirmation",
+            "reason",
+            "signal_confirmation_not_available",
+        ),
+        get_record_string(
+            state,
+            "cooldown_guard",
+            "reason",
+            "cooldown_guard_not_available",
+        ),
+        get_record_string(
+            state,
+            "thesis_confirmation",
+            "reason",
+            "thesis_confirmation_not_available",
+        ),
+    ];
+
+    let reasons = candidate_reasons
+        .into_iter()
+        .filter(|reason| {
+            !matches!(
+                reason.as_str(),
+                "signal_confirmation_not_available"
+                    | "cooldown_guard_not_available"
+                    | "thesis_confirmation_not_available"
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(reasons.join("_"))
+    }
+}
+
 fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
 }
@@ -3657,6 +3698,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
                         {
                             decision.reason = structured_hold_reason_from_state(&runtime_output);
+                        } else if decision.action == "HOLD"
+                            && (decision.reason.starts_with("awaiting_signal_confirmation_")
+                                || decision.reason.starts_with("cooldown_stop_loss_")
+                                || decision.reason.starts_with("blocked_until_trend_flip_"))
+                        {
+                            if let Some(temporal_reason) =
+                                structured_temporal_reason_from_state(&runtime_output)
+                            {
+                                decision.reason =
+                                    format!("{}_{}", decision.reason, temporal_reason);
+                            }
                         }
 
                         if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
@@ -3848,5 +3900,21 @@ mod tests {
         assert!(reason.contains("cooldown_guard"));
         assert!(reason.contains("thesis_confirmation"));
         assert!(!reason.contains("risk_constraints_not_met"));
+    }
+
+    #[test]
+    fn structured_temporal_reason_from_state_uses_temporal_steps() {
+        let state = json!({
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
+        });
+
+        let reason =
+            structured_temporal_reason_from_state(&state).expect("temporal reason should exist");
+
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
     }
 }
