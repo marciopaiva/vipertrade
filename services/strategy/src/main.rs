@@ -1219,12 +1219,7 @@ fn evaluate_trailing(
         trailing_stop_price,
         reason: format!(
             "trailing_eval_profit_{:.5}_peak_{:.5}_trail_{:.5}_stop_{:.5}_ratchet_{}_breakeven_{}",
-            profit_pct,
-            peak_price,
-            trail_pct,
-            trailing_stop_price,
-            ratchet_level,
-            break_even_armed
+            profit_pct, peak_price, trail_pct, trailing_stop_price, ratchet_level, break_even_armed
         ),
     })
 }
@@ -2173,7 +2168,10 @@ fn evaluate_open_trade_exit(
         };
 
         if trailing_hit {
-            let reason = format!("trailing_stop_triggered_{}_current_{:.5}", eval.reason, current_price);
+            let reason = format!(
+                "trailing_stop_triggered_{}_current_{:.5}",
+                eval.reason, current_price
+            );
             return ExitEvaluation {
                 decision: create_close_decision(
                     symbol,
