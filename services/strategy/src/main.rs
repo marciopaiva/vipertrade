@@ -2176,15 +2176,17 @@ fn execute_strategy_step(
             let decision_score = get_record_f64(&state, "decision", "decision_score", 0.0);
             let smart_copy_compatible =
                 get_record_bool(&state, "decision", "smart_copy_compatible", false);
+            let temporal_reason = structured_hold_reason_from_state(&state);
 
             Ok(json!({
                 "ok": true,
                 "reason": format!(
-                    "audit_action_{}_score_{:.3}_smart_copy_{}_{}",
+                    "audit_action_{}_score_{:.3}_smart_copy_{}_{}_{}",
                     decision_action,
                     decision_score,
                     smart_copy_compatible,
-                    decision_reason
+                    decision_reason,
+                    temporal_reason
                 ),
                 "decision_action": decision_action,
                 "decision_score": decision_score,
@@ -2408,6 +2410,24 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
             "reason",
             "trailing_config_not_available",
         ),
+        get_record_string(
+            state,
+            "signal_confirmation",
+            "reason",
+            "signal_confirmation_not_available",
+        ),
+        get_record_string(
+            state,
+            "cooldown_guard",
+            "reason",
+            "cooldown_guard_not_available",
+        ),
+        get_record_string(
+            state,
+            "thesis_confirmation",
+            "reason",
+            "thesis_confirmation_not_available",
+        ),
     ];
 
     let reasons = candidate_reasons
@@ -2420,6 +2440,9 @@ fn structured_hold_reason_from_state(state: &Value) -> String {
                     | "size_proposal_not_available"
                     | "size_constraints_not_met"
                     | "trailing_config_not_available"
+                    | "signal_confirmation_not_available"
+                    | "cooldown_guard_not_available"
+                    | "thesis_confirmation_not_available"
             )
         })
         .collect::<Vec<_>>();
@@ -3782,7 +3805,10 @@ mod tests {
                 "reason": "entry_confirmed",
                 "decision_score": 87.0,
                 "smart_copy_compatible": true
-            }
+            },
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
         });
 
         let audit = execute_strategy_step("audit", state, &sample_cfg()).expect("audit step");
@@ -3794,6 +3820,9 @@ mod tests {
         let reason = audit["reason"].as_str().expect("audit reason");
         assert!(reason.contains("audit_action_ENTER_LONG"));
         assert!(reason.contains("entry_confirmed"));
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
     }
 
     #[test]
@@ -3803,7 +3832,10 @@ mod tests {
             "check_funding": { "reason": "funding_validated" },
             "calc_smart_size": { "reason": "size_proposed_proposal_raw_100_clamped_100" },
             "validate_size": { "reason": "size_validated_size_raw_100_clamped_100" },
-            "get_trailing_config": { "reason": "trailing_pending_runtime" }
+            "get_trailing_config": { "reason": "trailing_pending_runtime" },
+            "signal_confirmation": { "reason": "signal_confirmation" },
+            "cooldown_guard": { "reason": "cooldown_guard" },
+            "thesis_confirmation": { "reason": "thesis_confirmation" }
         });
 
         let reason = structured_hold_reason_from_state(&state);
@@ -3812,6 +3844,9 @@ mod tests {
         assert!(reason.contains("funding_validated"));
         assert!(reason.contains("size_proposed_proposal_raw_100_clamped_100"));
         assert!(reason.contains("size_validated_size_raw_100_clamped_100"));
+        assert!(reason.contains("signal_confirmation"));
+        assert!(reason.contains("cooldown_guard"));
+        assert!(reason.contains("thesis_confirmation"));
         assert!(!reason.contains("risk_constraints_not_met"));
     }
 }
