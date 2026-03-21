@@ -9,7 +9,9 @@ CHECK_LOG="${CHECK_LOG:-/tmp/tupa_check.log}"
 AST_OUT="${AST_OUT:-/tmp/viper_smart_copy.ast.json}"
 TUPA_BIN="${TUPA_BIN:-tupa}"
 TUPA_DOCKER_IMAGE="${TUPA_DOCKER_IMAGE:-compose-strategy:latest}"
+TUPALANG_BUILDER_IMAGE="${TUPALANG_BUILDER_IMAGE:-tupalang-base-rust-builder:1.93}"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TUPALANG_DIR="${TUPALANG_DIR:-$(cd "$ROOT_DIR/.." && pwd)/tupalang}"
 
 show_help() {
   vt_print_header "ViperTrade - Pipeline Validation"
@@ -26,8 +28,35 @@ show_help() {
 }
 
 run_tupa() {
+  local -a args=()
+
   if command -v "$TUPA_BIN" >/dev/null 2>&1; then
     "$TUPA_BIN" "$@"
+    return
+  fi
+
+  if command -v docker >/dev/null 2>&1 \
+    && [[ -f "$TUPALANG_DIR/Cargo.toml" ]] \
+    && docker image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
+    for arg in "$@"; do
+      if [[ "$arg" == "$PIPELINE_FILE" ]]; then
+        args+=("/workspace/$PIPELINE_FILE")
+      else
+        args+=("$arg")
+      fi
+    done
+
+    docker run --rm \
+      --user "$(id -u):$(id -g)" \
+      -e CARGO_HOME=/tmp/cargo-home \
+      -e CARGO_TARGET_DIR=/tmp/cargo-target \
+      -e RUSTUP_HOME=/usr/local/rustup \
+      -e HOME=/tmp \
+      -v "$ROOT_DIR:/workspace" \
+      -v "$TUPALANG_DIR:/tupalang" \
+      -w /tupalang \
+      "$TUPALANG_BUILDER_IMAGE" \
+      cargo run -p tupa-cli -- "${args[@]}"
     return
   fi
 
@@ -69,6 +98,9 @@ main() {
 
   if command -v "$TUPA_BIN" >/dev/null 2>&1; then
     vt_info "Using local Tupa CLI: $(command -v "$TUPA_BIN")"
+  elif [[ -f "$TUPALANG_DIR/Cargo.toml" ]] && command -v docker >/dev/null 2>&1 \
+    && docker image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
+    vt_warn "'$TUPA_BIN' not found on the host; using tupa-cli from $TUPALANG_DIR via $TUPALANG_BUILDER_IMAGE"
   else
     vt_warn "'$TUPA_BIN' not found on the host; using $TUPA_DOCKER_IMAGE"
   fi
