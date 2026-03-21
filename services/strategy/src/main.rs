@@ -2165,7 +2165,32 @@ fn execute_strategy_step(
                 }))
             }
         }
-        "audit" => Ok(json!({"ok": true})),
+        "audit" => {
+            let decision_action = get_record_string(&state, "decision", "action", "UNKNOWN");
+            let decision_reason = get_record_string(
+                &state,
+                "decision",
+                "reason",
+                "audit_missing_decision_reason",
+            );
+            let decision_score = get_record_f64(&state, "decision", "decision_score", 0.0);
+            let smart_copy_compatible =
+                get_record_bool(&state, "decision", "smart_copy_compatible", false);
+
+            Ok(json!({
+                "ok": true,
+                "reason": format!(
+                    "audit_action_{}_score_{:.3}_smart_copy_{}_{}",
+                    decision_action,
+                    decision_score,
+                    smart_copy_compatible,
+                    decision_reason
+                ),
+                "decision_action": decision_action,
+                "decision_score": decision_score,
+                "smart_copy_compatible": smart_copy_compatible
+            }))
+        }
         _ => Ok(Value::Null),
     }
 }
