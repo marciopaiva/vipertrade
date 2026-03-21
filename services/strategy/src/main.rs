@@ -1847,7 +1847,44 @@ fn execute_strategy_step(
                 }
             }))
         }
-        "get_trailing_config" => Ok(cfg.trailing_config(&symbol)),
+        "get_trailing_config" => {
+            let trailing_cfg = cfg.trailing_runtime_config(&symbol);
+            let enabled_score: f64 = if trailing_cfg.enabled { 1.0 } else { 0.0 };
+            let activation_score = if trailing_cfg.activate_after_profit_pct > 0.0 {
+                (1.0 - trailing_cfg.activate_after_profit_pct / 0.05).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let distance_score = if trailing_cfg.initial_trail_pct > 0.0 {
+                (1.0 - trailing_cfg.initial_trail_pct / 0.03).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let trailing_score = clamp_i32(
+                (enabled_score * 40.0).round() as i32
+                    + (activation_score * 30.0).round() as i32
+                    + (distance_score * 30.0).round() as i32,
+                0,
+                100,
+            );
+
+            Ok(json!({
+                "enabled": trailing_cfg.enabled,
+                "activate_after_profit_pct": trailing_cfg.activate_after_profit_pct,
+                "initial_trail_pct": trailing_cfg.initial_trail_pct,
+                "move_to_break_even_at": trailing_cfg.move_to_break_even_at,
+                "min_move_threshold_pct": trailing_cfg.min_move_threshold_pct,
+                "ratchet_level_count": trailing_cfg.ratchet_levels.len(),
+                "trailing_score": trailing_score,
+                "reason": format!(
+                    "trailing_configured_enabled_{}_activate_{:.4}_trail_{:.4}_ratchets_{}",
+                    trailing_cfg.enabled,
+                    trailing_cfg.activate_after_profit_pct,
+                    trailing_cfg.initial_trail_pct,
+                    trailing_cfg.ratchet_levels.len()
+                )
+            }))
+        }
         "decision" => {
             let can_enter = get_bool(&state, "check_daily_loss", false)
                 && get_bool(&state, "check_consecutive_losses", false)
@@ -1856,7 +1893,7 @@ fn execute_strategy_step(
                 && get_record_bool(&state, "validate_size", "passed", false);
 
             let entry_price = get_f64(&state, "current_price", 0.0);
-            let quantity = get_f64(&state, "calc_smart_size", 0.0);
+            let quantity = get_record_f64(&state, "calc_smart_size", "quantity", 0.0);
             let entry_side = get_record_string(&state, "validate_entry", "side", "long");
             let entry_reason = get_record_string(
                 &state,
@@ -1893,6 +1930,14 @@ fn execute_strategy_step(
                 "funding_constraints_not_met",
             );
             let funding_score = get_record_f64(&state, "check_funding", "funding_score", 0.0);
+            let trailing_reason = get_record_string(
+                &state,
+                "get_trailing_config",
+                "reason",
+                "trailing_config_not_available",
+            );
+            let trailing_score =
+                get_record_f64(&state, "get_trailing_config", "trailing_score", 0.0);
 
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
                 let is_long = entry_side.eq_ignore_ascii_case("long");
@@ -1919,15 +1964,17 @@ fn execute_strategy_step(
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "reason": format!(
-                        "entry_confirmed_score_{:.3}_funding_{:.3}_proposal_{:.3}_size_{:.3}_{}_{}_{}_{}",
+                        "entry_confirmed_score_{:.3}_funding_{:.3}_proposal_{:.3}_size_{:.3}_trailing_{:.3}_{}_{}_{}_{}_{}",
                         entry_score,
                         funding_score,
                         size_proposal_score,
                         size_score,
+                        trailing_score,
                         entry_reason_with_breakdown,
                         funding_reason,
                         size_proposal_reason,
-                        size_reason
+                        size_reason,
+                        trailing_reason
                     ),
                     "smart_copy_compatible": true
                 }))
@@ -1941,11 +1988,12 @@ fn execute_strategy_step(
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
                     "reason": format!(
-                        "{}_{}_{}_{}",
+                        "{}_{}_{}_{}_{}",
                         entry_reason_with_breakdown,
                         funding_reason,
                         size_proposal_reason,
-                        size_reason
+                        size_reason,
+                        trailing_reason
                     ),
                     "smart_copy_compatible": false
                 }))
