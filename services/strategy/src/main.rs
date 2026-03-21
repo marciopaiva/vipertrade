@@ -160,6 +160,21 @@ struct SizeProposalBreakdown {
     components: Vec<SizeProposalComponent>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct DecisionPolicyComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct DecisionPolicyBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<DecisionPolicyComponent>,
+}
+
 #[derive(Debug, Clone)]
 struct HealthScoreComponent {
     reason: &'static str,
@@ -1955,6 +1970,49 @@ fn execute_strategy_step(
             let trailing_score =
                 get_record_f64(&state, "get_trailing_config", "trailing_score", 0.0);
 
+            let mut components = Vec::new();
+            push_weighted_decision_component(
+                &mut components,
+                "entry_policy",
+                (entry_score / 100.0).clamp(-1.0, 1.0),
+                40.0,
+            );
+            push_weighted_decision_component(
+                &mut components,
+                "funding_policy",
+                (funding_score / 100.0).clamp(-1.0, 1.0),
+                20.0,
+            );
+            push_weighted_decision_component(
+                &mut components,
+                "size_proposal",
+                (size_proposal_score / 100.0).clamp(-1.0, 1.0),
+                20.0,
+            );
+            push_weighted_decision_component(
+                &mut components,
+                "size_policy",
+                (size_score / 100.0).clamp(-1.0, 1.0),
+                10.0,
+            );
+            push_weighted_decision_component(
+                &mut components,
+                "trailing_policy",
+                (trailing_score / 100.0).clamp(0.0, 1.0),
+                10.0,
+            );
+            let decision_raw_score = components
+                .iter()
+                .map(|component| component.contribution)
+                .sum();
+            let decision_clamped_score = clamp_i32(decision_raw_score, -100, 100);
+            let decision_breakdown = DecisionPolicyBreakdown {
+                raw_score: decision_raw_score,
+                clamped_score: decision_clamped_score,
+                components,
+            };
+            let decision_summary = decision_policy_summary(&decision_breakdown);
+
             if can_enter && quantity > 0.0 && entry_price > 0.0 {
                 let is_long = entry_side.eq_ignore_ascii_case("long");
                 let sl_pct = cfg.stop_loss_pct(&symbol);
@@ -1980,7 +2038,7 @@ fn execute_strategy_step(
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "reason": format!(
-                        "entry_confirmed_score_{:.3}_funding_{:.3}_proposal_{:.3}_size_{:.3}_trailing_{:.3}_{}_{}_{}_{}_{}",
+                        "entry_confirmed_score_{:.3}_funding_{:.3}_proposal_{:.3}_size_{:.3}_trailing_{:.3}_{}_{}_{}_{}_{}_{}",
                         entry_score,
                         funding_score,
                         size_proposal_score,
@@ -1990,9 +2048,16 @@ fn execute_strategy_step(
                         funding_reason,
                         size_proposal_reason,
                         size_reason,
-                        trailing_reason
+                        trailing_reason,
+                        decision_summary
                     ),
-                    "smart_copy_compatible": true
+                    "smart_copy_compatible": true,
+                    "decision_score": decision_breakdown.clamped_score,
+                    "decision_breakdown": {
+                        "raw_score": decision_breakdown.raw_score,
+                        "clamped_score": decision_breakdown.clamped_score,
+                        "components": decision_breakdown.components
+                    }
                 }))
             } else {
                 Ok(json!({
@@ -2004,14 +2069,21 @@ fn execute_strategy_step(
                     "stop_loss": 0.0,
                     "take_profit": 0.0,
                     "reason": format!(
-                        "{}_{}_{}_{}_{}",
+                        "{}_{}_{}_{}_{}_{}",
                         entry_reason_with_breakdown,
                         funding_reason,
                         size_proposal_reason,
                         size_reason,
-                        trailing_reason
+                        trailing_reason,
+                        decision_summary
                     ),
-                    "smart_copy_compatible": false
+                    "smart_copy_compatible": false,
+                    "decision_score": decision_breakdown.clamped_score,
+                    "decision_breakdown": {
+                        "raw_score": decision_breakdown.raw_score,
+                        "clamped_score": decision_breakdown.clamped_score,
+                        "components": decision_breakdown.components
+                    }
                 }))
             }
         }
@@ -2411,6 +2483,54 @@ fn size_proposal_summary(breakdown: &SizeProposalBreakdown) -> String {
     } else {
         format!(
             "proposal_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
+}
+
+fn push_weighted_decision_component(
+    components: &mut Vec<DecisionPolicyComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(DecisionPolicyComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
+fn decision_policy_summary(breakdown: &DecisionPolicyBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(5)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "decision_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "decision_raw_{}_clamped_{}_{}",
             breakdown.raw_score,
             breakdown.clamped_score,
             reasons.join("__")
