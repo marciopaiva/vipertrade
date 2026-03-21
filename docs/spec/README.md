@@ -13,6 +13,7 @@ This folder contains the modularized technical specification.
   - `05-runtime-and-operations.md`
   - `06-validation-and-checklists.md`
   - `07-configuration.md`
+  - `08-strategy-execution-model.md`
 
 ## Target Structure
 
@@ -23,6 +24,7 @@ This folder contains the modularized technical specification.
 - `05-runtime-and-operations.md`
 - `06-validation-and-checklists.md`
 - `07-configuration.md`
+- `08-strategy-execution-model.md`
 
 ## Migration Rule
 
