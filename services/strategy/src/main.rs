@@ -1937,12 +1937,7 @@ fn position_health_breakdown(
     );
 
     let btc_trend_score = (signal.btc_trend_score * sign).clamp(-10.0 / 25.0, 10.0 / 25.0);
-    push_weighted_health_component(
-        &mut components,
-        "btc_trend_score",
-        btc_trend_score,
-        25.0,
-    );
+    push_weighted_health_component(&mut components, "btc_trend_score", btc_trend_score, 25.0);
 
     let macd_histogram = if signal.consensus_macd_histogram * sign > 0.0 {
         1.0
