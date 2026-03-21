@@ -30,7 +30,7 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 
 1. market data enters `market-data`
 2. normalized events are published through `redis`
-3. `strategy` evaluates the Tupa-backed plan and publishes a decision
+3. `strategy` parses, typechecks, and loads the Tupa-backed plan in-process, then combines that plan with runtime state to publish a decision
 4. `executor` validates and executes the exchange-side action
 5. execution results are persisted and exposed to observability surfaces
 6. `monitor` runs periodic reconciliation and drift checks

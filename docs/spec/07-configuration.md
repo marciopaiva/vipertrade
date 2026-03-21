@@ -64,14 +64,16 @@ Common environment variables in `compose/.env`:
 
 Mode profiles define the broad risk posture of the runtime.
 
-Examples of fields used there:
+Common fields used there include:
 
 - `permissive_entry`
 - `require_multi_exchange_consensus`
 - `require_btc_macro_alignment`
+- `prefer_bybit_for_decisions`
 - `min_volume_24h_usdt`
 - `max_spread_pct`
 - `max_atr_pct`
+- `max_funding_rate_pct`
 - `stop_loss_pct`
 - `trailing_enabled`
 - `min_hold_seconds`
@@ -79,6 +81,19 @@ Examples of fields used there:
 - `min_trend_score_short`
 - `min_signal_confirmation_ticks_long`
 - `min_signal_confirmation_ticks_short`
+- `btc_macro_min_trend_score_long`
+- `btc_macro_min_trend_score_short`
+- `btc_macro_min_consensus_count_long`
+- `btc_macro_min_consensus_count_short`
+- `btc_macro_neutral_penalty`
+- `min_volume_ratio_long`
+- `min_volume_ratio_short`
+- `rsi_long_min`
+- `rsi_long_max`
+- `rsi_short_min`
+- `rsi_short_max`
+- `stop_loss_cooldown_minutes_long`
+- `stop_loss_cooldown_minutes_short`
 
 These settings should be treated as high-impact controls.
 
@@ -93,6 +108,19 @@ Each token block may define:
 - `risk`
 - `trailing_stop`
 - `entry_filters`
+
+Common token-level `entry_filters` and risk controls include:
+
+- `min_trend_score_long`
+- `min_trend_score_short`
+- `min_signal_confirmation_ticks`
+- `min_signal_confirmation_ticks_long`
+- `min_signal_confirmation_ticks_short`
+- `thesis_invalidation_confirmation_ticks`
+- `stop_loss_cooldown_minutes_long`
+- `stop_loss_cooldown_minutes_short`
+- `max_atr_pct`
+- `max_position_usdt`
 
 This is where token-specific behavior is tuned.
 
@@ -110,13 +138,16 @@ The following settings can materially change runtime behavior and should be chan
 - token universe selection
 - per-token `enabled` state
 - `max_position_usdt`
+- `max_funding_rate_pct`
 - `stop_loss_pct`
 - trailing stop activation and ratchet levels
 - `min_trend_score_long`
 - `min_trend_score_short`
+- `prefer_bybit_for_decisions`
 - `min_signal_confirmation_ticks_long`
 - `min_signal_confirmation_ticks_short`
 - BTC macro filters
+- stop-loss cooldown behavior
 - thesis invalidation confirmation behavior
 
 ## Safe tuning workflow

@@ -41,10 +41,11 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
 
 ## Tupa Integration Model
 
-- Integracao de estrategia via pipeline .tp versionado.
-- Execucao via binario standalone tupa, com I/O JSON.
-- Regras de risco e validacao declarativas na pipeline.
-- Saida com hash de execucao para auditabilidade.
+- Strategy integration via a versioned `.tp` pipeline.
+- The strategy service loads the pipeline in-process through the Tupa parser, typechecker, and codegen layers.
+- The `.tp` file currently defines the validated plan shape and structured step contracts used by the runtime.
+- Runtime state, exchange data, guard state, and some trading semantics still live in Rust.
+- The current migration goal is to move more policy semantics into Tupa-native structured outputs over time.
 
 ## Trading Operations and Validation Modes
 
@@ -58,7 +59,7 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
 - Ativacao por lucro minimo e ajuste progressivo (ratcheting).
 - Trail nunca afrouxa; apenas mantem ou aperta.
 - Parametros por perfil de risco para equilibrar protecao e captura de tendencia.
-- Integracao com amend_order e fallback de retry.
+- Integracao com o fluxo de decisao e runtime state do strategy service.
 
 ## Development Blocks
 
