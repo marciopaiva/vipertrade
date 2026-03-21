@@ -65,6 +65,14 @@ struct TrailingEval {
 }
 
 #[derive(Debug, Clone)]
+struct ExitEvaluation {
+    decision: Option<StrategyDecision>,
+    trailing: Option<TrailingEval>,
+    trigger: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone)]
 struct EntryGuardState {
     blocked_side: String,
     cooldown_until: Instant,
@@ -2064,12 +2072,14 @@ fn evaluate_open_trade_exit(
     current_price: f64,
     open: &OpenTradeSnapshot,
     cfg: &StrategyConfig,
-) -> (Option<StrategyDecision>, Option<TrailingEval>) {
+) -> ExitEvaluation {
     if current_price <= 0.0 || open.entry_price <= 0.0 {
-        return (
-            Some(create_hold_decision(symbol, "open_position_invalid_price")),
-            None,
-        );
+        return ExitEvaluation {
+            decision: Some(create_hold_decision(symbol, "open_position_invalid_price")),
+            trailing: None,
+            trigger: "invalid_price".to_string(),
+            reason: "open_position_invalid_price".to_string(),
+        };
     }
 
     let min_hold_seconds = cfg.min_hold_seconds();
@@ -2079,13 +2089,13 @@ fn evaluate_open_trade_exit(
             .num_seconds()
             .max(0);
         if held_for < min_hold_seconds {
-            return (
-                Some(create_hold_decision(
-                    symbol,
-                    &format!("min_hold_{}s", min_hold_seconds),
-                )),
-                None,
-            );
+            let reason = format!("min_hold_{}s", min_hold_seconds);
+            return ExitEvaluation {
+                decision: Some(create_hold_decision(symbol, &reason)),
+                trailing: None,
+                trigger: "min_hold".to_string(),
+                reason,
+            };
         }
     }
 
@@ -2100,16 +2110,22 @@ fn evaluate_open_trade_exit(
     if (side == "Long" && current_price <= hard_stop)
         || (side == "Short" && current_price >= hard_stop)
     {
-        return (
-            create_close_decision(
+        let reason = format!(
+            "stop_loss_triggered_hard_stop_{:.5}_current_{:.5}",
+            hard_stop, current_price
+        );
+        return ExitEvaluation {
+            decision: create_close_decision(
                 symbol,
                 side,
                 open.quantity,
                 current_price,
-                "stop_loss_triggered",
+                &reason,
             ),
-            None,
-        );
+            trailing: None,
+            trigger: "stop_loss".to_string(),
+            reason,
+        };
     }
 
     if cfg.fixed_take_profit_enabled() {
@@ -2122,16 +2138,22 @@ fn evaluate_open_trade_exit(
         if (side == "Long" && current_price >= fixed_take_profit)
             || (side == "Short" && current_price <= fixed_take_profit)
         {
-            return (
-                create_close_decision(
+            let reason = format!(
+                "take_profit_triggered_target_{:.5}_current_{:.5}",
+                fixed_take_profit, current_price
+            );
+            return ExitEvaluation {
+                decision: create_close_decision(
                     symbol,
                     side,
                     open.quantity,
                     current_price,
-                    "take_profit_triggered",
+                    &reason,
                 ),
-                None,
-            );
+                trailing: None,
+                trigger: "take_profit".to_string(),
+                reason,
+            };
         }
     }
 
@@ -2144,22 +2166,42 @@ fn evaluate_open_trade_exit(
         };
 
         if trailing_hit {
-            return (
-                create_close_decision(
+            let reason = format!(
+                "trailing_stop_triggered_stop_{:.5}_peak_{:.5}_trail_{:.5}_current_{:.5}",
+                eval.trailing_stop_price, eval.peak_price, eval.trail_pct, current_price
+            );
+            return ExitEvaluation {
+                decision: create_close_decision(
                     symbol,
                     side,
                     open.quantity,
                     current_price,
-                    "trailing_stop_triggered",
+                    &reason,
                 ),
-                Some(eval),
-            );
+                trailing: Some(eval),
+                trigger: "trailing_stop".to_string(),
+                reason,
+            };
         }
 
-        return (None, Some(eval));
+        let reason = format!(
+            "trailing_monitoring_stop_{:.5}_peak_{:.5}_trail_{:.5}",
+            eval.trailing_stop_price, eval.peak_price, eval.trail_pct
+        );
+        return ExitEvaluation {
+            decision: None,
+            trailing: Some(eval),
+            trigger: "trailing_monitoring".to_string(),
+            reason,
+        };
     }
 
-    (None, None)
+    ExitEvaluation {
+        decision: None,
+        trailing: None,
+        trigger: "no_exit".to_string(),
+        reason: "open_position_monitoring".to_string(),
+    }
 }
 
 fn structured_hold_reason_from_state(state: &Value) -> String {
@@ -3045,8 +3087,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     match fetch_open_trade_for_symbol(pool, &symbol).await {
                         Ok(Some(open)) => {
                             let current_price = signal_event.signal.current_price;
-                            let (close_decision, trailing_eval) =
+                            let exit_evaluation =
                                 evaluate_open_trade_exit(&symbol, current_price, &open, cfg.as_ref());
+                            let close_decision = exit_evaluation.decision.clone();
+                            let trailing_eval = exit_evaluation.trailing.clone();
                             if let Some(eval) = trailing_eval {
                                 let trailing_cfg = cfg.trailing_runtime_config(&symbol);
                                 if should_persist_trailing_update(
@@ -3085,7 +3129,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                                 decision
                             } else {
-                                create_hold_decision(&symbol, "open_position_monitoring")
+                                create_hold_decision(
+                                    &symbol,
+                                    &format!(
+                                        "exit_{}_{}",
+                                        exit_evaluation.trigger, exit_evaluation.reason
+                                    ),
+                                )
                             };
 
                             if let Err(err) =
