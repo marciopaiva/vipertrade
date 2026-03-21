@@ -2440,6 +2440,7 @@ fn enforce_entry_guards(
         return decision;
     }
 
+    let proposed_reason = decision.reason.clone();
     let proposed_side = if decision.action == "ENTER_LONG" {
         "Long"
     } else {
@@ -2453,7 +2454,10 @@ fn enforce_entry_guards(
         decision.entry_price = 0.0;
         decision.stop_loss = 0.0;
         decision.take_profit = 0.0;
-        decision.reason = format!("cooldown_stop_loss_{}m", cooldown_minutes);
+        decision.reason = format!(
+            "cooldown_stop_loss_{}m_{}",
+            cooldown_minutes, proposed_reason
+        );
         decision.smart_copy_compatible = false;
         return decision;
     }
@@ -2480,8 +2484,8 @@ fn enforce_entry_guards(
         decision.stop_loss = 0.0;
         decision.take_profit = 0.0;
         decision.reason = format!(
-            "awaiting_signal_confirmation_{}/{}",
-            confirmation.consecutive_valid_ticks, min_confirmation_ticks
+            "awaiting_signal_confirmation_{}/{}_{}",
+            confirmation.consecutive_valid_ticks, min_confirmation_ticks, proposed_reason
         );
         decision.smart_copy_compatible = false;
         return decision;
@@ -2495,7 +2499,10 @@ fn enforce_entry_guards(
             decision.entry_price = 0.0;
             decision.stop_loss = 0.0;
             decision.take_profit = 0.0;
-            decision.reason = format!("cooldown_stop_loss_{}m", cooldown_minutes);
+            decision.reason = format!(
+                "cooldown_stop_loss_{}m_{}",
+                cooldown_minutes, proposed_reason
+            );
             decision.smart_copy_compatible = false;
             return decision;
         }
@@ -2516,7 +2523,7 @@ fn enforce_entry_guards(
             decision.entry_price = 0.0;
             decision.stop_loss = 0.0;
             decision.take_profit = 0.0;
-            decision.reason = "blocked_until_trend_flip".to_string();
+            decision.reason = format!("blocked_until_trend_flip_{}", proposed_reason);
             decision.smart_copy_compatible = false;
         }
     }
