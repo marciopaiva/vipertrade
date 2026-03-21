@@ -2508,6 +2508,23 @@ fn temporal_confirmation_reason(
     )
 }
 
+fn inferred_confirmation_side(
+    trend: f64,
+    signal_confirmation: Option<&SignalConfirmationState>,
+) -> &'static str {
+    if let Some(state) = signal_confirmation {
+        if state.side.eq_ignore_ascii_case("short") {
+            "short"
+        } else {
+            "long"
+        }
+    } else if trend < 0.0 {
+        "short"
+    } else {
+        "long"
+    }
+}
+
 fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
 }
@@ -3139,6 +3156,7 @@ fn apply_hold_block(decision: &mut StrategyDecision, reason: String) {
 
 fn build_temporal_pipeline_state(
     symbol: &str,
+    trend: f64,
     cfg: &StrategyConfig,
     entry_guards: &HashMap<String, EntryGuardState>,
     signal_confirmations: &HashMap<String, SignalConfirmationState>,
@@ -3147,11 +3165,12 @@ fn build_temporal_pipeline_state(
     let signal_confirmation = signal_confirmations.get(symbol);
     let thesis_confirmation = thesis_invalidations.get(symbol);
     let cooldown_guard = entry_guards.get(symbol);
+    let confirmation_side = inferred_confirmation_side(trend, signal_confirmation);
 
     let cooldown_active = cooldown_guard
         .map(|guard| Instant::now() < guard.cooldown_until)
         .unwrap_or(false);
-    let cooldown_remaining_ticks = if cooldown_active {
+    let cooldown_remaining_seconds = if cooldown_active {
         cooldown_guard
             .map(|guard| {
                 guard
@@ -3170,13 +3189,13 @@ fn build_temporal_pipeline_state(
                 .map(|state| state.consecutive_valid_ticks > 0)
                 .unwrap_or(false),
             "consecutive_hits": signal_confirmation
-                .map(|state| state.consecutive_valid_ticks as i64)
-                .unwrap_or(0),
-            "required_hits": cfg.min_signal_confirmation_ticks(symbol) as i64
+            .map(|state| state.consecutive_valid_ticks as i64)
+            .unwrap_or(0),
+            "required_hits": cfg.min_signal_confirmation_ticks_for_side(symbol, confirmation_side) as i64
         },
         "cooldown_guard": {
             "active": cooldown_active,
-            "remaining_ticks": cooldown_remaining_ticks
+            "remaining_seconds": cooldown_remaining_seconds
         },
         "thesis_confirmation": {
             "observed": thesis_confirmation
@@ -3642,6 +3661,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "temporal".to_string(),
                         build_temporal_pipeline_state(
                             &symbol,
+                            trend,
                             cfg.as_ref(),
                             &entry_guards,
                             &signal_confirmations,
