@@ -219,6 +219,12 @@ struct EntryGuardEvaluation {
     reason: String,
 }
 
+#[derive(Debug, Clone)]
+struct ThesisGuardEvaluation {
+    confirmed: bool,
+    reason: String,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct WalletSizingResponse {
     total_equity: Option<f64>,
@@ -2932,6 +2938,46 @@ fn evaluate_thesis_invalidation(
     }
 }
 
+fn evaluate_thesis_guard_policy(
+    symbol: &str,
+    open_side: &str,
+    evaluation: &ThesisInvalidationEvaluation,
+    thesis_invalidations: &mut HashMap<String, ThesisInvalidationState>,
+    required_ticks: usize,
+) -> ThesisGuardEvaluation {
+    let state = thesis_invalidations
+        .entry(symbol.to_string())
+        .or_insert_with(|| ThesisInvalidationState {
+            side: open_side.to_string(),
+            consecutive_invalid_ticks: 0,
+        });
+
+    if !state.side.eq_ignore_ascii_case(open_side) {
+        state.side = open_side.to_string();
+        state.consecutive_invalid_ticks = 1;
+    } else {
+        state.consecutive_invalid_ticks += 1;
+    }
+
+    if state.consecutive_invalid_ticks < required_ticks {
+        ThesisGuardEvaluation {
+            confirmed: false,
+            reason: format!(
+                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}_{}",
+                state.consecutive_invalid_ticks,
+                required_ticks,
+                evaluation.health_score,
+                evaluation.reason
+            ),
+        }
+    } else {
+        ThesisGuardEvaluation {
+            confirmed: true,
+            reason: evaluation.reason.clone(),
+        }
+    }
+}
+
 fn enforce_open_position_thesis_guard(
     symbol: &str,
     signal: &MarketSignal,
@@ -2952,31 +2998,16 @@ fn enforce_open_position_thesis_guard(
     }
 
     let required_ticks = cfg.thesis_invalidation_confirmation_ticks(symbol);
-    let state = thesis_invalidations
-        .entry(symbol.to_string())
-        .or_insert_with(|| ThesisInvalidationState {
-            side: open.side.clone(),
-            consecutive_invalid_ticks: 0,
-        });
+    let guard_evaluation = evaluate_thesis_guard_policy(
+        symbol,
+        &open.side,
+        &evaluation,
+        thesis_invalidations,
+        required_ticks,
+    );
 
-    if !state.side.eq_ignore_ascii_case(&open.side) {
-        state.side = open.side.clone();
-        state.consecutive_invalid_ticks = 1;
-    } else {
-        state.consecutive_invalid_ticks += 1;
-    }
-
-    if state.consecutive_invalid_ticks < required_ticks {
-        return Some(create_hold_decision(
-            symbol,
-            &format!(
-                "awaiting_thesis_invalidation_confirmation_{}/{}_health_{}_{}",
-                state.consecutive_invalid_ticks,
-                required_ticks,
-                evaluation.health_score,
-                evaluation.reason
-            ),
-        ));
+    if !guard_evaluation.confirmed {
+        return Some(create_hold_decision(symbol, &guard_evaluation.reason));
     }
 
     thesis_invalidations.remove(symbol);
@@ -2985,7 +3016,7 @@ fn enforce_open_position_thesis_guard(
         &open.side,
         open.quantity,
         signal.current_price,
-        &evaluation.reason,
+        &guard_evaluation.reason,
     )
 }
 
