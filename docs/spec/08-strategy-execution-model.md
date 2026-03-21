@@ -118,7 +118,16 @@ The strategy service currently has most of its trading semantics in:
 
 - `services/strategy/src/main.rs`
 
-But there is still no dedicated test module covering the newer structured outputs.
+The strategy service now has focused coverage for some of the newer structured outputs directly in
+`services/strategy/src/main.rs`, including:
+
+- trailing score and reason summary
+- open trade exit trigger selection
+- audit summary composition
+- structured hold reason reconstruction
+- temporal confirmation reason helpers
+
+The remaining gap is breadth, not total absence of tests.
 
 High-value missing tests:
 
@@ -152,7 +161,7 @@ High-value missing tests:
 
 If this phase is considered feature-complete, the best next investment is:
 
-1. add targeted unit tests around the structured outputs
+1. expand the targeted unit-test coverage around the structured outputs
 2. keep the public decision event contract stable unless we explicitly decide to publish
    breakdowns externally
 
