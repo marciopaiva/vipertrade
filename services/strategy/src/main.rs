@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -1340,6 +1341,75 @@ fn load_execution_plan(path: &str) -> Result<ExecutionPlan, Box<dyn Error>> {
     let plan_json = codegen_pipeline("vipertrade", pipeline, &program)?;
     let plan: ExecutionPlan = serde_json::from_str(&plan_json)?;
     Ok(plan)
+}
+
+fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+fn sha256_hex_json(value: &Value) -> Result<String, serde_json::Error> {
+    let bytes = serde_json::to_vec(value)?;
+    Ok(sha256_hex_bytes(&bytes))
+}
+
+async fn persist_tupa_audit_log(
+    pool: &PgPool,
+    signal_event: &MarketSignalEvent,
+    pipeline_name: &str,
+    pipeline_version: &str,
+    input_data: &Value,
+    output_data: &Value,
+    constraints_results: &Value,
+    decision: &StrategyDecision,
+    execution_time_ms: i32,
+) -> Result<(), sqlx::Error> {
+    let input_hash = sha256_hex_json(input_data).unwrap_or_else(|_| signal_event.event_id.clone());
+    let output_hash =
+        sha256_hex_json(output_data).unwrap_or_else(|_| signal_event.signal.symbol.clone());
+    let decision_value = serde_json::to_value(decision).unwrap_or_else(|_| json!({}));
+    let decision_hash =
+        sha256_hex_json(&decision_value).unwrap_or_else(|_| signal_event.signal.symbol.clone());
+    let environment = json!({
+        "service": "viper-strategy",
+        "strategy_version": env!("CARGO_PKG_VERSION"),
+        "decision_schema_version": viper_domain::SCHEMA_VERSION,
+        "runtime_mode": "in_process_tupa",
+    });
+
+    sqlx::query(
+        "INSERT INTO tupa_audit_logs (
+            execution_id,
+            pipeline_name,
+            pipeline_version,
+            input_hash,
+            output_hash,
+            decision_hash,
+            input_data,
+            output_data,
+            constraints_results,
+            execution_time_ms,
+            memory_used_kb,
+            environment
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    )
+    .bind(&signal_event.event_id)
+    .bind(pipeline_name)
+    .bind(pipeline_version)
+    .bind(input_hash)
+    .bind(output_hash)
+    .bind(decision_hash)
+    .bind(input_data)
+    .bind(output_data)
+    .bind(constraints_results)
+    .bind(execution_time_ms)
+    .bind(Option::<i32>::None)
+    .bind(environment)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 fn execute_strategy_step(
@@ -3669,6 +3739,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         ),
                     );
                 }
+                let pipeline_input = input.clone();
+                let pipeline_started_at = Instant::now();
                 let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
                     Ok(v) => v,
                     Err(e) => {
@@ -3779,6 +3851,47 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     },
                                 );
                                 signal_confirmations.remove(&symbol);
+                            }
+                        }
+
+                        if let Some(pool) = &db_pool {
+                            let mut audit_output = runtime_output.clone();
+                            if let Some(obj) = audit_output.as_object_mut() {
+                                obj.insert(
+                                    "final_decision".to_string(),
+                                    serde_json::to_value(&decision).unwrap_or_else(|_| json!({})),
+                                );
+                            }
+                            let constraints_results = json!({
+                                "check_daily_loss": runtime_output.get("check_daily_loss").cloned(),
+                                "check_consecutive_losses": runtime_output.get("check_consecutive_losses").cloned(),
+                                "validate_entry": runtime_output.get("validate_entry").cloned(),
+                                "check_funding": runtime_output.get("check_funding").cloned(),
+                                "validate_size": runtime_output.get("validate_size").cloned(),
+                                "signal_confirmation": runtime_output.get("signal_confirmation").cloned(),
+                                "cooldown_guard": runtime_output.get("cooldown_guard").cloned(),
+                                "thesis_confirmation": runtime_output.get("thesis_confirmation").cloned(),
+                                "audit": runtime_output.get("audit").cloned(),
+                            });
+                            let execution_time_ms =
+                                pipeline_started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+                            if let Err(err) = persist_tupa_audit_log(
+                                pool,
+                                &signal_event,
+                                "viper_smart_copy",
+                                &execution_plan.version,
+                                &pipeline_input,
+                                &audit_output,
+                                &constraints_results,
+                                &decision,
+                                execution_time_ms,
+                            )
+                            .await
+                            {
+                                eprintln!(
+                                    "Failed to persist Tupa audit log for symbol={} err={}",
+                                    symbol, err
+                                );
                             }
                         }
 
