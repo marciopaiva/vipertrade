@@ -43,14 +43,16 @@ echo ""
 BEFORE_COUNTS="$(run_psql -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades),
   (SELECT COUNT(*) FROM trades WHERE status = 'open'),
-  (SELECT COUNT(*) FROM position_snapshots);")"
+  (SELECT COUNT(*) FROM position_snapshots),
+  (SELECT COUNT(*) FROM strategy_decision_audit);")"
 
-IFS='|' read -r BEFORE_TRADES BEFORE_OPEN BEFORE_SNAPSHOTS <<< "$BEFORE_COUNTS"
+IFS='|' read -r BEFORE_TRADES BEFORE_OPEN BEFORE_SNAPSHOTS BEFORE_AUDIT <<< "$BEFORE_COUNTS"
 
 echo "Before reset:"
 echo "- trades: $BEFORE_TRADES"
 echo "- open trades: $BEFORE_OPEN"
 echo "- position_snapshots: $BEFORE_SNAPSHOTS"
+echo "- strategy_decision_audit: $BEFORE_AUDIT"
 echo ""
 
 if [[ "${1:-}" != "--yes" ]]; then
@@ -65,14 +67,16 @@ fi
 run_psql -c "BEGIN;
 DELETE FROM position_snapshots;
 DELETE FROM trades;
+DELETE FROM strategy_decision_audit;
 COMMIT;"
 
 AFTER_COUNTS="$(run_psql -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades),
   (SELECT COUNT(*) FROM trades WHERE status = 'open'),
-  (SELECT COUNT(*) FROM position_snapshots);")"
+  (SELECT COUNT(*) FROM position_snapshots),
+  (SELECT COUNT(*) FROM strategy_decision_audit);")"
 
-IFS='|' read -r AFTER_TRADES AFTER_OPEN AFTER_SNAPSHOTS <<< "$AFTER_COUNTS"
+IFS='|' read -r AFTER_TRADES AFTER_OPEN AFTER_SNAPSHOTS AFTER_AUDIT <<< "$AFTER_COUNTS"
 
 STATUS_JSON="$(run_api 'curl -s http://localhost:8080/api/v1/status || true')"
 
@@ -82,6 +86,7 @@ echo "After reset:"
 echo "- trades: $AFTER_TRADES"
 echo "- open trades: $AFTER_OPEN"
 echo "- position_snapshots: $AFTER_SNAPSHOTS"
+echo "- strategy_decision_audit: $AFTER_AUDIT"
 echo ""
 
 echo "Runtime status:"
