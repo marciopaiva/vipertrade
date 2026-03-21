@@ -62,7 +62,23 @@ struct TrailingEval {
     peak_price: f64,
     trail_pct: f64,
     trailing_stop_price: f64,
+    trailing_score: i32,
     reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct TrailingPolicyComponent {
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+    contribution: i32,
+}
+
+#[derive(Debug, Clone)]
+struct TrailingPolicyBreakdown {
+    raw_score: i32,
+    clamped_score: i32,
+    components: Vec<TrailingPolicyComponent>,
 }
 
 #[derive(Debug, Clone)]
@@ -1226,15 +1242,65 @@ fn evaluate_trailing(
         }
     }
 
+    let activation_score = if trailing.activate_after_profit_pct > 0.0 {
+        (profit_pct / trailing.activate_after_profit_pct).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let ratchet_score = if trailing.ratchet_levels.is_empty() {
+        0.0
+    } else {
+        (ratchet_level as f64 / trailing.ratchet_levels.len() as f64).clamp(0.0, 1.0)
+    };
+    let break_even_score = if break_even_armed { 1.0 } else { 0.0 };
+    let trail_tightness_score = if trail_pct > 0.0 {
+        (1.0 - trail_pct / 0.03).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let mut components = Vec::new();
+    push_weighted_trailing_component(
+        &mut components,
+        "activation_progress",
+        activation_score,
+        35.0,
+    );
+    push_weighted_trailing_component(&mut components, "ratchet_progress", ratchet_score, 25.0);
+    push_weighted_trailing_component(&mut components, "break_even_guard", break_even_score, 20.0);
+    push_weighted_trailing_component(
+        &mut components,
+        "trail_tightness",
+        trail_tightness_score,
+        20.0,
+    );
+    let raw_score = components
+        .iter()
+        .map(|component| component.contribution)
+        .sum();
+    let clamped_score = clamp_i32(raw_score, 0, 100);
+    let breakdown = TrailingPolicyBreakdown {
+        raw_score,
+        clamped_score,
+        components,
+    };
+
     activated = true;
     Some(TrailingEval {
         activated,
         peak_price,
         trail_pct,
         trailing_stop_price,
+        trailing_score: breakdown.clamped_score,
         reason: format!(
-            "trailing_eval_profit_{:.5}_peak_{:.5}_trail_{:.5}_stop_{:.5}_ratchet_{}_breakeven_{}",
-            profit_pct, peak_price, trail_pct, trailing_stop_price, ratchet_level, break_even_armed
+            "trailing_eval_profit_{:.5}_peak_{:.5}_trail_{:.5}_stop_{:.5}_ratchet_{}_breakeven_{}_{}",
+            profit_pct,
+            peak_price,
+            trail_pct,
+            trailing_stop_price,
+            ratchet_level,
+            break_even_armed,
+            trailing_policy_summary(&breakdown)
         ),
     })
 }
@@ -2241,8 +2307,8 @@ fn evaluate_open_trade_exit(
 
         if trailing_hit {
             let reason = format!(
-                "trailing_stop_triggered_{}_current_{:.5}",
-                eval.reason, current_price
+                "trailing_stop_triggered_score_{}_{}_current_{:.5}",
+                eval.trailing_score, eval.reason, current_price
             );
             return ExitEvaluation {
                 decision: create_close_decision(
@@ -2258,7 +2324,10 @@ fn evaluate_open_trade_exit(
             };
         }
 
-        let reason = format!("trailing_monitoring_{}", eval.reason);
+        let reason = format!(
+            "trailing_monitoring_score_{}_{}",
+            eval.trailing_score, eval.reason
+        );
         return ExitEvaluation {
             decision: None,
             trailing: Some(eval),
@@ -2531,6 +2600,54 @@ fn decision_policy_summary(breakdown: &DecisionPolicyBreakdown) -> String {
     } else {
         format!(
             "decision_raw_{}_clamped_{}_{}",
+            breakdown.raw_score,
+            breakdown.clamped_score,
+            reasons.join("__")
+        )
+    }
+}
+
+fn push_weighted_trailing_component(
+    components: &mut Vec<TrailingPolicyComponent>,
+    reason: &'static str,
+    score: f64,
+    weight: f64,
+) {
+    let contribution = weighted_contribution(score, weight);
+    if contribution != 0 {
+        components.push(TrailingPolicyComponent {
+            reason,
+            score,
+            weight,
+            contribution,
+        });
+    }
+}
+
+fn trailing_policy_summary(breakdown: &TrailingPolicyBreakdown) -> String {
+    let mut components = breakdown.components.clone();
+    components.sort_by_key(|component| component.contribution.abs());
+    components.reverse();
+
+    let reasons = components
+        .into_iter()
+        .take(4)
+        .map(|component| {
+            format!(
+                "{}:{:.3}x{:.1}={}",
+                component.reason, component.score, component.weight, component.contribution
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if reasons.is_empty() {
+        format!(
+            "trailing_raw_{}_clamped_{}",
+            breakdown.raw_score, breakdown.clamped_score
+        )
+    } else {
+        format!(
+            "trailing_raw_{}_clamped_{}_{}",
             breakdown.raw_score,
             breakdown.clamped_score,
             reasons.join("__")
