@@ -228,51 +228,97 @@ fn step_get_trailing_config(input: { symbol: string }): {
   };
 }
 
-fn step_signal_confirmation(input: { symbol: string }): {
+fn step_signal_confirmation(input: {
+  symbol: string,
+  temporal: {
+    signal_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    },
+    cooldown_guard: {
+      active: bool,
+      remaining_ticks: i64
+    },
+    thesis_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    }
+  }
+}): {
   passed: bool,
   pending: bool,
   remaining_hits: i64,
   reason: string
 } {
-  let observed: bool = true;
-  let consecutive_hits: i64 = 1;
-  let required_hits: i64 = 2;
   return confirm(
-    observed,
-    consecutive_hits,
-    required_hits,
-    "signal_confirmation_pending_runtime"
+    input.temporal.signal_confirmation.observed,
+    input.temporal.signal_confirmation.consecutive_hits,
+    input.temporal.signal_confirmation.required_hits,
+    "signal_confirmation"
   );
 }
 
-fn step_cooldown_guard(input: { symbol: string }): {
+fn step_cooldown_guard(input: {
+  symbol: string,
+  temporal: {
+    signal_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    },
+    cooldown_guard: {
+      active: bool,
+      remaining_ticks: i64
+    },
+    thesis_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    }
+  }
+}): {
   blocked: bool,
   remaining_ticks: i64,
   reason: string
 } {
-  let active: bool = false;
-  let remaining_ticks: i64 = 0;
   return cooldown(
-    active,
-    remaining_ticks,
-    "cooldown_pending_runtime"
+    input.temporal.cooldown_guard.active,
+    input.temporal.cooldown_guard.remaining_ticks,
+    "cooldown_guard"
   );
 }
 
-fn step_thesis_confirmation(input: { symbol: string }): {
+fn step_thesis_confirmation(input: {
+  symbol: string,
+  temporal: {
+    signal_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    },
+    cooldown_guard: {
+      active: bool,
+      remaining_ticks: i64
+    },
+    thesis_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    }
+  }
+}): {
   passed: bool,
   pending: bool,
   remaining_hits: i64,
   reason: string
 } {
-  let observed: bool = false;
-  let consecutive_hits: i64 = 0;
-  let required_hits: i64 = 2;
   return confirm(
-    observed,
-    consecutive_hits,
-    required_hits,
-    "thesis_confirmation_pending_runtime"
+    input.temporal.thesis_confirmation.observed,
+    input.temporal.thesis_confirmation.consecutive_hits,
+    input.temporal.thesis_confirmation.required_hits,
+    "thesis_confirmation"
   );
 }
 
@@ -349,19 +395,37 @@ fn step_audit(input: { symbol: string }): {
 }
 
 pipeline ViperSmartCopy @deterministic(seed=42) {
-  input: { symbol: string },
+  input: {
+    symbol: string,
+    temporal: {
+      signal_confirmation: {
+        observed: bool,
+        consecutive_hits: i64,
+        required_hits: i64
+      },
+      cooldown_guard: {
+        active: bool,
+        remaining_ticks: i64
+      },
+      thesis_confirmation: {
+        observed: bool,
+        consecutive_hits: i64,
+        required_hits: i64
+      }
+    }
+  },
   steps: [
-    step("check_daily_loss") { step_check_daily_loss(input) },
-    step("check_consecutive_losses") { step_check_consecutive_losses(input) },
-    step("validate_entry") { step_validate_entry(input) },
-    step("check_funding") { step_check_funding(input) },
-    step("calc_smart_size") { step_calc_smart_size(input) },
-    step("validate_size") { step_validate_size(input) },
-    step("get_trailing_config") { step_get_trailing_config(input) },
+    step("check_daily_loss") { step_check_daily_loss({ symbol: input.symbol }) },
+    step("check_consecutive_losses") { step_check_consecutive_losses({ symbol: input.symbol }) },
+    step("validate_entry") { step_validate_entry({ symbol: input.symbol }) },
+    step("check_funding") { step_check_funding({ symbol: input.symbol }) },
+    step("calc_smart_size") { step_calc_smart_size({ symbol: input.symbol }) },
+    step("validate_size") { step_validate_size({ symbol: input.symbol }) },
+    step("get_trailing_config") { step_get_trailing_config({ symbol: input.symbol }) },
     step("signal_confirmation") { step_signal_confirmation(input) },
     step("cooldown_guard") { step_cooldown_guard(input) },
     step("thesis_confirmation") { step_thesis_confirmation(input) },
-    step("decision") { step_decision(input) },
-    step("audit") { step_audit(input) }
+    step("decision") { step_decision({ symbol: input.symbol }) },
+    step("audit") { step_audit({ symbol: input.symbol }) }
   ],
 }
