@@ -323,7 +323,25 @@ fn step_thesis_confirmation(input: {
 }
 
 fn step_decision(
-  input: { symbol: string }
+  input: {
+    symbol: string,
+    temporal: {
+      signal_confirmation: {
+        observed: bool,
+        consecutive_hits: i64,
+        required_hits: i64
+      },
+      cooldown_guard: {
+        active: bool,
+        remaining_ticks: i64
+      },
+      thesis_confirmation: {
+        observed: bool,
+        consecutive_hits: i64,
+        required_hits: i64
+      }
+    }
+  }
 ): {
   action: string,
   symbol: string,
@@ -343,14 +361,29 @@ fn step_decision(
       score: f64,
       weight: f64,
       contribution: i64
-    }; 5]
+    }; 8]
   }
 } {
-  let entry_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 40.0, "entry_policy");
-  let funding_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "funding_policy");
-  let size_proposal: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "size_proposal");
-  let size_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "size_policy");
+  let entry_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "entry_policy");
+  let funding_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "funding_policy");
+  let size_proposal: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_proposal");
+  let size_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_policy");
   let trailing_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "trailing_policy");
+  let signal_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.signal_confirmation.consecutive_hits >= input.temporal.signal_confirmation.required_hits {
+    weighted(1.0, 5.0, "signal_confirmation_ready")
+  } else {
+    weighted(0.0, 5.0, "signal_confirmation_pending")
+  };
+  let cooldown_policy: { score: f64, weight: f64, reason: string } = if input.temporal.cooldown_guard.active {
+    weighted(0.0, 5.0, "cooldown_active")
+  } else {
+    weighted(1.0, 5.0, "cooldown_clear")
+  };
+  let thesis_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.thesis_confirmation.observed {
+    weighted(0.0, 5.0, "thesis_confirmation_pending")
+  } else {
+    weighted(1.0, 5.0, "thesis_confirmation_clear")
+  };
   let raw_score: i64 = 100;
   return {
     action: "HOLD",
@@ -367,17 +400,38 @@ fn step_decision(
       raw_score: raw_score,
       clamped_score: raw_score,
       components: [
-        { reason: entry_policy.reason, score: entry_policy.score, weight: entry_policy.weight, contribution: 40 },
-        { reason: funding_policy.reason, score: funding_policy.score, weight: funding_policy.weight, contribution: 20 },
-        { reason: size_proposal.reason, score: size_proposal.score, weight: size_proposal.weight, contribution: 20 },
-        { reason: size_policy.reason, score: size_policy.score, weight: size_policy.weight, contribution: 10 },
-        { reason: trailing_policy.reason, score: trailing_policy.score, weight: trailing_policy.weight, contribution: 10 }
+        { reason: entry_policy.reason, score: entry_policy.score, weight: entry_policy.weight, contribution: 30 },
+        { reason: funding_policy.reason, score: funding_policy.score, weight: funding_policy.weight, contribution: 15 },
+        { reason: size_proposal.reason, score: size_proposal.score, weight: size_proposal.weight, contribution: 15 },
+        { reason: size_policy.reason, score: size_policy.score, weight: size_policy.weight, contribution: 15 },
+        { reason: trailing_policy.reason, score: trailing_policy.score, weight: trailing_policy.weight, contribution: 10 },
+        { reason: signal_confirmation_policy.reason, score: signal_confirmation_policy.score, weight: signal_confirmation_policy.weight, contribution: 5 },
+        { reason: cooldown_policy.reason, score: cooldown_policy.score, weight: cooldown_policy.weight, contribution: 5 },
+        { reason: thesis_confirmation_policy.reason, score: thesis_confirmation_policy.score, weight: thesis_confirmation_policy.weight, contribution: 5 }
       ]
     }
   };
 }
 
-fn step_audit(input: { symbol: string }): {
+fn step_audit(input: {
+  symbol: string,
+  temporal: {
+    signal_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    },
+    cooldown_guard: {
+      active: bool,
+      remaining_ticks: i64
+    },
+    thesis_confirmation: {
+      observed: bool,
+      consecutive_hits: i64,
+      required_hits: i64
+    }
+  }
+}): {
   ok: bool,
   reason: string,
   decision_action: string,
@@ -387,7 +441,7 @@ fn step_audit(input: { symbol: string }): {
   let outcome: { passed: bool, severity: string, reason: string } = pass("audit_ok");
   return {
     ok: outcome.passed,
-    reason: outcome.reason,
+    reason: "audit_ok_temporal_pending_runtime",
     decision_action: "HOLD",
     decision_score: 100.0,
     smart_copy_compatible: false
@@ -425,7 +479,7 @@ pipeline ViperSmartCopy @deterministic(seed=42) {
     step("signal_confirmation") { step_signal_confirmation(input) },
     step("cooldown_guard") { step_cooldown_guard(input) },
     step("thesis_confirmation") { step_thesis_confirmation(input) },
-    step("decision") { step_decision({ symbol: input.symbol }) },
-    step("audit") { step_audit({ symbol: input.symbol }) }
+    step("decision") { step_decision(input) },
+    step("audit") { step_audit(input) }
   ],
 }
