@@ -154,7 +154,7 @@ services:
       context: ..
       dockerfile: services/strategy/Dockerfile
       args:
-        TUPA_VERSION: "v0.8.0-rc.3"
+        TUPA_VERSION: "v0.8.1"
         TUPA_BACKEND: ${TUPA_BACKEND:-hybrid}
         RUST_VERSION: "1.83"
         STRATEGY_BUILDER_IMAGE: ${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}
