@@ -86,6 +86,7 @@ function StageCard({
   color,
   tone,
   hero = false,
+  animated = false,
 }: {
   title: string;
   latency?: number;
@@ -93,6 +94,7 @@ function StageCard({
   color: typeof STAGE_COLORS.marketData;
   tone: ReturnType<typeof getStatusTone>;
   hero?: boolean;
+  animated?: boolean;
 }) {
   return (
     <div
@@ -105,6 +107,12 @@ function StageCard({
         tone.ring,
       ].join(' ')}
     >
+      {animated && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/2 -skew-x-12 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent animate-[flow-card-sweep_5.8s_ease-in-out_infinite]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_52%)] opacity-60" />
+        </>
+      )}
       <div className={`absolute inset-x-6 top-0 h-px bg-gradient-to-r ${color.rail}`} />
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -188,7 +196,7 @@ function BlockConnector({ from, to }: { from: string; to: string }) {
     <div className="hidden xl:flex items-center justify-center">
       <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
         <div className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`} />
-        <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/75 shadow-[0_0_14px_rgba(255,255,255,0.35)]" />
+        <div className="absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-white/85 shadow-[0_0_14px_rgba(255,255,255,0.4)] animate-[flow-connector_2.8s_ease-in-out_infinite]" />
       </div>
     </div>
   );
@@ -235,6 +243,40 @@ export default function ServiceFlowDiagram({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
+      <style jsx>{`
+        @keyframes flow-connector {
+          0% {
+            left: 0%;
+            opacity: 0;
+            transform: translate(0, -50%) scale(0.9);
+          }
+          12% {
+            opacity: 1;
+          }
+          88% {
+            opacity: 1;
+          }
+          100% {
+            left: calc(100% - 0.5rem);
+            opacity: 0;
+            transform: translate(0, -50%) scale(1.05);
+          }
+        }
+
+        @keyframes flow-card-sweep {
+          0% {
+            transform: translateX(-150%) skewX(-12deg);
+            opacity: 0;
+          }
+          18% {
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(320%) skewX(-12deg);
+            opacity: 0;
+          }
+        }
+      `}</style>
       <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -281,6 +323,7 @@ export default function ServiceFlowDiagram({
             subtitle="normalize + publish"
             color={STAGE_COLORS.marketData}
             tone={marketTone}
+            animated
           />
           <StageCard
             title="Strategy"
@@ -288,6 +331,7 @@ export default function ServiceFlowDiagram({
             subtitle="score + decide"
             color={STAGE_COLORS.strategy}
             tone={strategyTone}
+            animated
           />
           <StageCard
             title="Executor"
@@ -296,6 +340,7 @@ export default function ServiceFlowDiagram({
             color={STAGE_COLORS.executor}
             tone={executorTone}
             hero
+            animated
           />
         </div>
       </div>
