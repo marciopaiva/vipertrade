@@ -6,7 +6,17 @@ interface ServiceFlowDiagramProps {
   services?: Array<{ name: string; ok: boolean; latency_ms: number }>;
   executionMode?: 'paper' | 'testnet' | 'mainnet';
   executorState?: 'running' | 'paused' | 'down';
-  events?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string }>;
+  flowContext?: {
+    strategySymbol?: string;
+    strategyState?: string;
+    strategyContext?: string;
+    executorSymbol?: string;
+    executorAction?: string;
+    executorContext?: string;
+  };
+  activeSignalsCount?: number;
+  openPositionsCount?: number;
+  closedTradesCount?: number;
 }
 
 const STAGE_COLORS = {
@@ -83,6 +93,8 @@ function StageCard({
   title,
   latency,
   subtitle,
+  statusLine,
+  detailLine,
   color,
   tone,
   hero = false,
@@ -91,6 +103,8 @@ function StageCard({
   title: string;
   latency?: number;
   subtitle: string;
+  statusLine?: string;
+  detailLine?: string;
   color: typeof STAGE_COLORS.marketData;
   tone: ReturnType<typeof getStatusTone>;
   hero?: boolean;
@@ -137,6 +151,13 @@ function StageCard({
           <div className="mt-1 text-xs text-slate-300">{subtitle}</div>
         </div>
       </div>
+
+      {(statusLine || detailLine) && (
+        <div className="mt-4 border-t border-white/5 pt-3">
+          {statusLine && <div className="text-[11px] font-medium tracking-[0.08em] text-slate-300">{statusLine}</div>}
+          {detailLine && <div className="mt-1 text-[11px] text-slate-500">{detailLine}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -191,14 +212,32 @@ function SidecarPill({
   );
 }
 
-function BlockConnector({ from, to }: { from: string; to: string }) {
+function BlockConnector({
+  from,
+  to,
+  mobileLabel,
+  dotClass,
+}: {
+  from: string;
+  to: string;
+  mobileLabel: string;
+  dotClass: string;
+}) {
   return (
-    <div className="hidden xl:flex items-center justify-center">
-      <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
-        <div className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`} />
-        <div className="absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-white/85 shadow-[0_0_14px_rgba(255,255,255,0.4)] animate-[flow-connector_2.8s_ease-in-out_infinite]" />
+    <>
+      <div className="xl:hidden flex items-center justify-center py-1">
+        <div className="inline-flex items-center gap-2 rounded-full border border-slate-700/70 bg-slate-900/60 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+          <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+          {mobileLabel}
+        </div>
       </div>
-    </div>
+      <div className="hidden xl:flex items-center justify-center">
+        <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
+          <div className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`} />
+          <div className={`absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${dotClass} shadow-[0_0_14px_rgba(255,255,255,0.35)] animate-[flow-connector_2.8s_ease-in-out_infinite]`} />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -206,6 +245,10 @@ export default function ServiceFlowDiagram({
   services = [],
   executionMode = 'paper',
   executorState = 'down',
+  flowContext,
+  activeSignalsCount = 0,
+  openPositionsCount = 0,
+  closedTradesCount = 0,
 }: ServiceFlowDiagramProps) {
   const serviceState = useMemo(() => {
     const bybit = getService(services, 'bybit');
@@ -240,6 +283,15 @@ export default function ServiceFlowDiagram({
   const strategyTone = getStatusTone(serviceState.strategy?.ok, serviceState.strategy?.latency_ms);
   const executorTone = getStatusTone(serviceState.executor?.ok, serviceState.executor?.latency_ms);
   const showMultiSource = executionMode !== 'testnet';
+  const marketStatusLine = `${activeSignalsCount} active ${activeSignalsCount === 1 ? 'symbol' : 'symbols'} · ${showMultiSource ? 'multi venue' : 'single venue'}`;
+  const strategyStatusLine = flowContext?.strategySymbol
+    ? `${flowContext.strategySymbol} · ${flowContext.strategyState || 'Scanning'}`
+    : 'Scanning market conditions';
+  const strategyDetailLine = flowContext?.strategyContext || `${closedTradesCount} closed trades observed`;
+  const executorStatusLine = flowContext?.executorSymbol
+    ? `${flowContext.executorSymbol} · ${flowContext.executorAction || 'idle'}`
+    : `${openPositionsCount} open ${openPositionsCount === 1 ? 'position' : 'positions'}`;
+  const executorDetailLine = flowContext?.executorContext || 'Awaiting valid execution pressure';
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
@@ -301,7 +353,12 @@ export default function ServiceFlowDiagram({
         </div>
       </div>
 
-      <BlockConnector from="from-slate-300/15 via-sky-400/55" to="to-violet-400/35" />
+      <BlockConnector
+        from="from-slate-300/15 via-sky-400/55"
+        to="to-violet-400/35"
+        mobileLabel="market flow"
+        dotClass={strategyTone.dot}
+      />
 
       <div className="relative overflow-hidden rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -321,6 +378,8 @@ export default function ServiceFlowDiagram({
             title="Market"
             latency={serviceState.marketData?.latency_ms}
             subtitle="normalize + publish"
+            statusLine={marketStatusLine}
+            detailLine={serviceState.marketData?.ok === false ? 'Feed normalization degraded' : 'Venue telemetry is flowing into the runtime path'}
             color={STAGE_COLORS.marketData}
             tone={marketTone}
             animated
@@ -329,6 +388,8 @@ export default function ServiceFlowDiagram({
             title="Strategy"
             latency={serviceState.strategy?.latency_ms}
             subtitle="score + decide"
+            statusLine={strategyStatusLine}
+            detailLine={strategyDetailLine}
             color={STAGE_COLORS.strategy}
             tone={strategyTone}
             animated
@@ -337,6 +398,8 @@ export default function ServiceFlowDiagram({
             title="Executor"
             latency={serviceState.executor?.latency_ms}
             subtitle={executorState === 'paused' ? 'orders paused' : 'orders + reconcile'}
+            statusLine={executorStatusLine}
+            detailLine={executorDetailLine}
             color={STAGE_COLORS.executor}
             tone={executorTone}
             hero
@@ -345,7 +408,12 @@ export default function ServiceFlowDiagram({
         </div>
       </div>
 
-      <BlockConnector from="from-violet-400/35 via-emerald-400/55" to="to-blue-400/25" />
+      <BlockConnector
+        from="from-violet-400/35 via-emerald-400/55"
+        to="to-blue-400/25"
+        mobileLabel="execution fan-out"
+        dotClass={executorTone.dot}
+      />
 
       <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
