@@ -728,7 +728,10 @@ export default function DashboardPage() {
               services={data?.services || []}
               executionMode={tradingMode}
               executorState={executorEnabled ? 'running' : 'down'}
-              events={data?.events?.items || []}
+              flowContext={flowContext}
+              activeSignalsCount={Object.keys(effectiveMarketSignals).length}
+              openPositionsCount={data?.positions?.items?.length || 0}
+              closedTradesCount={(data?.trades?.items || []).filter((trade) => trade.status === 'closed').length}
             />
           </CardContent>
         </Card>
