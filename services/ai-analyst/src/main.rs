@@ -1,0 +1,782 @@
+use chrono::{DateTime, Utc};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use std::convert::Infallible;
+use std::env;
+use std::fs;
+use std::sync::Arc;
+use tracing::{error, info};
+use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
+use tupa_parser::{parse_program, Item, PipelineDecl, Program};
+use tupa_runtime::Runtime;
+use tupa_typecheck::typecheck_program;
+use warp::http::StatusCode;
+use warp::{Filter, Rejection, Reply};
+
+#[derive(Clone)]
+struct AppState {
+    db_pool: PgPool,
+    http_client: Client,
+    runtime: Runtime,
+    execution_plan: Arc<ExecutionPlan>,
+    llm_enabled: bool,
+    ollama_url: Option<String>,
+    ollama_model: Option<String>,
+    default_lookback_hours: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnalysisQuery {
+    hours: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    db_connected: bool,
+    llm_enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricSummary {
+    closed_trades: i64,
+    total_pnl_usdt: f64,
+    avg_pnl_pct: f64,
+    avg_duration_s: f64,
+    win_rate_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct BreakdownItem {
+    name: String,
+    trades: i64,
+    pnl_usdt: f64,
+    avg_pnl_pct: f64,
+    avg_duration_s: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct AnalystSnapshot {
+    lookback_hours: i64,
+    summary: SnapshotSummary,
+    exits: SnapshotExitMetrics,
+    sides: SnapshotSideMetrics,
+    blockers: SnapshotBlockerMetrics,
+    symbols: SnapshotSymbolMetrics,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotSummary {
+    closed_trades: i64,
+    total_pnl_usdt: f64,
+    avg_pnl_pct: f64,
+    avg_duration_s: f64,
+    win_rate_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotExitMetrics {
+    thesis_invalidated_pct: f64,
+    thesis_invalidated_avg_pnl_pct: f64,
+    trailing_stop_pct: f64,
+    trailing_stop_avg_pnl_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotSideMetrics {
+    long_trade_share_pct: f64,
+    short_trade_share_pct: f64,
+    long_avg_pnl_pct: f64,
+    short_avg_pnl_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotBlockerMetrics {
+    top_reason: String,
+    top_reason_hits: i64,
+    consensus_blocks: i64,
+    volume_blocks: i64,
+    macd_blocks: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotSymbolMetrics {
+    worst_symbol: String,
+    worst_symbol_pnl_usdt: f64,
+    best_symbol: String,
+    best_symbol_pnl_usdt: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct AnalysisResponse {
+    generated_at: DateTime<Utc>,
+    lookback_hours: i64,
+    summary: MetricSummary,
+    by_close_reason: Vec<BreakdownItem>,
+    by_side: Vec<BreakdownItem>,
+    by_symbol: Vec<BreakdownItem>,
+    top_entry_blockers: Vec<BlockerItem>,
+    tupa_snapshot: AnalystSnapshot,
+    tupa_evaluation: Option<Value>,
+    tupa_error: Option<String>,
+    heuristic_summary: String,
+    llm_summary: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BlockerItem {
+    reason: String,
+    total: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiError {
+    error: &'static str,
+    message: String,
+}
+
+#[derive(thiserror::Error, Debug)]
+enum AnalystError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("http error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("runtime error: {0}")]
+    Runtime(String),
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_ai_analyst=info".into()),
+        )
+        .json()
+        .init();
+
+    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        let host = env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());
+        let port = env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
+        let name = env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
+        let user = env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
+        let password = env::var("DB_PASSWORD").unwrap_or_default();
+        format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, name)
+    });
+
+    let db_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await?;
+
+    let pipeline_path = env::var("AI_ANALYST_TUPA_PIPELINE")
+        .unwrap_or_else(|_| "/app/config/analysts/trade_diagnostics.tp".to_string());
+    let execution_plan = Arc::new(load_execution_plan(&pipeline_path)?);
+    let runtime = Runtime::new();
+    register_analyst_steps(&runtime, execution_plan.as_ref());
+
+    let llm_enabled = env::var("AI_ANALYST_ENABLE_LLM")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    let state = Arc::new(AppState {
+        db_pool,
+        http_client: Client::new(),
+        runtime,
+        execution_plan,
+        llm_enabled,
+        ollama_url: env::var("OLLAMA_URL").ok(),
+        ollama_model: env::var("OLLAMA_MODEL").ok(),
+        default_lookback_hours: env::var("AI_ANALYST_LOOKBACK_HOURS")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(24),
+    });
+
+    let health = warp::path!("health")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(handle_health);
+
+    let analyze_recent = warp::path!("analyze" / "recent")
+        .and(warp::get())
+        .and(warp::query::<AnalysisQuery>())
+        .and(with_state(state.clone()))
+        .and_then(handle_recent_analysis);
+
+    let routes = health
+        .or(analyze_recent)
+        .recover(handle_rejection)
+        .with(warp::cors().allow_any_origin());
+
+    info!("Starting viper-ai-analyst on :8087");
+    warp::serve(routes).run(([0, 0, 0, 0], 8087)).await;
+    Ok(())
+}
+
+fn with_state(
+    state: Arc<AppState>,
+) -> impl Filter<Extract = (Arc<AppState>,), Error = Infallible> + Clone {
+    warp::any().map(move || state.clone())
+}
+
+async fn handle_health(state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+    let db_connected = sqlx::query_scalar::<_, i64>("select 1::bigint")
+        .fetch_one(&state.db_pool)
+        .await
+        .is_ok();
+
+    Ok(warp::reply::json(&HealthResponse {
+        status: "ok",
+        db_connected,
+        llm_enabled: state.llm_enabled,
+    }))
+}
+
+async fn handle_recent_analysis(
+    query: AnalysisQuery,
+    state: Arc<AppState>,
+) -> Result<impl Reply, Rejection> {
+    let hours = query
+        .hours
+        .filter(|value| *value > 0 && *value <= 24 * 14)
+        .unwrap_or(state.default_lookback_hours);
+
+    match build_analysis(hours, &state).await {
+        Ok(response) => Ok(warp::reply::with_status(
+            warp::reply::json(&response),
+            StatusCode::OK,
+        )),
+        Err(err) => {
+            error!("analysis failed: {err}");
+            Ok(warp::reply::with_status(
+                warp::reply::json(&ApiError {
+                    error: "analysis_failed",
+                    message: err.to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {
+    let summary = fetch_summary(hours, &state.db_pool).await?;
+    let by_close_reason = fetch_breakdown(
+        hours,
+        &state.db_pool,
+        "close_reason",
+        "select coalesce(close_reason, 'unknown') as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by close_reason order by trades desc",
+    )
+    .await?;
+    let by_side = fetch_breakdown(
+        hours,
+        &state.db_pool,
+        "side",
+        "select side as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by side order by trades desc",
+    )
+    .await?;
+    let by_symbol = fetch_breakdown(
+        hours,
+        &state.db_pool,
+        "symbol",
+        "select symbol as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by symbol order by pnl_usdt asc limit 10",
+    )
+    .await?;
+    let top_entry_blockers = fetch_top_blockers(hours, &state.db_pool).await?;
+    let tupa_snapshot = build_tupa_snapshot(
+        hours,
+        &summary,
+        &by_close_reason,
+        &by_side,
+        &by_symbol,
+        &top_entry_blockers,
+    );
+    let (tupa_evaluation, tupa_error) = match run_tupa_diagnostics(&tupa_snapshot, state).await {
+        Ok(value) => (Some(value), None),
+        Err(err) => {
+            error!("tupa diagnostics failed: {err}");
+            (None, Some(err.to_string()))
+        }
+    };
+
+    let heuristic_summary =
+        build_heuristic_summary(hours, &summary, &by_close_reason, &by_side, &by_symbol, &top_entry_blockers);
+    let llm_summary = if state.llm_enabled {
+        request_llm_summary(state, &heuristic_summary).await?
+    } else {
+        None
+    };
+
+    Ok(AnalysisResponse {
+        generated_at: Utc::now(),
+        lookback_hours: hours,
+        summary,
+        by_close_reason,
+        by_side,
+        by_symbol,
+        top_entry_blockers,
+        tupa_snapshot,
+        tupa_evaluation,
+        tupa_error,
+        heuristic_summary,
+        llm_summary,
+    })
+}
+
+fn first_pipeline(program: &Program) -> Result<&PipelineDecl, AnalystError> {
+    program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Pipeline(p) => Some(p),
+            _ => None,
+        })
+        .ok_or_else(|| AnalystError::Runtime("no pipeline declaration found".to_string()))
+}
+
+fn load_execution_plan(path: &str) -> Result<ExecutionPlan, AnalystError> {
+    let source = fs::read_to_string(path)?;
+    let program = parse_program(&source).map_err(|err| AnalystError::Runtime(err.to_string()))?;
+
+    if let Err(err) = typecheck_program(&program) {
+        info!("Trade diagnostics typecheck warning (continuing): {}", err);
+    }
+
+    let pipeline = first_pipeline(&program)?;
+    let plan_json =
+        codegen_pipeline("ai_analyst", pipeline, &program).map_err(|err| AnalystError::Runtime(err.to_string()))?;
+    let plan: ExecutionPlan = serde_json::from_str(&plan_json)?;
+    Ok(plan)
+}
+
+fn register_analyst_steps(runtime: &Runtime, plan: &ExecutionPlan) {
+    for step in &plan.steps {
+        let function_ref = step.function_ref.clone();
+        let fallback_name = step.name.clone();
+        let fn_name = function_ref
+            .rsplit("::")
+            .next()
+            .unwrap_or(&fallback_name)
+            .to_string();
+
+        runtime.register_step(&function_ref, move |state| match fn_name.as_str() {
+            "evaluate_exit_pressure" | "step_exit_pressure" => execute_exit_pressure(state),
+            "evaluate_directional_bias" | "step_directional_bias" => {
+                execute_directional_bias(state)
+            }
+            "evaluate_entry_pressure" | "step_entry_pressure" => execute_entry_pressure(state),
+            "evaluate_symbol_risk" | "step_symbol_risk" => execute_symbol_risk(state),
+            other => Err(format!("unknown analyst step {}", other)),
+        });
+    }
+}
+
+async fn run_tupa_diagnostics(
+    snapshot: &AnalystSnapshot,
+    state: &AppState,
+) -> Result<Value, AnalystError> {
+    let input = serde_json::to_value(snapshot)?;
+    state
+        .runtime
+        .run_pipeline_async(state.execution_plan.as_ref(), input)
+        .await
+        .map_err(|err| AnalystError::Runtime(err.to_string()))
+}
+
+fn as_f64(value: &Value, path: &[&str]) -> Result<f64, String> {
+    let mut current = value;
+    for part in path {
+        current = current
+            .get(*part)
+            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
+    }
+    current
+        .as_f64()
+        .ok_or_else(|| format!("expected f64 at {}", path.join(".")))
+}
+
+fn as_i64(value: &Value, path: &[&str]) -> Result<i64, String> {
+    let mut current = value;
+    for part in path {
+        current = current
+            .get(*part)
+            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
+    }
+    current
+        .as_i64()
+        .ok_or_else(|| format!("expected i64 at {}", path.join(".")))
+}
+
+fn as_str_value(value: &Value, path: &[&str]) -> Result<String, String> {
+    let mut current = value;
+    for part in path {
+        current = current
+            .get(*part)
+            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
+    }
+    current
+        .as_str()
+        .map(|value| value.to_string())
+        .ok_or_else(|| format!("expected string at {}", path.join(".")))
+}
+
+fn execute_exit_pressure(state: Value) -> Result<Value, String> {
+    let thesis_invalidated_pct = as_f64(&state, &["exits", "thesis_invalidated_pct"])?;
+    let trailing_stop_pct = as_f64(&state, &["exits", "trailing_stop_pct"])?;
+
+    let (severity, reason) = if thesis_invalidated_pct >= 80.0 && trailing_stop_pct <= 12.0 {
+        ("fail", "exit_pressure_high")
+    } else if thesis_invalidated_pct >= 65.0 {
+        ("warn", "exit_pressure_elevated")
+    } else {
+        ("pass", "exit_pressure_stable")
+    };
+
+    Ok(json!({
+        "severity": severity,
+        "reason": reason,
+        "thesis_invalidated_pct": thesis_invalidated_pct,
+        "trailing_stop_pct": trailing_stop_pct
+    }))
+}
+
+fn execute_directional_bias(state: Value) -> Result<Value, String> {
+    let long_avg_pnl_pct = as_f64(&state, &["sides", "long_avg_pnl_pct"])?;
+    let short_avg_pnl_pct = as_f64(&state, &["sides", "short_avg_pnl_pct"])?;
+
+    let (score, reason) = if long_avg_pnl_pct >= short_avg_pnl_pct {
+        (1.0, "directional_bias_long")
+    } else {
+        (0.0, "directional_bias_short")
+    };
+
+    Ok(json!({
+        "score": score,
+        "weight": 100.0,
+        "reason": reason
+    }))
+}
+
+fn execute_entry_pressure(state: Value) -> Result<Value, String> {
+    let consensus_blocks = as_i64(&state, &["blockers", "consensus_blocks"])?;
+    let volume_blocks = as_i64(&state, &["blockers", "volume_blocks"])?;
+    let macd_blocks = as_i64(&state, &["blockers", "macd_blocks"])?;
+
+    let (reason, dominant_gate) = if consensus_blocks >= volume_blocks && consensus_blocks >= macd_blocks {
+        ("entry_pressure_consensus", "consensus")
+    } else if volume_blocks >= macd_blocks {
+        ("entry_pressure_volume", "volume")
+    } else {
+        ("entry_pressure_macd", "macd")
+    };
+
+    Ok(json!({
+        "severity": "warn",
+        "reason": reason,
+        "dominant_gate": dominant_gate
+    }))
+}
+
+fn execute_symbol_risk(state: Value) -> Result<Value, String> {
+    let worst_symbol = as_str_value(&state, &["symbols", "worst_symbol"])?;
+    let worst_symbol_pnl_usdt = as_f64(&state, &["symbols", "worst_symbol_pnl_usdt"])?;
+
+    let (severity, reason) = if worst_symbol_pnl_usdt <= -0.30 {
+        ("fail", "symbol_risk_high")
+    } else if worst_symbol_pnl_usdt < 0.0 {
+        ("warn", "symbol_risk_elevated")
+    } else {
+        ("pass", "symbol_risk_stable")
+    };
+
+    Ok(json!({
+        "severity": severity,
+        "reason": reason,
+        "symbol": worst_symbol
+    }))
+}
+
+async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, AnalystError> {
+    let row = sqlx::query_as::<_, (i64, f64, f64, f64, f64)>(
+        r#"
+        select
+          count(*)::bigint as closed_trades,
+          coalesce(sum(pnl), 0)::float8 as total_pnl_usdt,
+          coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct,
+          coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s,
+          coalesce(100.0 * count(*) filter (where pnl > 0) / nullif(count(*), 0), 0)::float8 as win_rate_pct
+        from trades
+        where status = 'closed'
+          and opened_at >= now() - ($1 * interval '1 hour')
+        "#,
+    )
+    .bind(hours)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(MetricSummary {
+        closed_trades: row.0,
+        total_pnl_usdt: row.1,
+        avg_pnl_pct: row.2,
+        avg_duration_s: row.3,
+        win_rate_pct: row.4,
+    })
+}
+
+async fn fetch_breakdown(
+    hours: i64,
+    pool: &PgPool,
+    _dimension: &str,
+    sql: &str,
+) -> Result<Vec<BreakdownItem>, AnalystError> {
+    let rows = sqlx::query_as::<_, (String, i64, f64, f64, f64)>(sql)
+        .bind(hours)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(name, trades, pnl_usdt, avg_pnl_pct, avg_duration_s)| BreakdownItem {
+            name,
+            trades,
+            pnl_usdt,
+            avg_pnl_pct,
+            avg_duration_s,
+        })
+        .collect())
+}
+
+async fn fetch_top_blockers(hours: i64, pool: &PgPool) -> Result<Vec<BlockerItem>, AnalystError> {
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        r#"
+        select
+          constraints_results->'validate_entry'->>'reason' as reason,
+          count(*)::bigint as total
+        from tupa_audit_logs
+        where created_at >= now() - ($1 * interval '1 hour')
+          and (constraints_results->'validate_entry'->>'passed')::boolean = false
+        group by reason
+        order by total desc
+        limit 8
+        "#,
+    )
+    .bind(hours)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(reason, total)| BlockerItem { reason, total })
+        .collect())
+}
+
+fn build_heuristic_summary(
+    hours: i64,
+    summary: &MetricSummary,
+    by_close_reason: &[BreakdownItem],
+    by_side: &[BreakdownItem],
+    by_symbol: &[BreakdownItem],
+    blockers: &[BlockerItem],
+) -> String {
+    let worst_symbol = by_symbol.first();
+    let best_symbol = by_symbol
+        .iter()
+        .max_by(|a, b| a.pnl_usdt.partial_cmp(&b.pnl_usdt).unwrap_or(std::cmp::Ordering::Equal));
+    let dominant_close = by_close_reason.first();
+    let long_side = by_side.iter().find(|item| item.name.eq_ignore_ascii_case("long"));
+    let short_side = by_side.iter().find(|item| item.name.eq_ignore_ascii_case("short"));
+    let top_blocker = blockers.first();
+
+    format!(
+        "Lookback {}h: {} closed trades, total pnl {:+.4} USDT, avg pnl {:+.4}%, win rate {:.2}%. Dominant exit: {} ({} trades, {:+.4}% avg). Long side: {:+.4}% avg over {} trades. Short side: {:+.4}% avg over {} trades. Worst symbol: {} ({:+.4} USDT). Best symbol: {} ({:+.4} USDT). Top entry blocker: {} ({} hits).",
+        hours,
+        summary.closed_trades,
+        summary.total_pnl_usdt,
+        summary.avg_pnl_pct,
+        summary.win_rate_pct,
+        dominant_close
+            .map(|item| item.name.as_str())
+            .unwrap_or("n/a"),
+        dominant_close.map(|item| item.trades).unwrap_or(0),
+        dominant_close.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+        long_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+        long_side.map(|item| item.trades).unwrap_or(0),
+        short_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+        short_side.map(|item| item.trades).unwrap_or(0),
+        worst_symbol.map(|item| item.name.as_str()).unwrap_or("n/a"),
+        worst_symbol.map(|item| item.pnl_usdt).unwrap_or(0.0),
+        best_symbol.map(|item| item.name.as_str()).unwrap_or("n/a"),
+        best_symbol.map(|item| item.pnl_usdt).unwrap_or(0.0),
+        top_blocker
+            .map(|item| item.reason.as_str())
+            .unwrap_or("n/a"),
+        top_blocker.map(|item| item.total).unwrap_or(0),
+    )
+}
+
+fn build_tupa_snapshot(
+    hours: i64,
+    summary: &MetricSummary,
+    by_close_reason: &[BreakdownItem],
+    by_side: &[BreakdownItem],
+    by_symbol: &[BreakdownItem],
+    blockers: &[BlockerItem],
+) -> AnalystSnapshot {
+    let total_trades = summary.closed_trades.max(1) as f64;
+    let thesis_invalidated = by_close_reason
+        .iter()
+        .find(|item| item.name == "thesis_invalidated");
+    let trailing_stop = by_close_reason
+        .iter()
+        .find(|item| item.name == "trailing_stop");
+    let long_side = by_side
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case("long"));
+    let short_side = by_side
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case("short"));
+    let worst_symbol = by_symbol.first();
+    let best_symbol = by_symbol
+        .iter()
+        .max_by(|a, b| a.pnl_usdt.partial_cmp(&b.pnl_usdt).unwrap_or(std::cmp::Ordering::Equal));
+
+    let consensus_blocks = blockers
+        .iter()
+        .filter(|item| item.reason.contains("consensus"))
+        .map(|item| item.total)
+        .sum();
+    let volume_blocks = blockers
+        .iter()
+        .filter(|item| item.reason.contains("volume"))
+        .map(|item| item.total)
+        .sum();
+    let macd_blocks = blockers
+        .iter()
+        .filter(|item| item.reason.contains("macd"))
+        .map(|item| item.total)
+        .sum();
+
+    AnalystSnapshot {
+        lookback_hours: hours,
+        summary: SnapshotSummary {
+            closed_trades: summary.closed_trades,
+            total_pnl_usdt: summary.total_pnl_usdt,
+            avg_pnl_pct: summary.avg_pnl_pct,
+            avg_duration_s: summary.avg_duration_s,
+            win_rate_pct: summary.win_rate_pct,
+        },
+        exits: SnapshotExitMetrics {
+            thesis_invalidated_pct: thesis_invalidated
+                .map(|item| 100.0 * item.trades as f64 / total_trades)
+                .unwrap_or(0.0),
+            thesis_invalidated_avg_pnl_pct: thesis_invalidated
+                .map(|item| item.avg_pnl_pct)
+                .unwrap_or(0.0),
+            trailing_stop_pct: trailing_stop
+                .map(|item| 100.0 * item.trades as f64 / total_trades)
+                .unwrap_or(0.0),
+            trailing_stop_avg_pnl_pct: trailing_stop
+                .map(|item| item.avg_pnl_pct)
+                .unwrap_or(0.0),
+        },
+        sides: SnapshotSideMetrics {
+            long_trade_share_pct: long_side
+                .map(|item| 100.0 * item.trades as f64 / total_trades)
+                .unwrap_or(0.0),
+            short_trade_share_pct: short_side
+                .map(|item| 100.0 * item.trades as f64 / total_trades)
+                .unwrap_or(0.0),
+            long_avg_pnl_pct: long_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+            short_avg_pnl_pct: short_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+        },
+        blockers: SnapshotBlockerMetrics {
+            top_reason: blockers
+                .first()
+                .map(|item| item.reason.clone())
+                .unwrap_or_else(|| "n/a".to_string()),
+            top_reason_hits: blockers.first().map(|item| item.total).unwrap_or(0),
+            consensus_blocks,
+            volume_blocks,
+            macd_blocks,
+        },
+        symbols: SnapshotSymbolMetrics {
+            worst_symbol: worst_symbol
+                .map(|item| item.name.clone())
+                .unwrap_or_else(|| "n/a".to_string()),
+            worst_symbol_pnl_usdt: worst_symbol.map(|item| item.pnl_usdt).unwrap_or(0.0),
+            best_symbol: best_symbol
+                .map(|item| item.name.clone())
+                .unwrap_or_else(|| "n/a".to_string()),
+            best_symbol_pnl_usdt: best_symbol.map(|item| item.pnl_usdt).unwrap_or(0.0),
+        },
+    }
+}
+
+async fn request_llm_summary(
+    state: &AppState,
+    heuristic_summary: &str,
+) -> Result<Option<String>, AnalystError> {
+    let Some(base_url) = &state.ollama_url else {
+        return Ok(None);
+    };
+    let Some(model) = &state.ollama_model else {
+        return Ok(None);
+    };
+
+    let prompt = format!(
+        "You are an AI analyst for a crypto trading bot. Summarize the latest diagnostics in a short operational note, highlighting risk, stability, and next steps. Data: {}",
+        heuristic_summary
+    );
+
+    let response = state
+        .http_client
+        .post(format!("{}/api/generate", base_url.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": false
+        }))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+
+    let body: serde_json::Value = response.json().await?;
+    Ok(body
+        .get("response")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string()))
+}
+
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
+    if err.is_not_found() {
+        let reply = warp::reply::with_status(
+            warp::reply::json(&ApiError {
+                error: "not_found",
+                message: "route not found".to_string(),
+            }),
+            StatusCode::NOT_FOUND,
+        );
+        return Ok(reply);
+    }
+
+    let reply = warp::reply::with_status(
+        warp::reply::json(&ApiError {
+            error: "internal_error",
+            message: "request failed".to_string(),
+        }),
+        StatusCode::INTERNAL_SERVER_ERROR,
+    );
+    Ok(reply)
+}
