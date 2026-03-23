@@ -1,0 +1,280 @@
+fn evaluate_exit_pressure(
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  }
+): {
+  severity: string,
+  reason: string,
+  thesis_invalidated_pct: f64,
+  trailing_stop_pct: f64
+} {
+  if input.exits.thesis_invalidated_pct >= 80.0 && input.exits.trailing_stop_pct <= 12.0 {
+    return {
+      severity: "fail",
+      reason: "exit_pressure_high",
+      thesis_invalidated_pct: input.exits.thesis_invalidated_pct,
+      trailing_stop_pct: input.exits.trailing_stop_pct
+    };
+  }
+  if input.exits.thesis_invalidated_pct >= 65.0 {
+    return {
+      severity: "warn",
+      reason: "exit_pressure_elevated",
+      thesis_invalidated_pct: input.exits.thesis_invalidated_pct,
+      trailing_stop_pct: input.exits.trailing_stop_pct
+    };
+  }
+  return {
+    severity: "pass",
+    reason: "exit_pressure_stable",
+    thesis_invalidated_pct: input.exits.thesis_invalidated_pct,
+    trailing_stop_pct: input.exits.trailing_stop_pct
+  };
+}
+
+fn evaluate_directional_bias(
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  }
+): {
+  score: f64,
+  weight: f64,
+  reason: string
+} {
+  if input.sides.long_avg_pnl_pct >= input.sides.short_avg_pnl_pct {
+    return weighted(1.0, 100.0, "directional_bias_long");
+  }
+  return weighted(0.0, 100.0, "directional_bias_short");
+}
+
+fn evaluate_entry_pressure(
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  }
+): {
+  severity: string,
+  reason: string,
+  dominant_gate: string
+} {
+  if input.blockers.consensus_blocks >= input.blockers.volume_blocks && input.blockers.consensus_blocks >= input.blockers.macd_blocks {
+    return {
+      severity: "warn",
+      reason: "entry_pressure_consensus",
+      dominant_gate: "consensus"
+    };
+  }
+  if input.blockers.volume_blocks >= input.blockers.macd_blocks {
+    return {
+      severity: "warn",
+      reason: "entry_pressure_volume",
+      dominant_gate: "volume"
+    };
+  }
+  return {
+    severity: "warn",
+    reason: "entry_pressure_macd",
+    dominant_gate: "macd"
+  };
+}
+
+fn evaluate_symbol_risk(
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  }
+): {
+  severity: string,
+  reason: string,
+  symbol: string
+} {
+  if input.symbols.worst_symbol_pnl_usdt <= -0.30 {
+    return {
+      severity: "fail",
+      reason: "symbol_risk_high",
+      symbol: input.symbols.worst_symbol
+    };
+  }
+  if input.symbols.worst_symbol_pnl_usdt < 0.0 {
+    return {
+      severity: "warn",
+      reason: "symbol_risk_elevated",
+      symbol: input.symbols.worst_symbol
+    };
+  }
+  return {
+    severity: "pass",
+    reason: "symbol_risk_stable",
+    symbol: input.symbols.worst_symbol
+  };
+}
+
+pipeline TradeDiagnostics @deterministic(seed=42) {
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  },
+  steps: [
+    step("exit_pressure") { evaluate_exit_pressure(input) },
+    step("directional_bias") { evaluate_directional_bias(input) },
+    step("entry_pressure") { evaluate_entry_pressure(input) },
+    step("symbol_risk") { evaluate_symbol_risk(input) }
+  ],
+}

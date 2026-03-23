@@ -1,0 +1,35 @@
+{
+  "lookback_hours": 24,
+  "summary": {
+    "closed_trades": 120,
+    "total_pnl_usdt": 2.4323,
+    "avg_pnl_pct": 0.1716,
+    "avg_duration_s": 753.9,
+    "win_rate_pct": 44.17
+  },
+  "exits": {
+    "thesis_invalidated_pct": 87.5,
+    "thesis_invalidated_avg_pnl_pct": -0.1219,
+    "trailing_stop_pct": 10.83,
+    "trailing_stop_avg_pnl_pct": 3.0054
+  },
+  "sides": {
+    "long_trade_share_pct": 47.5,
+    "short_trade_share_pct": 52.5,
+    "long_avg_pnl_pct": 0.2952,
+    "short_avg_pnl_pct": 0.0553
+  },
+  "blockers": {
+    "top_reason": "long_block_consensus_regime_neutral",
+    "top_reason_hits": 1392,
+    "consensus_blocks": 2516,
+    "volume_blocks": 1476,
+    "macd_blocks": 1004
+  },
+  "symbols": {
+    "worst_symbol": "NEARUSDT",
+    "worst_symbol_pnl_usdt": -0.3864,
+    "best_symbol": "XRPUSDT",
+    "best_symbol_pnl_usdt": 1.1962
+  }
+}

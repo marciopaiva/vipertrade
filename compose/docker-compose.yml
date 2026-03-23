@@ -466,6 +466,49 @@ services:
           memory: 256M
           cpus: '0.5'
 
+  ai-analyst:
+    build:
+      context: ..
+      dockerfile: services/ai-analyst/Dockerfile
+      args:
+        RUST_VERSION: "1.83"
+        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
+        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
+    container_name: vipertrade-ai-analyst
+    ports:
+      - "8087:8087"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-vipertrade}
+      DB_USER: ${POSTGRES_USER:-viper}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      AI_ANALYST_LOOKBACK_HOURS: ${AI_ANALYST_LOOKBACK_HOURS:-24}
+      AI_ANALYST_ENABLE_LLM: ${AI_ANALYST_ENABLE_LLM:-false}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RUST_LOG: "viper_ai_analyst=info"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 45s
+    networks:
+      - viper-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
 # ═══════════════════════════════════════════════════════════
 # VOLUMES
 # ═══════════════════════════════════════════════════════════
