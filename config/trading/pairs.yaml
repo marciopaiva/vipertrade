@@ -633,10 +633,10 @@ NEARUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.34
+    min_trend_score_long: 0.36
     min_trend_score_short: 0.37
     min_trend_score: 0.30
-    min_signal_confirmation_ticks_long: 5
+    min_signal_confirmation_ticks_long: 6
     min_signal_confirmation_ticks_short: 6
     min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
@@ -699,11 +699,11 @@ LTCUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.24
-    min_trend_score_short: 0.31
+    min_trend_score_long: 0.27
+    min_trend_score_short: 0.33
     min_trend_score: 0.24
-    min_signal_confirmation_ticks_long: 3
-    min_signal_confirmation_ticks_short: 5
+    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_short: 6
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0042
