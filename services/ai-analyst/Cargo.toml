@@ -1,0 +1,21 @@
+[package]
+name = "viper-ai-analyst"
+version = "0.8.1"
+edition = "2021"
+description = "ViperTrade AI-assisted trade analytics service"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tupa-parser = { workspace = true }
+tupa-codegen = { workspace = true }
+tupa-runtime = { workspace = true }
+tupa-typecheck = { workspace = true }
+warp = "0.3"

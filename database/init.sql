@@ -122,5 +122,6 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO viper_app;
 ANALYZE trades;
 ANALYZE position_snapshots;
 ANALYZE system_events;
+ANALYZE strategy_decision_audit;
 ANALYZE daily_metrics;
 ANALYZE tupa_audit_logs;

@@ -14,7 +14,7 @@ global:
       require_multi_exchange_consensus: true
       require_btc_macro_alignment: true
       prefer_bybit_for_decisions: false
-      min_volume_24h_usdt: 18000000
+      min_volume_24h_usdt: 16000000
       max_spread_pct: 0.0008
       max_atr_pct: 0.035
       max_funding_rate_pct: 0.01
@@ -50,6 +50,8 @@ global:
       rsi_short_max: 48
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
+      entry_filters:
+        thesis_invalidation_confirmation_ticks: 2
     TESTNET:
       name: "testnet_smoke"
       permissive_entry: true

@@ -933,12 +933,70 @@ async fn claim_processed_event(
             return Ok(false);
         }
 
+        upsert_decision_audit(pool, source_event_id, event, "claimed", None, None).await?;
         remember_processed(state, source_event_id).await;
         return Ok(true);
     }
 
     let mut seen = state.processed_in_memory.lock().await;
     Ok(seen.insert(source_event_id.to_string()))
+}
+
+async fn upsert_decision_audit(
+    pool: &PgPool,
+    source_event_id: &str,
+    event: &StrategyDecisionEvent,
+    status: &str,
+    bybit_order_id: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let payload = serde_json::to_value(event).unwrap_or_else(|_| json!({}));
+
+    sqlx::query(
+        "INSERT INTO strategy_decision_audit (
+            source_event_id,
+            decision_event_id,
+            schema_version,
+            symbol,
+            action,
+            reason,
+            smart_copy_compatible,
+            decision_hash,
+            executor_status,
+            bybit_order_id,
+            error,
+            payload
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        ON CONFLICT (decision_event_id) DO UPDATE SET
+            source_event_id = EXCLUDED.source_event_id,
+            schema_version = EXCLUDED.schema_version,
+            symbol = EXCLUDED.symbol,
+            action = EXCLUDED.action,
+            reason = EXCLUDED.reason,
+            smart_copy_compatible = EXCLUDED.smart_copy_compatible,
+            decision_hash = EXCLUDED.decision_hash,
+            executor_status = EXCLUDED.executor_status,
+            bybit_order_id = EXCLUDED.bybit_order_id,
+            error = EXCLUDED.error,
+            payload = EXCLUDED.payload,
+            updated_at = NOW()",
+    )
+    .bind(source_event_id)
+    .bind(&event.event_id)
+    .bind(&event.schema_version)
+    .bind(&event.decision.symbol)
+    .bind(&event.decision.action)
+    .bind(&event.decision.reason)
+    .bind(event.decision.smart_copy_compatible)
+    .bind(decision_hash(event))
+    .bind(status)
+    .bind(bybit_order_id)
+    .bind(error)
+    .bind(payload)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 async fn mark_processed(
@@ -984,6 +1042,8 @@ async fn mark_processed(
         .bind(decision_hash(event))
         .execute(pool)
         .await?;
+
+        upsert_decision_audit(pool, source_event_id, event, status, bybit_order_id, error).await?;
     }
 
     remember_processed(state, source_event_id).await;
