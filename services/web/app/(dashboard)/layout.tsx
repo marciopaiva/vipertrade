@@ -12,6 +12,7 @@ export default function DashboardLayout({
             <h1 className="text-xl font-bold text-viper-cyan">ViperTrade</h1>
             <nav className="flex items-center gap-4">
               <a href="/" className="text-sm text-slate-400 hover:text-viper-cyan">Dashboard</a>
+              <a href="/analysis" className="text-sm text-slate-400 hover:text-viper-cyan">Analysis</a>
               <a href="/trades" className="text-sm text-slate-400 hover:text-viper-cyan">Trades</a>
               <a href="/positions" className="text-sm text-slate-400 hover:text-viper-cyan">Positions</a>
               <a href="/settings" className="text-sm text-slate-400 hover:text-viper-cyan">Settings</a>

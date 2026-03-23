@@ -51,6 +51,43 @@ interface FlowContext {
   executorContext?: string;
 }
 
+interface AnalystEvaluationSignal {
+  reason?: string;
+  severity?: 'pass' | 'warn' | 'fail';
+  dominant_gate?: string;
+  symbol?: string;
+  thesis_invalidated_pct?: number;
+  trailing_stop_pct?: number;
+}
+
+interface AiAnalystData {
+  generated_at?: string;
+  lookback_hours?: number;
+  heuristic_summary?: string;
+  llm_summary?: string | null;
+  tupa_error?: string | null;
+  summary?: {
+    closed_trades?: number;
+    total_pnl_usdt?: number;
+    avg_pnl_pct?: number;
+    avg_duration_s?: number;
+    win_rate_pct?: number;
+  };
+  tupa_evaluation?: {
+    exit_pressure?: AnalystEvaluationSignal;
+    directional_bias?: AnalystEvaluationSignal;
+    entry_pressure?: AnalystEvaluationSignal;
+    symbol_risk?: AnalystEvaluationSignal;
+    summary?: {
+      closed_trades?: number;
+      total_pnl_usdt?: number;
+      avg_pnl_pct?: number;
+      avg_duration_s?: number;
+      win_rate_pct?: number;
+    };
+  };
+}
+
 interface DashboardData {
   status: {
     trading_mode: string;
@@ -117,6 +154,7 @@ interface DashboardData {
   services: Array<{ name: string; ok: boolean; latency_ms: number }>;
   events?: { items?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string; data?: any }> };
   market_signals?: { items?: any[] | Record<string, any> };
+  ai_analyst?: AiAnalystData;
   partial?: boolean;
   warnings?: string[];
 }
@@ -143,6 +181,25 @@ function titleCase(value: string | null | undefined) {
     .replaceAll('_', ' ')
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toneClasses(severity?: string) {
+  if (severity === 'fail') {
+    return {
+      badge: 'border-red-500/35 bg-red-500/10 text-red-300',
+      text: 'text-red-300',
+    };
+  }
+  if (severity === 'warn') {
+    return {
+      badge: 'border-amber-500/35 bg-amber-500/10 text-amber-300',
+      text: 'text-amber-300',
+    };
+  }
+  return {
+    badge: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300',
+    text: 'text-emerald-300',
+  };
 }
 
 // Components
@@ -173,6 +230,107 @@ function MetricCard({ label, value, accent = '#11c4ff', helper }: { label: strin
           {value}
         </div>
         {helper && <div className="text-xs text-muted-foreground mt-1">{helper}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
+  const exitPressure = analyst?.tupa_evaluation?.exit_pressure;
+  const entryPressure = analyst?.tupa_evaluation?.entry_pressure;
+  const directionalBias = analyst?.tupa_evaluation?.directional_bias;
+  const symbolRisk = analyst?.tupa_evaluation?.symbol_risk;
+  const summary = analyst?.tupa_evaluation?.summary || analyst?.summary;
+  const exitTone = toneClasses(exitPressure?.severity);
+  const entryTone = toneClasses(entryPressure?.severity);
+  const symbolTone = toneClasses(symbolRisk?.severity);
+
+  return (
+    <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+      <CardHeader className="pb-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base text-slate-200">AI Analyst</CardTitle>
+          <div className="flex items-center gap-2">
+            {analyst?.lookback_hours ? (
+              <Badge className="border-slate-600/70 bg-slate-900/60 text-[10px] tracking-[0.16em] text-slate-300">
+                {analyst.lookback_hours}H WINDOW
+              </Badge>
+            ) : null}
+            {analyst?.generated_at ? (
+              <div className="text-[11px] text-slate-500">
+                {new Date(analyst.generated_at).toLocaleTimeString()}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Directional Bias</div>
+            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', toneClasses('pass').text)}>
+              {titleCase(directionalBias?.reason?.replace('directional_bias_', '') || 'neutral')}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {summary?.closed_trades ?? 0} trades · {usd(summary?.total_pnl_usdt)}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Exit Pressure</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', exitTone.badge)}>
+                {exitPressure?.severity || 'pass'}
+              </Badge>
+            </div>
+            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', exitTone.text)}>
+              {num(exitPressure?.thesis_invalidated_pct)}%
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              thesis invalidated · trailing {num(exitPressure?.trailing_stop_pct)}%
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Entry Pressure</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', entryTone.badge)}>
+                {entryPressure?.severity || 'warn'}
+              </Badge>
+            </div>
+            <div className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-100">
+              {titleCase(entryPressure?.dominant_gate || 'unknown')}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {titleCase((entryPressure?.reason || '').replace('entry_pressure_', '')) || 'No dominant gate'}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbol Risk</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', symbolTone.badge)}>
+                {symbolRisk?.severity || 'pass'}
+              </Badge>
+            </div>
+            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', symbolTone.text)}>
+              {symbolRisk?.symbol || 'Stable'}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {titleCase((symbolRisk?.reason || '').replace('symbol_risk_', '')) || 'No elevated symbol risk'}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 px-4 py-3">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Analyst Summary</div>
+          <div className="mt-2 text-sm leading-6 text-slate-300">
+            {analyst?.llm_summary || analyst?.heuristic_summary || 'AI analyst summary unavailable.'}
+          </div>
+          {analyst?.tupa_error ? (
+            <div className="mt-3 text-xs text-red-300">Tupa evaluation fallback: {analyst.tupa_error}</div>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );
@@ -525,6 +683,7 @@ export default function DashboardPage() {
       services: dashboardData.services || [],
       events: dashboardData.events || { items: [] },
       market_signals: dashboardData.market_signals || { items: {} },
+      ai_analyst: dashboardData.ai_analyst,
       partial: Boolean(dashboardData.partial),
       warnings: Array.isArray(dashboardData.warnings) ? dashboardData.warnings : [],
     };
@@ -708,6 +867,9 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <ViperTradeLogo size="md" />
             <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <a href="/analysis">Analysis</a>
+              </Button>
               <Button variant="outline" size="sm" onClick={refreshAll}>
                 Refresh
               </Button>
@@ -735,6 +897,8 @@ export default function DashboardPage() {
             />
           </CardContent>
         </Card>
+
+        <AiAnalystCard analyst={data?.ai_analyst} />
 
         {/* Wallet Card - Unified */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
