@@ -3196,6 +3196,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "viper-ai-analyst"
+version = "0.8.1"
+dependencies = [
+ "chrono",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tupa-codegen",
+ "tupa-parser",
+ "tupa-runtime",
+ "tupa-typecheck",
+ "warp",
+]
+
+[[package]]
 name = "viper-analytics"
 version = "0.8.1"
 dependencies = [
@@ -3320,11 +3340,13 @@ version = "0.8.1"
 dependencies = [
  "chrono",
  "futures-util",
+ "hex",
  "redis 0.27.6",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "sqlx",
  "tokio",
  "tracing",

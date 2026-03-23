@@ -285,6 +285,15 @@ async function fetchAnalyticsScores(baseUrl: string): Promise<FetchJsonResult> {
   return fetchJson(`${protocol}//${host}:8086`, "/scores");
 }
 
+async function fetchAiAnalyst(baseUrl: string): Promise<FetchJsonResult> {
+  const parsed = new URL(baseUrl);
+  const host = parsed.hostname;
+  const protocol = parsed.protocol;
+  const hours = Number(process.env.AI_ANALYST_LOOKBACK_HOURS || "24");
+  const safeHours = Number.isFinite(hours) && hours > 0 ? Math.min(hours, 24 * 14) : 24;
+  return fetchJson(`${protocol}//${host}:8087`, `/analyze/recent?hours=${safeHours}`);
+}
+
 export async function GET() {
   const baseUrls = uniqueBaseUrls(DEFAULT_BASE_URLS);
   const errors: BackendError[] = [];
@@ -300,7 +309,7 @@ export async function GET() {
       baseUrl,
       (status.data as { trading_mode?: string } | undefined)?.trading_mode,
     );
-    const [performance, positions, trades, dailyTradesSummary, events, marketSignals, analyticsScores, riskKpis, controlState, wallet, services] = await Promise.all([
+    const [performance, positions, trades, dailyTradesSummary, events, marketSignals, analyticsScores, aiAnalyst, riskKpis, controlState, wallet, services] = await Promise.all([
       fetchJson(baseUrl, "/performance"),
       fetchJson(baseUrl, "/positions"),
       fetchJson(baseUrl, "/trades?limit=100"),
@@ -308,6 +317,7 @@ export async function GET() {
       fetchJson(baseUrl, "/events?limit=40"),
       fetchMarketSignals(baseUrl),
       fetchAnalyticsScores(baseUrl),
+      fetchAiAnalyst(baseUrl),
       fetchJson(baseUrl, "/risk/kpis"),
       fetchJson(baseUrl, "/control/state"),
       fetchJson(baseUrl, "/external/bybit-wallet"),
@@ -322,6 +332,7 @@ export async function GET() {
     if (!events.ok) partialErrors.push(`events failed: ${events.error}`);
     if (!marketSignals.ok) partialErrors.push(`market_signals failed: ${marketSignals.error}`);
     if (!analyticsScores.ok) partialErrors.push(`analytics_scores failed: ${analyticsScores.error}`);
+    if (!aiAnalyst.ok) partialErrors.push(`ai_analyst failed: ${aiAnalyst.error}`);
     if (!riskKpis.ok) partialErrors.push(`risk_kpis failed: ${riskKpis.error}`);
     if (!controlState.ok) partialErrors.push(`control_state failed: ${controlState.error}`);
     if (!wallet.ok) partialErrors.push(`wallet failed: ${wallet.error}`);
@@ -344,6 +355,24 @@ export async function GET() {
         events: events.ok ? events.data : { items: [] },
         market_signals: marketSignals.ok ? marketSignals.data : { updated_at: undefined, items: {} },
         analytics_scores: analyticsScores.ok ? analyticsScores.data : { updated_at: undefined, exchanges: [], by_symbol: [] } as unknown as AnalyticsScores,
+        ai_analyst: aiAnalyst.ok
+          ? aiAnalyst.data
+          : {
+              generated_at: undefined,
+              lookback_hours: Number(process.env.AI_ANALYST_LOOKBACK_HOURS || "24"),
+              summary: {
+                closed_trades: 0,
+                total_pnl_usdt: 0,
+                avg_pnl_pct: 0,
+                avg_duration_s: 0,
+                win_rate_pct: 0,
+              },
+              tupa_snapshot: undefined,
+              tupa_evaluation: undefined,
+              tupa_error: aiAnalyst.error || "unavailable",
+              heuristic_summary: "AI analyst unavailable.",
+              llm_summary: null,
+            },
         risk_kpis: riskKpis.ok
           ? riskKpis.data
           : {

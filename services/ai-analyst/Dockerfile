@@ -1,0 +1,28 @@
+# Base Rust Image
+ARG RUST_VERSION=1.83
+ARG RUST_BUILDER_IMAGE=rust:${RUST_VERSION}-slim-bookworm
+ARG RUST_RUNTIME_IMAGE=debian:bookworm-slim
+FROM ${RUST_BUILDER_IMAGE} AS builder
+
+WORKDIR /usr/src/app
+
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY . .
+
+RUN cargo build --release --package viper-ai-analyst
+
+FROM ${RUST_RUNTIME_IMAGE}
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y ca-certificates libssl3 libpython3.11 curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/src/app/target/release/viper-ai-analyst /usr/local/bin/viper-ai-analyst
+COPY --from=builder /usr/src/app/config/analysts /app/config/analysts
+
+RUN useradd -m -u 1000 -U viper
+USER viper
+
+CMD ["viper-ai-analyst"]
