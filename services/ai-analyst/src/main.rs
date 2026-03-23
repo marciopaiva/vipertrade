@@ -168,7 +168,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let name = env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
         let user = env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
         let password = env::var("DB_PASSWORD").unwrap_or_default();
-        format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, name)
+        format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            user, password, host, port, name
+        )
     });
 
     let db_pool = PgPoolOptions::new()
@@ -308,8 +311,14 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         }
     };
 
-    let heuristic_summary =
-        build_heuristic_summary(hours, &summary, &by_close_reason, &by_side, &by_symbol, &top_entry_blockers);
+    let heuristic_summary = build_heuristic_summary(
+        hours,
+        &summary,
+        &by_close_reason,
+        &by_side,
+        &by_symbol,
+        &top_entry_blockers,
+    );
     let llm_summary = if state.llm_enabled {
         request_llm_summary(state, &heuristic_summary).await?
     } else {
@@ -352,8 +361,8 @@ fn load_execution_plan(path: &str) -> Result<ExecutionPlan, AnalystError> {
     }
 
     let pipeline = first_pipeline(&program)?;
-    let plan_json =
-        codegen_pipeline("ai_analyst", pipeline, &program).map_err(|err| AnalystError::Runtime(err.to_string()))?;
+    let plan_json = codegen_pipeline("ai_analyst", pipeline, &program)
+        .map_err(|err| AnalystError::Runtime(err.to_string()))?;
     let plan: ExecutionPlan = serde_json::from_str(&plan_json)?;
     Ok(plan)
 }
@@ -471,13 +480,14 @@ fn execute_entry_pressure(state: Value) -> Result<Value, String> {
     let volume_blocks = as_i64(&state, &["blockers", "volume_blocks"])?;
     let macd_blocks = as_i64(&state, &["blockers", "macd_blocks"])?;
 
-    let (reason, dominant_gate) = if consensus_blocks >= volume_blocks && consensus_blocks >= macd_blocks {
-        ("entry_pressure_consensus", "consensus")
-    } else if volume_blocks >= macd_blocks {
-        ("entry_pressure_volume", "volume")
-    } else {
-        ("entry_pressure_macd", "macd")
-    };
+    let (reason, dominant_gate) =
+        if consensus_blocks >= volume_blocks && consensus_blocks >= macd_blocks {
+            ("entry_pressure_consensus", "consensus")
+        } else if volume_blocks >= macd_blocks {
+            ("entry_pressure_volume", "volume")
+        } else {
+            ("entry_pressure_macd", "macd")
+        };
 
     Ok(json!({
         "severity": "warn",
@@ -545,13 +555,15 @@ async fn fetch_breakdown(
 
     Ok(rows
         .into_iter()
-        .map(|(name, trades, pnl_usdt, avg_pnl_pct, avg_duration_s)| BreakdownItem {
-            name,
-            trades,
-            pnl_usdt,
-            avg_pnl_pct,
-            avg_duration_s,
-        })
+        .map(
+            |(name, trades, pnl_usdt, avg_pnl_pct, avg_duration_s)| BreakdownItem {
+                name,
+                trades,
+                pnl_usdt,
+                avg_pnl_pct,
+                avg_duration_s,
+            },
+        )
         .collect())
 }
 
@@ -588,12 +600,18 @@ fn build_heuristic_summary(
     blockers: &[BlockerItem],
 ) -> String {
     let worst_symbol = by_symbol.first();
-    let best_symbol = by_symbol
-        .iter()
-        .max_by(|a, b| a.pnl_usdt.partial_cmp(&b.pnl_usdt).unwrap_or(std::cmp::Ordering::Equal));
+    let best_symbol = by_symbol.iter().max_by(|a, b| {
+        a.pnl_usdt
+            .partial_cmp(&b.pnl_usdt)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let dominant_close = by_close_reason.first();
-    let long_side = by_side.iter().find(|item| item.name.eq_ignore_ascii_case("long"));
-    let short_side = by_side.iter().find(|item| item.name.eq_ignore_ascii_case("short"));
+    let long_side = by_side
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case("long"));
+    let short_side = by_side
+        .iter()
+        .find(|item| item.name.eq_ignore_ascii_case("short"));
     let top_blocker = blockers.first();
 
     format!(
@@ -645,9 +663,11 @@ fn build_tupa_snapshot(
         .iter()
         .find(|item| item.name.eq_ignore_ascii_case("short"));
     let worst_symbol = by_symbol.first();
-    let best_symbol = by_symbol
-        .iter()
-        .max_by(|a, b| a.pnl_usdt.partial_cmp(&b.pnl_usdt).unwrap_or(std::cmp::Ordering::Equal));
+    let best_symbol = by_symbol.iter().max_by(|a, b| {
+        a.pnl_usdt
+            .partial_cmp(&b.pnl_usdt)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let consensus_blocks = blockers
         .iter()
@@ -684,9 +704,7 @@ fn build_tupa_snapshot(
             trailing_stop_pct: trailing_stop
                 .map(|item| 100.0 * item.trades as f64 / total_trades)
                 .unwrap_or(0.0),
-            trailing_stop_avg_pnl_pct: trailing_stop
-                .map(|item| item.avg_pnl_pct)
-                .unwrap_or(0.0),
+            trailing_stop_avg_pnl_pct: trailing_stop.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
         },
         sides: SnapshotSideMetrics {
             long_trade_share_pct: long_side
