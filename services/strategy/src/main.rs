@@ -1354,6 +1354,7 @@ fn sha256_hex_json(value: &Value) -> Result<String, serde_json::Error> {
     Ok(sha256_hex_bytes(&bytes))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn persist_tupa_audit_log(
     pool: &PgPool,
     signal_event: &MarketSignalEvent,
