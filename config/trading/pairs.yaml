@@ -298,10 +298,10 @@ XRPUSDT:
   entry_filters:
     allow_long: true
     allow_short: true
-    min_trend_score_long: 0.29
+    min_trend_score_long: 0.32
     min_trend_score_short: 0.32
     min_trend_score: 0.22
-    min_signal_confirmation_ticks_long: 5
+    min_signal_confirmation_ticks_long: 6
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
@@ -364,10 +364,10 @@ ADAUSDT:
         move_to_break_even_at: 0.025
   
   entry_filters:
-    min_trend_score_long: 0.28
+    min_trend_score_long: 0.31
     min_trend_score_short: 0.24
     min_trend_score: 0.28
-    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_long: 4
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
     thesis_invalidation_confirmation_ticks: 1
@@ -633,10 +633,10 @@ NEARUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.32
+    min_trend_score_long: 0.34
     min_trend_score_short: 0.37
     min_trend_score: 0.30
-    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_long: 5
     min_signal_confirmation_ticks_short: 6
     min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
