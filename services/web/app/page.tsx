@@ -109,6 +109,16 @@ interface AiAnalystData {
     evidence?: string;
     expected_tradeoff?: string;
   }>;
+  hypotheses?: Array<{
+    hypothesis_id?: string;
+    priority?: string;
+    confidence?: string;
+    hypothesis?: string;
+    evidence?: string;
+    observe?: string;
+    success_condition?: string;
+    failure_condition?: string;
+  }>;
   symbol_diagnostics?: Array<{
     symbol?: string;
     status?: string;
@@ -121,6 +131,15 @@ interface AiAnalystData {
     avg_thesis_pnl_pct?: number;
     avg_trailing_pnl_pct?: number;
   }>;
+  regime_diagnostics?: {
+    status?: string;
+    regime?: string;
+    confidence?: string;
+    directional_bias?: string;
+    dominant_gate?: string;
+    exit_profile?: string;
+    evidence?: string[];
+  };
   tupa_evaluation?: {
     exit_pressure?: AnalystEvaluationSignal;
     directional_bias?: AnalystEvaluationSignal;
@@ -300,12 +319,15 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
   const expectancy = analyst?.expectancy;
   const comparative = analyst?.comparative_diagnostics;
   const recommendations = analyst?.recommendations || [];
+  const hypotheses = analyst?.hypotheses || [];
   const symbolDiagnostics = analyst?.symbol_diagnostics || [];
+  const regime = analyst?.regime_diagnostics;
   const exitTone = toneClasses(exitPressure?.severity);
   const entryTone = toneClasses(entryPressure?.severity);
   const thesisTone = toneClasses(thesisQuality?.severity);
   const symbolTone = toneClasses(symbolRisk?.severity);
   const comparativeToneState = comparativeTone(comparative?.status);
+  const regimeTone = comparativeTone(regime?.status);
 
   return (
     <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
@@ -450,13 +472,36 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
             </div>
           </div>
 
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4 xl:col-span-2">
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Current Regime</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', regimeTone.badge)}>
+                {regime?.status || 'mixed'}
+              </Badge>
+            </div>
+            <div className={cn('mt-3 text-lg font-semibold', regimeTone.text)}>
+              {titleCase((regime?.regime || 'balanced_mixed').replaceAll('_', ' '))}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {titleCase((regime?.directional_bias || 'neutral').replaceAll('_', ' '))} · {titleCase(regime?.exit_profile || 'balanced')}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                gate {titleCase(regime?.dominant_gate || 'unknown')}
+              </Badge>
+              <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                {regime?.confidence || 'low'} confidence
+              </Badge>
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
             <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Top Recommendations</div>
-            <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="mt-3 space-y-3">
               {recommendations.length === 0 ? (
                 <div className="text-sm text-slate-400">No recommendations yet.</div>
               ) : (
-                recommendations.slice(0, 4).map((item) => {
+                recommendations.slice(0, 3).map((item) => {
                   const tone = toneClasses(item.severity);
                   return (
                     <div key={item.recommendation_id} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
@@ -474,6 +519,42 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
                 })
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Hypotheses</div>
+            <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+              {hypotheses.length} active
+            </Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {hypotheses.length === 0 ? (
+              <div className="text-sm text-slate-400">No testable hypotheses yet.</div>
+            ) : (
+              hypotheses.slice(0, 2).map((item) => (
+                <div key={item.hypothesis_id} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-100">
+                      {item.hypothesis || 'Observe more sample'}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                        {item.priority || 'info'}
+                      </Badge>
+                      <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                        {item.confidence || 'low'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
+                  <div className="mt-3 text-xs text-slate-300">
+                    <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
