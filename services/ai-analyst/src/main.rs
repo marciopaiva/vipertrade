@@ -597,8 +597,7 @@ fn execute_thesis_quality(state: Value) -> Result<Value, String> {
             "thesis_quality_profit_protective",
             "preserve_trailing_capture",
         )
-    } else if top_reason.contains("health_threshold") || health_threshold_hits > no_alignment_hits
-    {
+    } else if top_reason.contains("health_threshold") || health_threshold_hits > no_alignment_hits {
         (
             "warn",
             "thesis_quality_threshold_driven",

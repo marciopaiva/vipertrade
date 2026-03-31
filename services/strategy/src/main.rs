@@ -1307,14 +1307,18 @@ async fn flush_pending_entry_candidates(
 
     let current_open_count = match db_pool {
         Some(pool) => count_open_trades(pool).await.unwrap_or_else(|err| {
-            eprintln!("Failed to count open trades for portfolio selection: {}", err);
+            eprintln!(
+                "Failed to count open trades for portfolio selection: {}",
+                err
+            );
             0
         }),
         None => 0,
     };
     let open_slots = (max_open_positions - current_open_count).max(0) as usize;
 
-    let mut candidates: Vec<PendingEntryCandidate> = pending_candidates.drain().map(|(_, c)| c).collect();
+    let mut candidates: Vec<PendingEntryCandidate> =
+        pending_candidates.drain().map(|(_, c)| c).collect();
     candidates.sort_by(|a, b| {
         b.rank_score
             .partial_cmp(&a.rank_score)
@@ -2915,7 +2919,12 @@ fn rsi_quality_score_for_side(side: &str, rsi: f64) -> f64 {
     }
 }
 
-fn macd_quality_score_for_side(side: &str, macd_line: f64, macd_signal: f64, macd_histogram: f64) -> f64 {
+fn macd_quality_score_for_side(
+    side: &str,
+    macd_line: f64,
+    macd_signal: f64,
+    macd_histogram: f64,
+) -> f64 {
     let favorable_crossover = if side.eq_ignore_ascii_case("long") {
         macd_line > macd_signal
     } else {
@@ -3635,7 +3644,10 @@ fn evaluate_thesis_degrading_policy(
     } else {
         ThesisGuardEvaluation {
             confirmed: true,
-            reason: format!("thesis_invalidated_degrading_persisted_{}", evaluation.reason),
+            reason: format!(
+                "thesis_invalidated_degrading_persisted_{}",
+                evaluation.reason
+            ),
         }
     }
 }
@@ -4783,7 +4795,9 @@ mod tests {
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
         assert_eq!(evaluation.stage, "invalidated");
-        assert!(evaluation.reason.contains("thesis_invalidated_no_bullish_alignment"));
+        assert!(evaluation
+            .reason
+            .contains("thesis_invalidated_no_bullish_alignment"));
     }
 
     #[test]
@@ -4801,7 +4815,9 @@ mod tests {
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
         assert_eq!(evaluation.stage, "degrading_soft");
-        assert!(evaluation.reason.contains("thesis_degrading_soft_long_alignment"));
+        assert!(evaluation
+            .reason
+            .contains("thesis_degrading_soft_long_alignment"));
     }
 
     #[test]
