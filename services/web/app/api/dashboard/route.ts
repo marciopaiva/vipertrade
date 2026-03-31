@@ -235,6 +235,7 @@ async function fetchServices(baseUrl: string, tradingMode?: string): Promise<Ser
     { name: "monitor", urls: [`${protocol}//${host}:8084/health`] },
     { name: "analytics", urls: [`${protocol}//${host}:8086/health`] },
     { name: "backtest", urls: [`${protocol}//${host}:8085/health`] },
+    { name: "ai-analyst", urls: [`${protocol}//${host}:8087/health`] },
     { name: "bybit", urls: [`${bybitRestUrl}/v5/market/time`] },
     { name: "binance", urls: [`${binanceRestUrl}/fapi/v1/time`] },
     { name: "okx", urls: [`${okxRestUrl}/api/v5/public/time`] },

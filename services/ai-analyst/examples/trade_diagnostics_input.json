@@ -26,6 +26,20 @@
     "volume_blocks": 1476,
     "macd_blocks": 1004
   },
+  "thesis": {
+    "total_closes": 105,
+    "top_reason": "thesis_invalidated_no_bullish_alignment_health_raw_-24_clamped_-24_consensus_trend_score:-0.310x50.0=-16__bybit_trend_score:-0.233x30.0=-7__price_vs_fast_ema:-1.000x5.0=-5",
+    "top_reason_hits": 31,
+    "positive_close_pct": 18.1,
+    "long_avg_pnl_pct": -0.284,
+    "short_avg_pnl_pct": -0.041,
+    "no_alignment_hits": 67,
+    "health_threshold_hits": 28,
+    "opposite_side_hits": 10,
+    "consensus_trend_hits": 74,
+    "price_vs_fast_ema_hits": 42,
+    "btc_regime_hits": 19
+  },
   "symbols": {
     "worst_symbol": "NEARUSDT",
     "worst_symbol_pnl_usdt": -0.3864,

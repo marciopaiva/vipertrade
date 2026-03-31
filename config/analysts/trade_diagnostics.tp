@@ -27,6 +27,20 @@ fn evaluate_exit_pressure(
       volume_blocks: i64,
       macd_blocks: i64
     },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
+    },
     symbols: {
       worst_symbol: string,
       worst_symbol_pnl_usdt: f64,
@@ -93,6 +107,20 @@ fn evaluate_directional_bias(
       volume_blocks: i64,
       macd_blocks: i64
     },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
+    },
     symbols: {
       worst_symbol: string,
       worst_symbol_pnl_usdt: f64,
@@ -140,6 +168,20 @@ fn evaluate_entry_pressure(
       volume_blocks: i64,
       macd_blocks: i64
     },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
+    },
     symbols: {
       worst_symbol: string,
       worst_symbol_pnl_usdt: f64,
@@ -173,6 +215,96 @@ fn evaluate_entry_pressure(
   };
 }
 
+fn evaluate_thesis_quality(
+  input: {
+    lookback_hours: i64,
+    summary: {
+      closed_trades: i64,
+      total_pnl_usdt: f64,
+      avg_pnl_pct: f64,
+      avg_duration_s: f64,
+      win_rate_pct: f64
+    },
+    exits: {
+      thesis_invalidated_pct: f64,
+      thesis_invalidated_avg_pnl_pct: f64,
+      trailing_stop_pct: f64,
+      trailing_stop_avg_pnl_pct: f64
+    },
+    sides: {
+      long_trade_share_pct: f64,
+      short_trade_share_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64
+    },
+    blockers: {
+      top_reason: string,
+      top_reason_hits: i64,
+      consensus_blocks: i64,
+      volume_blocks: i64,
+      macd_blocks: i64
+    },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
+    },
+    symbols: {
+      worst_symbol: string,
+      worst_symbol_pnl_usdt: f64,
+      best_symbol: string,
+      best_symbol_pnl_usdt: f64
+    }
+  }
+): {
+  severity: string,
+  reason: string,
+  recommendation: string
+} {
+  if input.thesis.long_avg_pnl_pct <= -0.20 && input.thesis.no_alignment_hits >= input.thesis.health_threshold_hits {
+    return {
+      severity: "fail",
+      reason: "thesis_quality_long_fragile",
+      recommendation: "harden_long_invalidation_inputs"
+    };
+  }
+  if input.thesis.positive_close_pct >= 25.0 {
+    return {
+      severity: "pass",
+      reason: "thesis_quality_profit_protective",
+      recommendation: "preserve_trailing_capture"
+    };
+  }
+  if input.thesis.health_threshold_hits > input.thesis.no_alignment_hits {
+    return {
+      severity: "warn",
+      reason: "thesis_quality_threshold_driven",
+      recommendation: "review_health_threshold_balance"
+    };
+  }
+  if input.thesis.short_avg_pnl_pct >= input.thesis.long_avg_pnl_pct {
+    return {
+      severity: "warn",
+      reason: "thesis_quality_directionally_asymmetric",
+      recommendation: "review_long_side_guard"
+    };
+  }
+  return {
+    severity: "pass",
+    reason: "thesis_quality_stable",
+    recommendation: "keep_current_thesis_policy"
+  };
+}
+
 fn evaluate_symbol_risk(
   input: {
     lookback_hours: i64,
@@ -201,6 +333,20 @@ fn evaluate_symbol_risk(
       consensus_blocks: i64,
       volume_blocks: i64,
       macd_blocks: i64
+    },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
     },
     symbols: {
       worst_symbol: string,
@@ -264,6 +410,20 @@ pipeline TradeDiagnostics @deterministic(seed=42) {
       volume_blocks: i64,
       macd_blocks: i64
     },
+    thesis: {
+      total_closes: i64,
+      top_reason: string,
+      top_reason_hits: i64,
+      positive_close_pct: f64,
+      long_avg_pnl_pct: f64,
+      short_avg_pnl_pct: f64,
+      no_alignment_hits: i64,
+      health_threshold_hits: i64,
+      opposite_side_hits: i64,
+      consensus_trend_hits: i64,
+      price_vs_fast_ema_hits: i64,
+      btc_regime_hits: i64
+    },
     symbols: {
       worst_symbol: string,
       worst_symbol_pnl_usdt: f64,
@@ -275,6 +435,7 @@ pipeline TradeDiagnostics @deterministic(seed=42) {
     step("exit_pressure") { evaluate_exit_pressure(input) },
     step("directional_bias") { evaluate_directional_bias(input) },
     step("entry_pressure") { evaluate_entry_pressure(input) },
+    step("thesis_quality") { evaluate_thesis_quality(input) },
     step("symbol_risk") { evaluate_symbol_risk(input) }
   ],
 }

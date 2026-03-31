@@ -56,6 +56,8 @@ interface AnalystEvaluationSignal {
   severity?: 'pass' | 'warn' | 'fail';
   dominant_gate?: string;
   symbol?: string;
+  recommendation?: string;
+  top_reason?: string;
   thesis_invalidated_pct?: number;
   trailing_stop_pct?: number;
 }
@@ -73,10 +75,23 @@ interface AiAnalystData {
     avg_duration_s?: number;
     win_rate_pct?: number;
   };
+  expectancy?: {
+    winning_trades?: number;
+    losing_trades?: number;
+    neutral_trades?: number;
+    avg_win_usdt?: number;
+    avg_win_pct?: number;
+    avg_loss_usdt?: number;
+    avg_loss_pct?: number;
+    payoff_ratio?: number;
+    expectancy_usdt?: number;
+    expectancy_pct?: number;
+  };
   tupa_evaluation?: {
     exit_pressure?: AnalystEvaluationSignal;
     directional_bias?: AnalystEvaluationSignal;
     entry_pressure?: AnalystEvaluationSignal;
+    thesis_quality?: AnalystEvaluationSignal;
     symbol_risk?: AnalystEvaluationSignal;
     summary?: {
       closed_trades?: number;
@@ -239,10 +254,13 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
   const exitPressure = analyst?.tupa_evaluation?.exit_pressure;
   const entryPressure = analyst?.tupa_evaluation?.entry_pressure;
   const directionalBias = analyst?.tupa_evaluation?.directional_bias;
+  const thesisQuality = analyst?.tupa_evaluation?.thesis_quality;
   const symbolRisk = analyst?.tupa_evaluation?.symbol_risk;
   const summary = analyst?.tupa_evaluation?.summary || analyst?.summary;
+  const expectancy = analyst?.expectancy;
   const exitTone = toneClasses(exitPressure?.severity);
   const entryTone = toneClasses(entryPressure?.severity);
+  const thesisTone = toneClasses(thesisQuality?.severity);
   const symbolTone = toneClasses(symbolRisk?.severity);
 
   return (
@@ -265,7 +283,7 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
         </div>
       </CardHeader>
       <CardContent className="pt-0 space-y-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
           <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
             <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Directional Bias</div>
             <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', toneClasses('pass').text)}>
@@ -303,6 +321,36 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
             </div>
             <div className="mt-2 text-xs text-slate-500">
               {titleCase((entryPressure?.reason || '').replace('entry_pressure_', '')) || 'No dominant gate'}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Thesis Guard</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', thesisTone.badge)}>
+                {thesisQuality?.severity || 'pass'}
+              </Badge>
+            </div>
+            <div className={cn('mt-3 text-xl font-semibold tracking-[-0.03em]', thesisTone.text)}>
+              {titleCase((thesisQuality?.reason || 'stable').replace('thesis_quality_', ''))}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {titleCase((thesisQuality?.recommendation || 'keep_current_thesis_policy').replaceAll('_', ' '))}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Expectancy</div>
+            <div
+              className={cn(
+                'mt-3 text-2xl font-semibold tracking-[-0.03em]',
+                (expectancy?.expectancy_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300',
+              )}
+            >
+              {num(expectancy?.expectancy_pct)}%
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              payoff {num(expectancy?.payoff_ratio)} · {usd(expectancy?.expectancy_usdt)} / trade
             </div>
           </div>
 
