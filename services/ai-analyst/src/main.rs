@@ -153,6 +153,9 @@ struct AnalysisResponse {
     by_symbol: Vec<BreakdownItem>,
     top_entry_blockers: Vec<BlockerItem>,
     thesis_invalidation_breakdown: Vec<ThesisReasonItem>,
+    comparative_diagnostics: ComparativeDiagnostics,
+    recommendations: Vec<RecommendationItem>,
+    symbol_diagnostics: Vec<SymbolDiagnosticItem>,
     tupa_snapshot: AnalystSnapshot,
     tupa_evaluation: Option<Value>,
     tupa_error: Option<String>,
@@ -170,6 +173,53 @@ struct BlockerItem {
 struct ThesisReasonItem {
     reason: String,
     total: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ComparativeMetric {
+    current: f64,
+    previous: f64,
+    delta: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ComparativeDiagnostics {
+    status: String,
+    reasons: Vec<String>,
+    current_window_hours: i64,
+    previous_window_hours: i64,
+    closed_trades: ComparativeMetric,
+    win_rate_pct: ComparativeMetric,
+    expectancy_pct: ComparativeMetric,
+    payoff_ratio: ComparativeMetric,
+    thesis_invalidated_pct: ComparativeMetric,
+    trailing_stop_pct: ComparativeMetric,
+    long_avg_pnl_pct: ComparativeMetric,
+    short_avg_pnl_pct: ComparativeMetric,
+}
+
+#[derive(Debug, Serialize)]
+struct RecommendationItem {
+    recommendation_id: String,
+    severity: String,
+    confidence: String,
+    recommendation: String,
+    evidence: String,
+    expected_tradeoff: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SymbolDiagnosticItem {
+    symbol: String,
+    status: String,
+    recommendation: String,
+    confidence: String,
+    trades: i64,
+    avg_pnl_pct: f64,
+    thesis_invalidated_trades: i64,
+    trailing_stop_trades: i64,
+    avg_thesis_pnl_pct: f64,
+    avg_trailing_pnl_pct: f64,
 }
 
 #[derive(Debug)]
@@ -201,6 +251,17 @@ struct TupaSnapshotContext<'a> {
     blockers: &'a [BlockerItem],
     thesis_summary: &'a ThesisSummary,
     thesis_breakdown: &'a [ThesisReasonItem],
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SymbolDiagnosticRow {
+    symbol: String,
+    trades: i64,
+    avg_pnl_pct: f64,
+    thesis_invalidated_trades: i64,
+    trailing_stop_trades: i64,
+    avg_thesis_pnl_pct: f64,
+    avg_trailing_pnl_pct: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -343,33 +404,56 @@ async fn handle_recent_analysis(
 }
 
 async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {
-    let summary = fetch_summary(hours, &state.db_pool).await?;
-    let expectancy = fetch_expectancy(hours, &state.db_pool).await?;
+    let summary = fetch_summary(hours, 0, &state.db_pool).await?;
+    let expectancy = fetch_expectancy(hours, 0, &state.db_pool).await?;
     let by_close_reason = fetch_breakdown(
         hours,
+        0,
         &state.db_pool,
         "close_reason",
-        "select coalesce(close_reason, 'unknown') as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by close_reason order by trades desc",
+        "select coalesce(close_reason, 'unknown') as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - (($1 + $2) * interval '1 hour') and opened_at < now() - ($2 * interval '1 hour') group by close_reason order by trades desc",
     )
     .await?;
     let by_side = fetch_breakdown(
         hours,
+        0,
         &state.db_pool,
         "side",
-        "select side as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by side order by trades desc",
+        "select side as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - (($1 + $2) * interval '1 hour') and opened_at < now() - ($2 * interval '1 hour') group by side order by trades desc",
     )
     .await?;
     let by_symbol = fetch_breakdown(
         hours,
+        0,
         &state.db_pool,
         "symbol",
-        "select symbol as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - ($1 * interval '1 hour') group by symbol order by pnl_usdt asc limit 10",
+        "select symbol as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - (($1 + $2) * interval '1 hour') and opened_at < now() - ($2 * interval '1 hour') group by symbol order by pnl_usdt asc limit 10",
     )
     .await?;
-    let top_entry_blockers = fetch_top_blockers(hours, &state.db_pool).await?;
-    let thesis_summary = fetch_thesis_summary(hours, &state.db_pool).await?;
+    let top_entry_blockers = fetch_top_blockers(hours, 0, &state.db_pool).await?;
+    let thesis_summary = fetch_thesis_summary(hours, 0, &state.db_pool).await?;
     let thesis_invalidation_breakdown =
-        fetch_thesis_invalidation_breakdown(hours, &state.db_pool).await?;
+        fetch_thesis_invalidation_breakdown(hours, 0, &state.db_pool).await?;
+    let symbol_diagnostics = fetch_symbol_diagnostics(hours, 0, &state.db_pool).await?;
+
+    let previous_summary = fetch_summary(hours, hours, &state.db_pool).await?;
+    let previous_expectancy = fetch_expectancy(hours, hours, &state.db_pool).await?;
+    let previous_by_close_reason = fetch_breakdown(
+        hours,
+        hours,
+        &state.db_pool,
+        "close_reason",
+        "select coalesce(close_reason, 'unknown') as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - (($1 + $2) * interval '1 hour') and opened_at < now() - ($2 * interval '1 hour') group by close_reason order by trades desc",
+    )
+    .await?;
+    let previous_by_side = fetch_breakdown(
+        hours,
+        hours,
+        &state.db_pool,
+        "side",
+        "select side as name, count(*) as trades, coalesce(sum(pnl), 0)::float8 as pnl_usdt, coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct, coalesce(avg(duration_seconds), 0)::float8 as avg_duration_s from trades where status='closed' and opened_at >= now() - (($1 + $2) * interval '1 hour') and opened_at < now() - ($2 * interval '1 hour') group by side order by trades desc",
+    )
+    .await?;
     let tupa_snapshot = build_tupa_snapshot(TupaSnapshotContext {
         hours,
         summary: &summary,
@@ -381,6 +465,17 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         thesis_summary: &thesis_summary,
         thesis_breakdown: &thesis_invalidation_breakdown,
     });
+    let comparative_diagnostics = build_comparative_diagnostics(
+        hours,
+        &summary,
+        &previous_summary,
+        &expectancy,
+        &previous_expectancy,
+        &by_close_reason,
+        &previous_by_close_reason,
+        &by_side,
+        &previous_by_side,
+    );
     let (tupa_evaluation, tupa_error) = match run_tupa_diagnostics(&tupa_snapshot, state).await {
         Ok(value) => (Some(value), None),
         Err(err) => {
@@ -388,6 +483,14 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
             (None, Some(err.to_string()))
         }
     };
+    let recommendations = build_recommendations(
+        &summary,
+        &expectancy,
+        &comparative_diagnostics,
+        &top_entry_blockers,
+        &symbol_diagnostics,
+        tupa_evaluation.as_ref(),
+    );
 
     let heuristic_summary = build_heuristic_summary(HeuristicSummaryContext {
         hours,
@@ -415,6 +518,9 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         by_symbol,
         top_entry_blockers,
         thesis_invalidation_breakdown,
+        comparative_diagnostics,
+        recommendations,
+        symbol_diagnostics,
         tupa_snapshot,
         tupa_evaluation,
         tupa_error,
@@ -651,7 +757,11 @@ fn execute_thesis_quality(state: Value) -> Result<Value, String> {
     }))
 }
 
-async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, AnalystError> {
+async fn fetch_summary(
+    hours: i64,
+    offset_hours: i64,
+    pool: &PgPool,
+) -> Result<MetricSummary, AnalystError> {
     let row = sqlx::query_as::<_, (i64, f64, f64, f64, f64)>(
         r#"
         select
@@ -662,10 +772,12 @@ async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, Analy
           coalesce(100.0 * count(*) filter (where pnl > 0) / nullif(count(*), 0), 0)::float8 as win_rate_pct
         from trades
         where status = 'closed'
-          and opened_at >= now() - ($1 * interval '1 hour')
+          and opened_at >= now() - (($1 + $2) * interval '1 hour')
+          and opened_at < now() - ($2 * interval '1 hour')
         "#,
     )
     .bind(hours)
+    .bind(offset_hours)
     .fetch_one(pool)
     .await?;
 
@@ -678,7 +790,11 @@ async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, Analy
     })
 }
 
-async fn fetch_expectancy(hours: i64, pool: &PgPool) -> Result<ExpectancyMetrics, AnalystError> {
+async fn fetch_expectancy(
+    hours: i64,
+    offset_hours: i64,
+    pool: &PgPool,
+) -> Result<ExpectancyMetrics, AnalystError> {
     let row = sqlx::query_as::<_, (i64, i64, i64, f64, f64, f64, f64)>(
         r#"
         select
@@ -691,10 +807,12 @@ async fn fetch_expectancy(hours: i64, pool: &PgPool) -> Result<ExpectancyMetrics
           coalesce(avg(pnl_pct) filter (where pnl < 0), 0)::float8 as avg_loss_pct
         from trades
         where status = 'closed'
-          and opened_at >= now() - ($1 * interval '1 hour')
+          and opened_at >= now() - (($1 + $2) * interval '1 hour')
+          and opened_at < now() - ($2 * interval '1 hour')
         "#,
     )
     .bind(hours)
+    .bind(offset_hours)
     .fetch_one(pool)
     .await?;
 
@@ -723,12 +841,14 @@ async fn fetch_expectancy(hours: i64, pool: &PgPool) -> Result<ExpectancyMetrics
 
 async fn fetch_breakdown(
     hours: i64,
+    offset_hours: i64,
     pool: &PgPool,
     _dimension: &str,
     sql: &str,
 ) -> Result<Vec<BreakdownItem>, AnalystError> {
     let rows = sqlx::query_as::<_, (String, i64, f64, f64, f64)>(sql)
         .bind(hours)
+        .bind(offset_hours)
         .fetch_all(pool)
         .await?;
 
@@ -746,14 +866,19 @@ async fn fetch_breakdown(
         .collect())
 }
 
-async fn fetch_top_blockers(hours: i64, pool: &PgPool) -> Result<Vec<BlockerItem>, AnalystError> {
+async fn fetch_top_blockers(
+    hours: i64,
+    offset_hours: i64,
+    pool: &PgPool,
+) -> Result<Vec<BlockerItem>, AnalystError> {
     let rows = sqlx::query_as::<_, (String, i64)>(
         r#"
         select
           constraints_results->'validate_entry'->>'reason' as reason,
           count(*)::bigint as total
         from tupa_audit_logs
-        where created_at >= now() - ($1 * interval '1 hour')
+        where created_at >= now() - (($1 + $2) * interval '1 hour')
+          and created_at < now() - ($2 * interval '1 hour')
           and (constraints_results->'validate_entry'->>'passed')::boolean = false
         group by reason
         order by total desc
@@ -761,6 +886,7 @@ async fn fetch_top_blockers(hours: i64, pool: &PgPool) -> Result<Vec<BlockerItem
         "#,
     )
     .bind(hours)
+    .bind(offset_hours)
     .fetch_all(pool)
     .await?;
 
@@ -770,7 +896,11 @@ async fn fetch_top_blockers(hours: i64, pool: &PgPool) -> Result<Vec<BlockerItem
         .collect())
 }
 
-async fn fetch_thesis_summary(hours: i64, pool: &PgPool) -> Result<ThesisSummary, AnalystError> {
+async fn fetch_thesis_summary(
+    hours: i64,
+    offset_hours: i64,
+    pool: &PgPool,
+) -> Result<ThesisSummary, AnalystError> {
     let row = sqlx::query_as::<_, (i64, i64, f64, f64)>(
         r#"
         select
@@ -781,10 +911,12 @@ async fn fetch_thesis_summary(hours: i64, pool: &PgPool) -> Result<ThesisSummary
         from trades
         where status = 'closed'
           and close_reason = 'thesis_invalidated'
-          and opened_at >= now() - ($1 * interval '1 hour')
+          and opened_at >= now() - (($1 + $2) * interval '1 hour')
+          and opened_at < now() - ($2 * interval '1 hour')
         "#,
     )
     .bind(hours)
+    .bind(offset_hours)
     .fetch_one(pool)
     .await?;
 
@@ -798,6 +930,7 @@ async fn fetch_thesis_summary(hours: i64, pool: &PgPool) -> Result<ThesisSummary
 
 async fn fetch_thesis_invalidation_breakdown(
     hours: i64,
+    offset_hours: i64,
     pool: &PgPool,
 ) -> Result<Vec<ThesisReasonItem>, AnalystError> {
     let rows = sqlx::query_as::<_, (String, i64)>(
@@ -806,7 +939,8 @@ async fn fetch_thesis_invalidation_breakdown(
           reason,
           count(*)::bigint as total
         from strategy_decision_audit
-        where created_at >= now() - ($1 * interval '1 hour')
+        where created_at >= now() - (($1 + $2) * interval '1 hour')
+          and created_at < now() - ($2 * interval '1 hour')
           and action in ('CLOSE_LONG', 'CLOSE_SHORT')
           and reason like 'thesis_invalidated%'
         group by reason
@@ -815,6 +949,7 @@ async fn fetch_thesis_invalidation_breakdown(
         "#,
     )
     .bind(hours)
+    .bind(offset_hours)
     .fetch_all(pool)
     .await?;
 
@@ -822,6 +957,340 @@ async fn fetch_thesis_invalidation_breakdown(
         .into_iter()
         .map(|(reason, total)| ThesisReasonItem { reason, total })
         .collect())
+}
+
+async fn fetch_symbol_diagnostics(
+    hours: i64,
+    offset_hours: i64,
+    pool: &PgPool,
+) -> Result<Vec<SymbolDiagnosticItem>, AnalystError> {
+    let rows = sqlx::query_as::<_, SymbolDiagnosticRow>(
+        r#"
+        select
+          symbol,
+          count(*)::bigint as trades,
+          coalesce(avg(pnl_pct), 0)::float8 as avg_pnl_pct,
+          count(*) filter (where close_reason = 'thesis_invalidated')::bigint as thesis_invalidated_trades,
+          count(*) filter (where close_reason = 'trailing_stop')::bigint as trailing_stop_trades,
+          coalesce(avg(pnl_pct) filter (where close_reason = 'thesis_invalidated'), 0)::float8 as avg_thesis_pnl_pct,
+          coalesce(avg(pnl_pct) filter (where close_reason = 'trailing_stop'), 0)::float8 as avg_trailing_pnl_pct
+        from trades
+        where status = 'closed'
+          and opened_at >= now() - (($1 + $2) * interval '1 hour')
+          and opened_at < now() - ($2 * interval '1 hour')
+        group by symbol
+        order by avg_pnl_pct asc, trades desc
+        limit 12
+        "#,
+    )
+    .bind(hours)
+    .bind(offset_hours)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let (status, recommendation, confidence) = if row.trades >= 2
+                && row.avg_pnl_pct < 0.0
+                && row.thesis_invalidated_trades >= row.trailing_stop_trades
+            {
+                (
+                    "fragile".to_string(),
+                    "tighten_entry_or_reduce_priority".to_string(),
+                    "high".to_string(),
+                )
+            } else if row.avg_pnl_pct > 0.0 && row.trailing_stop_trades > row.thesis_invalidated_trades
+            {
+                (
+                    "healthy".to_string(),
+                    "keep_current_policy".to_string(),
+                    "medium".to_string(),
+                )
+            } else {
+                (
+                    "mixed".to_string(),
+                    "observe_more_sample".to_string(),
+                    "medium".to_string(),
+                )
+            };
+
+            SymbolDiagnosticItem {
+                symbol: row.symbol,
+                status,
+                recommendation,
+                confidence,
+                trades: row.trades,
+                avg_pnl_pct: row.avg_pnl_pct,
+                thesis_invalidated_trades: row.thesis_invalidated_trades,
+                trailing_stop_trades: row.trailing_stop_trades,
+                avg_thesis_pnl_pct: row.avg_thesis_pnl_pct,
+                avg_trailing_pnl_pct: row.avg_trailing_pnl_pct,
+            }
+        })
+        .collect())
+}
+
+fn comparative_metric(current: f64, previous: f64) -> ComparativeMetric {
+    ComparativeMetric {
+        current,
+        previous,
+        delta: current - previous,
+    }
+}
+
+fn breakdown_metric<F>(items: &[BreakdownItem], name: &str, field: F) -> f64
+where
+    F: Fn(&BreakdownItem) -> f64,
+{
+    items.iter()
+        .find(|item| item.name.eq_ignore_ascii_case(name))
+        .map(|item| field(item))
+        .unwrap_or(0.0)
+}
+
+fn build_comparative_diagnostics(
+    hours: i64,
+    current_summary: &MetricSummary,
+    previous_summary: &MetricSummary,
+    current_expectancy: &ExpectancyMetrics,
+    previous_expectancy: &ExpectancyMetrics,
+    current_by_close_reason: &[BreakdownItem],
+    previous_by_close_reason: &[BreakdownItem],
+    current_by_side: &[BreakdownItem],
+    previous_by_side: &[BreakdownItem],
+) -> ComparativeDiagnostics {
+    let thesis_invalidated_pct_current =
+        breakdown_metric(current_by_close_reason, "thesis_invalidated", |item| {
+            if current_summary.closed_trades > 0 {
+                100.0 * item.trades as f64 / current_summary.closed_trades as f64
+            } else {
+                0.0
+            }
+        });
+    let thesis_invalidated_pct_previous =
+        breakdown_metric(previous_by_close_reason, "thesis_invalidated", |item| {
+            if previous_summary.closed_trades > 0 {
+                100.0 * item.trades as f64 / previous_summary.closed_trades as f64
+            } else {
+                0.0
+            }
+        });
+    let trailing_stop_pct_current =
+        breakdown_metric(current_by_close_reason, "trailing_stop", |item| {
+            if current_summary.closed_trades > 0 {
+                100.0 * item.trades as f64 / current_summary.closed_trades as f64
+            } else {
+                0.0
+            }
+        });
+    let trailing_stop_pct_previous =
+        breakdown_metric(previous_by_close_reason, "trailing_stop", |item| {
+            if previous_summary.closed_trades > 0 {
+                100.0 * item.trades as f64 / previous_summary.closed_trades as f64
+            } else {
+                0.0
+            }
+        });
+    let long_avg_current = breakdown_metric(current_by_side, "long", |item| item.avg_pnl_pct);
+    let long_avg_previous = breakdown_metric(previous_by_side, "long", |item| item.avg_pnl_pct);
+    let short_avg_current = breakdown_metric(current_by_side, "short", |item| item.avg_pnl_pct);
+    let short_avg_previous = breakdown_metric(previous_by_side, "short", |item| item.avg_pnl_pct);
+
+    if previous_summary.closed_trades == 0 {
+        return ComparativeDiagnostics {
+            status: "insufficient_baseline".to_string(),
+            reasons: vec!["previous_window_empty".to_string()],
+            current_window_hours: hours,
+            previous_window_hours: hours,
+            closed_trades: comparative_metric(
+                current_summary.closed_trades as f64,
+                previous_summary.closed_trades as f64,
+            ),
+            win_rate_pct: comparative_metric(
+                current_summary.win_rate_pct,
+                previous_summary.win_rate_pct,
+            ),
+            expectancy_pct: comparative_metric(
+                current_expectancy.expectancy_pct,
+                previous_expectancy.expectancy_pct,
+            ),
+            payoff_ratio: comparative_metric(
+                current_expectancy.payoff_ratio,
+                previous_expectancy.payoff_ratio,
+            ),
+            thesis_invalidated_pct: comparative_metric(
+                thesis_invalidated_pct_current,
+                thesis_invalidated_pct_previous,
+            ),
+            trailing_stop_pct: comparative_metric(
+                trailing_stop_pct_current,
+                trailing_stop_pct_previous,
+            ),
+            long_avg_pnl_pct: comparative_metric(long_avg_current, long_avg_previous),
+            short_avg_pnl_pct: comparative_metric(short_avg_current, short_avg_previous),
+        };
+    }
+
+    let mut reasons = Vec::new();
+    if current_expectancy.expectancy_pct > previous_expectancy.expectancy_pct + 0.10 {
+        reasons.push("improved_expectancy".to_string());
+    } else if current_expectancy.expectancy_pct + 0.10 < previous_expectancy.expectancy_pct {
+        reasons.push("regressed_expectancy".to_string());
+    }
+
+    if thesis_invalidated_pct_current + 5.0 < thesis_invalidated_pct_previous {
+        reasons.push("improved_exit_mix".to_string());
+    } else if thesis_invalidated_pct_current > thesis_invalidated_pct_previous + 5.0 {
+        reasons.push("regressed_exit_mix".to_string());
+    }
+
+    if long_avg_current + 0.10 < long_avg_previous {
+        reasons.push("regressed_long_side".to_string());
+    } else if long_avg_current > long_avg_previous + 0.10 {
+        reasons.push("improved_long_side".to_string());
+    }
+
+    let status = if reasons.iter().any(|reason| reason.starts_with("regressed"))
+        && reasons.iter().any(|reason| reason.starts_with("improved"))
+    {
+        "mixed"
+    } else if reasons.iter().any(|reason| reason.starts_with("regressed")) {
+        "regressed"
+    } else if reasons.iter().any(|reason| reason.starts_with("improved")) {
+        "improved"
+    } else {
+        "stable"
+    };
+
+    ComparativeDiagnostics {
+        status: status.to_string(),
+        reasons,
+        current_window_hours: hours,
+        previous_window_hours: hours,
+        closed_trades: comparative_metric(
+            current_summary.closed_trades as f64,
+            previous_summary.closed_trades as f64,
+        ),
+        win_rate_pct: comparative_metric(
+            current_summary.win_rate_pct,
+            previous_summary.win_rate_pct,
+        ),
+        expectancy_pct: comparative_metric(
+            current_expectancy.expectancy_pct,
+            previous_expectancy.expectancy_pct,
+        ),
+        payoff_ratio: comparative_metric(
+            current_expectancy.payoff_ratio,
+            previous_expectancy.payoff_ratio,
+        ),
+        thesis_invalidated_pct: comparative_metric(
+            thesis_invalidated_pct_current,
+            thesis_invalidated_pct_previous,
+        ),
+        trailing_stop_pct: comparative_metric(trailing_stop_pct_current, trailing_stop_pct_previous),
+        long_avg_pnl_pct: comparative_metric(long_avg_current, long_avg_previous),
+        short_avg_pnl_pct: comparative_metric(short_avg_current, short_avg_previous),
+    }
+}
+
+fn build_recommendations(
+    summary: &MetricSummary,
+    expectancy: &ExpectancyMetrics,
+    comparative: &ComparativeDiagnostics,
+    blockers: &[BlockerItem],
+    symbols: &[SymbolDiagnosticItem],
+    tupa_evaluation: Option<&Value>,
+) -> Vec<RecommendationItem> {
+    let mut items = Vec::new();
+
+    if let Some(thesis) = tupa_evaluation.and_then(|value| value.get("thesis_quality")) {
+        let severity = thesis
+            .get("severity")
+            .and_then(Value::as_str)
+            .unwrap_or("warn");
+        let reason = thesis
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("thesis_quality_unknown");
+        let recommendation = thesis
+            .get("recommendation")
+            .and_then(Value::as_str)
+            .unwrap_or("review_thesis_guard");
+        items.push(RecommendationItem {
+            recommendation_id: "thesis_guard".to_string(),
+            severity: severity.to_string(),
+            confidence: "high".to_string(),
+            recommendation: recommendation.to_string(),
+            evidence: format!("thesis quality reason: {}", reason),
+            expected_tradeoff: "may reduce long-side thesis losses at the cost of fewer exits staying open".to_string(),
+        });
+    }
+
+    if let Some(symbol) = symbols
+        .iter()
+        .find(|item| item.status == "fragile")
+        .or_else(|| symbols.first())
+    {
+        items.push(RecommendationItem {
+            recommendation_id: format!("symbol_{}", symbol.symbol.to_lowercase()),
+            severity: if symbol.status == "fragile" {
+                "warn".to_string()
+            } else {
+                "info".to_string()
+            },
+            confidence: symbol.confidence.clone(),
+            recommendation: format!("{} for {}", symbol.recommendation, symbol.symbol),
+            evidence: format!(
+                "{} trades, avg pnl {:+.4}%, thesis trades {}, trailing trades {}",
+                symbol.trades,
+                symbol.avg_pnl_pct,
+                symbol.thesis_invalidated_trades,
+                symbol.trailing_stop_trades
+            ),
+            expected_tradeoff: "symbol-specific tuning may improve local performance while reducing overall trade count".to_string(),
+        });
+    }
+
+    if let Some(blocker) = blockers.first() {
+        items.push(RecommendationItem {
+            recommendation_id: "entry_pressure".to_string(),
+            severity: "info".to_string(),
+            confidence: "medium".to_string(),
+            recommendation: format!("monitor dominant entry gate: {}", blocker.reason),
+            evidence: format!("top blocker hit {} times in current window", blocker.total),
+            expected_tradeoff: "changing blocker thresholds can increase fill rate but may lower setup quality".to_string(),
+        });
+    }
+
+    if comparative.status == "regressed" || expectancy.expectancy_pct < 0.0 {
+        items.push(RecommendationItem {
+            recommendation_id: "regression_guard".to_string(),
+            severity: "warn".to_string(),
+            confidence: "medium".to_string(),
+            recommendation: "prefer observation before broad retuning".to_string(),
+            evidence: format!(
+                "comparative status={}, expectancy {:+.4}%",
+                comparative.status, expectancy.expectancy_pct
+            ),
+            expected_tradeoff: "slower tuning cadence reduces the risk of chasing short-window noise".to_string(),
+        });
+    } else if summary.closed_trades > 0 {
+        items.push(RecommendationItem {
+            recommendation_id: "keep_watching".to_string(),
+            severity: "info".to_string(),
+            confidence: "medium".to_string(),
+            recommendation: "keep the current changes running and accumulate more sample".to_string(),
+            evidence: format!(
+                "{} closed trades, expectancy {:+.4}%, status {}",
+                summary.closed_trades, expectancy.expectancy_pct, comparative.status
+            ),
+            expected_tradeoff: "more sample improves confidence before the next runtime change".to_string(),
+        });
+    }
+
+    items.truncate(4);
+    items
 }
 
 fn build_heuristic_summary(ctx: HeuristicSummaryContext<'_>) -> String {
