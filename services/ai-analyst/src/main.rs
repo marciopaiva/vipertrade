@@ -50,6 +50,20 @@ struct MetricSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct ExpectancyMetrics {
+    winning_trades: i64,
+    losing_trades: i64,
+    neutral_trades: i64,
+    avg_win_usdt: f64,
+    avg_win_pct: f64,
+    avg_loss_usdt: f64,
+    avg_loss_pct: f64,
+    payoff_ratio: f64,
+    expectancy_usdt: f64,
+    expectancy_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
 struct BreakdownItem {
     name: String,
     trades: i64,
@@ -62,9 +76,11 @@ struct BreakdownItem {
 struct AnalystSnapshot {
     lookback_hours: i64,
     summary: SnapshotSummary,
+    expectancy: ExpectancyMetrics,
     exits: SnapshotExitMetrics,
     sides: SnapshotSideMetrics,
     blockers: SnapshotBlockerMetrics,
+    thesis: SnapshotThesisMetrics,
     symbols: SnapshotSymbolMetrics,
 }
 
@@ -103,6 +119,22 @@ struct SnapshotBlockerMetrics {
 }
 
 #[derive(Debug, Serialize)]
+struct SnapshotThesisMetrics {
+    total_closes: i64,
+    top_reason: String,
+    top_reason_hits: i64,
+    positive_close_pct: f64,
+    long_avg_pnl_pct: f64,
+    short_avg_pnl_pct: f64,
+    no_alignment_hits: i64,
+    health_threshold_hits: i64,
+    opposite_side_hits: i64,
+    consensus_trend_hits: i64,
+    price_vs_fast_ema_hits: i64,
+    btc_regime_hits: i64,
+}
+
+#[derive(Debug, Serialize)]
 struct SnapshotSymbolMetrics {
     worst_symbol: String,
     worst_symbol_pnl_usdt: f64,
@@ -115,10 +147,12 @@ struct AnalysisResponse {
     generated_at: DateTime<Utc>,
     lookback_hours: i64,
     summary: MetricSummary,
+    expectancy: ExpectancyMetrics,
     by_close_reason: Vec<BreakdownItem>,
     by_side: Vec<BreakdownItem>,
     by_symbol: Vec<BreakdownItem>,
     top_entry_blockers: Vec<BlockerItem>,
+    thesis_invalidation_breakdown: Vec<ThesisReasonItem>,
     tupa_snapshot: AnalystSnapshot,
     tupa_evaluation: Option<Value>,
     tupa_error: Option<String>,
@@ -130,6 +164,20 @@ struct AnalysisResponse {
 struct BlockerItem {
     reason: String,
     total: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ThesisReasonItem {
+    reason: String,
+    total: i64,
+}
+
+#[derive(Debug)]
+struct ThesisSummary {
+    total_closes: i64,
+    positive_closes: i64,
+    long_avg_pnl_pct: f64,
+    short_avg_pnl_pct: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -273,6 +321,7 @@ async fn handle_recent_analysis(
 
 async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {
     let summary = fetch_summary(hours, &state.db_pool).await?;
+    let expectancy = fetch_expectancy(hours, &state.db_pool).await?;
     let by_close_reason = fetch_breakdown(
         hours,
         &state.db_pool,
@@ -295,13 +344,19 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
     )
     .await?;
     let top_entry_blockers = fetch_top_blockers(hours, &state.db_pool).await?;
+    let thesis_summary = fetch_thesis_summary(hours, &state.db_pool).await?;
+    let thesis_invalidation_breakdown =
+        fetch_thesis_invalidation_breakdown(hours, &state.db_pool).await?;
     let tupa_snapshot = build_tupa_snapshot(
         hours,
         &summary,
+        &expectancy,
         &by_close_reason,
         &by_side,
         &by_symbol,
         &top_entry_blockers,
+        &thesis_summary,
+        &thesis_invalidation_breakdown,
     );
     let (tupa_evaluation, tupa_error) = match run_tupa_diagnostics(&tupa_snapshot, state).await {
         Ok(value) => (Some(value), None),
@@ -314,10 +369,12 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
     let heuristic_summary = build_heuristic_summary(
         hours,
         &summary,
+        &expectancy,
         &by_close_reason,
         &by_side,
         &by_symbol,
         &top_entry_blockers,
+        &thesis_invalidation_breakdown,
     );
     let llm_summary = if state.llm_enabled {
         request_llm_summary(state, &heuristic_summary).await?
@@ -329,10 +386,12 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         generated_at: Utc::now(),
         lookback_hours: hours,
         summary,
+        expectancy,
         by_close_reason,
         by_side,
         by_symbol,
         top_entry_blockers,
+        thesis_invalidation_breakdown,
         tupa_snapshot,
         tupa_evaluation,
         tupa_error,
@@ -383,6 +442,7 @@ fn register_analyst_steps(runtime: &Runtime, plan: &ExecutionPlan) {
                 execute_directional_bias(state)
             }
             "evaluate_entry_pressure" | "step_entry_pressure" => execute_entry_pressure(state),
+            "evaluate_thesis_quality" | "step_thesis_quality" => execute_thesis_quality(state),
             "evaluate_symbol_risk" | "step_symbol_risk" => execute_symbol_risk(state),
             other => Err(format!("unknown analyst step {}", other)),
         });
@@ -515,6 +575,60 @@ fn execute_symbol_risk(state: Value) -> Result<Value, String> {
     }))
 }
 
+fn execute_thesis_quality(state: Value) -> Result<Value, String> {
+    let positive_close_pct = as_f64(&state, &["thesis", "positive_close_pct"])?;
+    let long_avg_pnl_pct = as_f64(&state, &["thesis", "long_avg_pnl_pct"])?;
+    let short_avg_pnl_pct = as_f64(&state, &["thesis", "short_avg_pnl_pct"])?;
+    let top_reason = as_str_value(&state, &["thesis", "top_reason"])?;
+    let no_alignment_hits = as_i64(&state, &["thesis", "no_alignment_hits"])?;
+    let health_threshold_hits = as_i64(&state, &["thesis", "health_threshold_hits"])?;
+
+    let (severity, reason, recommendation) = if long_avg_pnl_pct <= -0.20
+        && no_alignment_hits >= health_threshold_hits
+    {
+        (
+            "fail",
+            "thesis_quality_long_fragile",
+            "harden_long_invalidation_inputs",
+        )
+    } else if positive_close_pct >= 25.0 {
+        (
+            "pass",
+            "thesis_quality_profit_protective",
+            "preserve_trailing_capture",
+        )
+    } else if top_reason.contains("health_threshold") || health_threshold_hits > no_alignment_hits
+    {
+        (
+            "warn",
+            "thesis_quality_threshold_driven",
+            "review_health_threshold_balance",
+        )
+    } else if short_avg_pnl_pct >= long_avg_pnl_pct {
+        (
+            "warn",
+            "thesis_quality_directionally_asymmetric",
+            "review_long_side_guard",
+        )
+    } else {
+        (
+            "pass",
+            "thesis_quality_stable",
+            "keep_current_thesis_policy",
+        )
+    };
+
+    Ok(json!({
+        "severity": severity,
+        "reason": reason,
+        "recommendation": recommendation,
+        "positive_close_pct": positive_close_pct,
+        "long_avg_pnl_pct": long_avg_pnl_pct,
+        "short_avg_pnl_pct": short_avg_pnl_pct,
+        "top_reason": top_reason
+    }))
+}
+
 async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, AnalystError> {
     let row = sqlx::query_as::<_, (i64, f64, f64, f64, f64)>(
         r#"
@@ -539,6 +653,49 @@ async fn fetch_summary(hours: i64, pool: &PgPool) -> Result<MetricSummary, Analy
         avg_pnl_pct: row.2,
         avg_duration_s: row.3,
         win_rate_pct: row.4,
+    })
+}
+
+async fn fetch_expectancy(hours: i64, pool: &PgPool) -> Result<ExpectancyMetrics, AnalystError> {
+    let row = sqlx::query_as::<_, (i64, i64, i64, f64, f64, f64, f64)>(
+        r#"
+        select
+          count(*) filter (where pnl > 0)::bigint as winning_trades,
+          count(*) filter (where pnl < 0)::bigint as losing_trades,
+          count(*) filter (where pnl = 0)::bigint as neutral_trades,
+          coalesce(avg(pnl) filter (where pnl > 0), 0)::float8 as avg_win_usdt,
+          coalesce(avg(pnl_pct) filter (where pnl > 0), 0)::float8 as avg_win_pct,
+          coalesce(avg(pnl) filter (where pnl < 0), 0)::float8 as avg_loss_usdt,
+          coalesce(avg(pnl_pct) filter (where pnl < 0), 0)::float8 as avg_loss_pct
+        from trades
+        where status = 'closed'
+          and opened_at >= now() - ($1 * interval '1 hour')
+        "#,
+    )
+    .bind(hours)
+    .fetch_one(pool)
+    .await?;
+
+    let total_trades = (row.0 + row.1 + row.2).max(1) as f64;
+    let payoff_ratio = if row.5.abs() > f64::EPSILON {
+        (row.3 / row.5.abs()).max(0.0)
+    } else {
+        0.0
+    };
+    let expectancy_usdt = ((row.0 as f64 * row.3) + (row.1 as f64 * row.5)) / total_trades;
+    let expectancy_pct = ((row.0 as f64 * row.4) + (row.1 as f64 * row.6)) / total_trades;
+
+    Ok(ExpectancyMetrics {
+        winning_trades: row.0,
+        losing_trades: row.1,
+        neutral_trades: row.2,
+        avg_win_usdt: row.3,
+        avg_win_pct: row.4,
+        avg_loss_usdt: row.5,
+        avg_loss_pct: row.6,
+        payoff_ratio,
+        expectancy_usdt,
+        expectancy_pct,
     })
 }
 
@@ -591,13 +748,69 @@ async fn fetch_top_blockers(hours: i64, pool: &PgPool) -> Result<Vec<BlockerItem
         .collect())
 }
 
+async fn fetch_thesis_summary(hours: i64, pool: &PgPool) -> Result<ThesisSummary, AnalystError> {
+    let row = sqlx::query_as::<_, (i64, i64, f64, f64)>(
+        r#"
+        select
+          count(*)::bigint as total_closes,
+          count(*) filter (where pnl > 0)::bigint as positive_closes,
+          coalesce(avg(pnl_pct) filter (where side = 'Long'), 0)::float8 as long_avg_pnl_pct,
+          coalesce(avg(pnl_pct) filter (where side = 'Short'), 0)::float8 as short_avg_pnl_pct
+        from trades
+        where status = 'closed'
+          and close_reason = 'thesis_invalidated'
+          and opened_at >= now() - ($1 * interval '1 hour')
+        "#,
+    )
+    .bind(hours)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(ThesisSummary {
+        total_closes: row.0,
+        positive_closes: row.1,
+        long_avg_pnl_pct: row.2,
+        short_avg_pnl_pct: row.3,
+    })
+}
+
+async fn fetch_thesis_invalidation_breakdown(
+    hours: i64,
+    pool: &PgPool,
+) -> Result<Vec<ThesisReasonItem>, AnalystError> {
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        r#"
+        select
+          reason,
+          count(*)::bigint as total
+        from strategy_decision_audit
+        where created_at >= now() - ($1 * interval '1 hour')
+          and action in ('CLOSE_LONG', 'CLOSE_SHORT')
+          and reason like 'thesis_invalidated%'
+        group by reason
+        order by total desc
+        limit 12
+        "#,
+    )
+    .bind(hours)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(reason, total)| ThesisReasonItem { reason, total })
+        .collect())
+}
+
 fn build_heuristic_summary(
     hours: i64,
     summary: &MetricSummary,
+    expectancy: &ExpectancyMetrics,
     by_close_reason: &[BreakdownItem],
     by_side: &[BreakdownItem],
     by_symbol: &[BreakdownItem],
     blockers: &[BlockerItem],
+    thesis_breakdown: &[ThesisReasonItem],
 ) -> String {
     let worst_symbol = by_symbol.first();
     let best_symbol = by_symbol.iter().max_by(|a, b| {
@@ -613,9 +826,10 @@ fn build_heuristic_summary(
         .iter()
         .find(|item| item.name.eq_ignore_ascii_case("short"));
     let top_blocker = blockers.first();
+    let top_thesis = thesis_breakdown.first();
 
     format!(
-        "Lookback {}h: {} closed trades, total pnl {:+.4} USDT, avg pnl {:+.4}%, win rate {:.2}%. Dominant exit: {} ({} trades, {:+.4}% avg). Long side: {:+.4}% avg over {} trades. Short side: {:+.4}% avg over {} trades. Worst symbol: {} ({:+.4} USDT). Best symbol: {} ({:+.4} USDT). Top entry blocker: {} ({} hits).",
+        "Lookback {}h: {} closed trades, total pnl {:+.4} USDT, avg pnl {:+.4}%, win rate {:.2}%. Dominant exit: {} ({} trades, {:+.4}% avg). Long side: {:+.4}% avg over {} trades. Short side: {:+.4}% avg over {} trades. Worst symbol: {} ({:+.4} USDT). Best symbol: {} ({:+.4} USDT). Top entry blocker: {} ({} hits). Top thesis reason: {} ({} hits).",
         hours,
         summary.closed_trades,
         summary.total_pnl_usdt,
@@ -638,16 +852,30 @@ fn build_heuristic_summary(
             .map(|item| item.reason.as_str())
             .unwrap_or("n/a"),
         top_blocker.map(|item| item.total).unwrap_or(0),
+        top_thesis
+            .map(|item| item.reason.as_str())
+            .unwrap_or("n/a"),
+        top_thesis.map(|item| item.total).unwrap_or(0),
+    ) + &format!(
+        " Expectancy {:+.4} USDT / {:+.4}% per trade, payoff ratio {:.2}, avg win {:+.4}% vs avg loss {:+.4}%.",
+        expectancy.expectancy_usdt,
+        expectancy.expectancy_pct,
+        expectancy.payoff_ratio,
+        expectancy.avg_win_pct,
+        expectancy.avg_loss_pct,
     )
 }
 
 fn build_tupa_snapshot(
     hours: i64,
     summary: &MetricSummary,
+    expectancy: &ExpectancyMetrics,
     by_close_reason: &[BreakdownItem],
     by_side: &[BreakdownItem],
     by_symbol: &[BreakdownItem],
     blockers: &[BlockerItem],
+    thesis_summary: &ThesisSummary,
+    thesis_breakdown: &[ThesisReasonItem],
 ) -> AnalystSnapshot {
     let total_trades = summary.closed_trades.max(1) as f64;
     let thesis_invalidated = by_close_reason
@@ -684,6 +912,44 @@ fn build_tupa_snapshot(
         .filter(|item| item.reason.contains("macd"))
         .map(|item| item.total)
         .sum();
+    let top_thesis_reason = thesis_breakdown
+        .first()
+        .map(|item| item.reason.clone())
+        .unwrap_or_else(|| "n/a".to_string());
+    let top_thesis_reason_hits = thesis_breakdown.first().map(|item| item.total).unwrap_or(0);
+    let no_alignment_hits = thesis_breakdown
+        .iter()
+        .filter(|item| {
+            item.reason.contains("no_bullish_alignment")
+                || item.reason.contains("no_bearish_alignment")
+        })
+        .map(|item| item.total)
+        .sum();
+    let health_threshold_hits = thesis_breakdown
+        .iter()
+        .filter(|item| item.reason.contains("health_threshold"))
+        .map(|item| item.total)
+        .sum();
+    let opposite_side_hits = thesis_breakdown
+        .iter()
+        .filter(|item| item.reason.contains("opposite_side"))
+        .map(|item| item.total)
+        .sum();
+    let consensus_trend_hits = thesis_breakdown
+        .iter()
+        .filter(|item| item.reason.contains("consensus_trend_score"))
+        .map(|item| item.total)
+        .sum();
+    let price_vs_fast_ema_hits = thesis_breakdown
+        .iter()
+        .filter(|item| item.reason.contains("price_vs_fast_ema"))
+        .map(|item| item.total)
+        .sum();
+    let btc_regime_hits = thesis_breakdown
+        .iter()
+        .filter(|item| item.reason.contains("btc_regime"))
+        .map(|item| item.total)
+        .sum();
 
     AnalystSnapshot {
         lookback_hours: hours,
@@ -693,6 +959,18 @@ fn build_tupa_snapshot(
             avg_pnl_pct: summary.avg_pnl_pct,
             avg_duration_s: summary.avg_duration_s,
             win_rate_pct: summary.win_rate_pct,
+        },
+        expectancy: ExpectancyMetrics {
+            winning_trades: expectancy.winning_trades,
+            losing_trades: expectancy.losing_trades,
+            neutral_trades: expectancy.neutral_trades,
+            avg_win_usdt: expectancy.avg_win_usdt,
+            avg_win_pct: expectancy.avg_win_pct,
+            avg_loss_usdt: expectancy.avg_loss_usdt,
+            avg_loss_pct: expectancy.avg_loss_pct,
+            payoff_ratio: expectancy.payoff_ratio,
+            expectancy_usdt: expectancy.expectancy_usdt,
+            expectancy_pct: expectancy.expectancy_pct,
         },
         exits: SnapshotExitMetrics {
             thesis_invalidated_pct: thesis_invalidated
@@ -725,6 +1003,24 @@ fn build_tupa_snapshot(
             consensus_blocks,
             volume_blocks,
             macd_blocks,
+        },
+        thesis: SnapshotThesisMetrics {
+            total_closes: thesis_summary.total_closes,
+            top_reason: top_thesis_reason,
+            top_reason_hits: top_thesis_reason_hits,
+            positive_close_pct: if thesis_summary.total_closes > 0 {
+                100.0 * thesis_summary.positive_closes as f64 / thesis_summary.total_closes as f64
+            } else {
+                0.0
+            },
+            long_avg_pnl_pct: thesis_summary.long_avg_pnl_pct,
+            short_avg_pnl_pct: thesis_summary.short_avg_pnl_pct,
+            no_alignment_hits,
+            health_threshold_hits,
+            opposite_side_hits,
+            consensus_trend_hits,
+            price_vs_fast_ema_hits,
+            btc_regime_hits,
         },
         symbols: SnapshotSymbolMetrics {
             worst_symbol: worst_symbol
