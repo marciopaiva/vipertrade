@@ -12,7 +12,12 @@
 <p align="center">Rust microservices, TupaLang-driven strategy policy, Docker runtime parity, and operator-first observability.</p>
 
 <p align="center">
-  <a href="https://github.com/marciopaiva/vipertrade/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI" /></a>
+  <a href="https://github.com/marciopaiva/vipertrade/actions/workflows/ci.yml">
+    <img
+      alt="CI"
+      src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI"
+    />
+  </a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.83-black?logo=rust" />
   <img alt="TupaLang" src="https://img.shields.io/badge/TupaLang-typed%20strategy%20runtime-0ea5e9" />
   <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
@@ -29,9 +34,15 @@
 
 ---
 
-ViperTrade is a production-oriented lead-trader runtime for Bybit copy trading. It is built around deterministic strategy evaluation, replayable runtime behavior, strong operational controls, and evidence-driven iteration.
+ViperTrade is a production-oriented lead-trader runtime for Bybit copy trading.
+It is built around deterministic strategy evaluation, replayable runtime behavior,
+strong operational controls, and evidence-driven iteration.
 
-Instead of hiding strategy logic inside application code, ViperTrade uses [TupaLang](https://github.com/marciopaiva/tupalang) as a typed policy layer. The Rust services handle live state, exchange interaction, persistence, and operator tooling; the `.tp` strategy layer keeps decision semantics easier to validate, review, and evolve.
+Instead of hiding strategy logic inside application code, ViperTrade uses
+[TupaLang](https://github.com/marciopaiva/tupalang) as a typed policy layer.
+The Rust services handle live state, exchange interaction, persistence, and
+operator tooling; the `.tp` strategy layer keeps decision semantics easier to
+validate, review, and evolve.
 
 ## Why ViperTrade
 
@@ -256,7 +267,9 @@ Useful commands:
 
 ## Status
 
-ViperTrade is being developed as an applied trading runtime with TupaLang as its strategy-policy layer. Paper mode, diagnostics, audit trails, and local operator tooling are active parts of the current workflow.
+ViperTrade is being developed as an applied trading runtime with TupaLang as
+its strategy-policy layer. Paper mode, diagnostics, audit trails, and local
+operator tooling are active parts of the current workflow.
 
 ## License
 
