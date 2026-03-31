@@ -83,6 +83,16 @@ type AiAnalystData = {
     evidence?: string;
     expected_tradeoff?: string;
   }>;
+  hypotheses?: Array<{
+    hypothesis_id?: string;
+    priority?: string;
+    confidence?: string;
+    hypothesis?: string;
+    evidence?: string;
+    observe?: string;
+    success_condition?: string;
+    failure_condition?: string;
+  }>;
   symbol_diagnostics?: Array<{
     symbol?: string;
     status?: string;
@@ -528,6 +538,49 @@ export default function AnalysisPage() {
                       </div>
                     );
                   })
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Hypotheses</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {(analyst?.hypotheses || []).length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No testable hypotheses yet.</div>
+                ) : (
+                  (analyst?.hypotheses || []).map((item) => (
+                    <div key={item.hypothesis_id} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-100">
+                          {item.hypothesis || 'Observe more sample'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                            {item.priority || 'info'}
+                          </Badge>
+                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                            {item.confidence || 'low'}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
+                      <div className="mt-3 grid gap-2 text-xs">
+                        <div className="rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2 text-slate-300">
+                          <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
+                        </div>
+                        <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-emerald-200">
+                          <span className="font-semibold text-emerald-100">Success:</span> {item.success_condition}
+                        </div>
+                        <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 text-red-200">
+                          <span className="font-semibold text-red-100">Failure:</span> {item.failure_condition}
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </CardContent>
