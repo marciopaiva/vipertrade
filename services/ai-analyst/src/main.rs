@@ -156,6 +156,7 @@ struct AnalysisResponse {
     comparative_diagnostics: ComparativeDiagnostics,
     recommendations: Vec<RecommendationItem>,
     symbol_diagnostics: Vec<SymbolDiagnosticItem>,
+    regime_diagnostics: RegimeDiagnostics,
     tupa_snapshot: AnalystSnapshot,
     tupa_evaluation: Option<Value>,
     tupa_error: Option<String>,
@@ -220,6 +221,17 @@ struct SymbolDiagnosticItem {
     trailing_stop_trades: i64,
     avg_thesis_pnl_pct: f64,
     avg_trailing_pnl_pct: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct RegimeDiagnostics {
+    status: String,
+    regime: String,
+    confidence: String,
+    directional_bias: String,
+    dominant_gate: String,
+    exit_profile: String,
+    evidence: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -483,12 +495,15 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
             (None, Some(err.to_string()))
         }
     };
+    let regime_diagnostics =
+        build_regime_diagnostics(&tupa_snapshot, tupa_evaluation.as_ref(), &symbol_diagnostics);
     let recommendations = build_recommendations(
         &summary,
         &expectancy,
         &comparative_diagnostics,
         &top_entry_blockers,
         &symbol_diagnostics,
+        &regime_diagnostics,
         tupa_evaluation.as_ref(),
     );
 
@@ -521,6 +536,7 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         comparative_diagnostics,
         recommendations,
         symbol_diagnostics,
+        regime_diagnostics,
         tupa_snapshot,
         tupa_evaluation,
         tupa_error,
@@ -1212,12 +1228,122 @@ fn build_comparative_diagnostics(ctx: ComparativeDiagnosticsContext<'_>) -> Comp
     }
 }
 
+fn build_regime_diagnostics(
+    snapshot: &AnalystSnapshot,
+    tupa_evaluation: Option<&Value>,
+    symbols: &[SymbolDiagnosticItem],
+) -> RegimeDiagnostics {
+    let directional_bias = tupa_evaluation
+        .and_then(|value| value.get("directional_bias"))
+        .and_then(|value| value.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or({
+            if snapshot.sides.long_avg_pnl_pct >= snapshot.sides.short_avg_pnl_pct {
+                "directional_bias_long"
+            } else {
+                "directional_bias_short"
+            }
+        })
+        .to_string();
+
+    let dominant_gate = tupa_evaluation
+        .and_then(|value| value.get("entry_pressure"))
+        .and_then(|value| value.get("dominant_gate"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+
+    let total_blockers = (snapshot.blockers.consensus_blocks
+        + snapshot.blockers.volume_blocks
+        + snapshot.blockers.macd_blocks)
+        .max(1) as f64;
+    let consensus_block_share = snapshot.blockers.consensus_blocks as f64 / total_blockers;
+    let fragile_symbols = symbols.iter().filter(|item| item.status == "fragile").count();
+
+    let regime = if snapshot.sides.long_avg_pnl_pct > 0.20 && snapshot.sides.short_avg_pnl_pct <= 0.05
+    {
+        "long_biased_trend"
+    } else if snapshot.sides.short_avg_pnl_pct > 0.20
+        && snapshot.sides.long_avg_pnl_pct <= 0.05
+    {
+        "short_biased_trend"
+    } else if consensus_block_share >= 0.45 {
+        "consensus_gated_mixed"
+    } else if snapshot.exits.thesis_invalidated_pct >= 70.0 {
+        "thesis_heavy_chop"
+    } else {
+        "balanced_mixed"
+    };
+
+    let status = if snapshot.expectancy.expectancy_pct > 0.0
+        && snapshot.exits.trailing_stop_avg_pnl_pct
+            > snapshot.exits.thesis_invalidated_avg_pnl_pct.abs()
+        && snapshot.exits.thesis_invalidated_pct <= 70.0
+    {
+        "supportive"
+    } else if snapshot.exits.thesis_invalidated_pct >= 70.0
+        || (regime == "long_biased_trend" && snapshot.sides.short_avg_pnl_pct < 0.0)
+        || (regime == "short_biased_trend" && snapshot.sides.long_avg_pnl_pct < 0.0)
+    {
+        "fragile"
+    } else {
+        "mixed"
+    };
+
+    let confidence = if snapshot.summary.closed_trades >= 30 {
+        "high"
+    } else if snapshot.summary.closed_trades >= 12 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    let exit_profile = if snapshot.exits.trailing_stop_pct >= snapshot.exits.thesis_invalidated_pct {
+        "trailing_dominant"
+    } else if snapshot.exits.thesis_invalidated_pct >= 65.0 {
+        "thesis_dominant"
+    } else {
+        "balanced"
+    };
+
+    let mut evidence = vec![
+        format!(
+            "long avg {:+.4}% vs short avg {:+.4}%",
+            snapshot.sides.long_avg_pnl_pct, snapshot.sides.short_avg_pnl_pct
+        ),
+        format!(
+            "thesis exits {:.2}% vs trailing {:.2}%",
+            snapshot.exits.thesis_invalidated_pct, snapshot.exits.trailing_stop_pct
+        ),
+        format!(
+            "dominant entry gate {} with consensus blocker share {:.1}%",
+            dominant_gate,
+            consensus_block_share * 100.0
+        ),
+    ];
+
+    if fragile_symbols > 0 {
+        evidence.push(format!("{fragile_symbols} fragile symbol(s) in current window"));
+    }
+
+    RegimeDiagnostics {
+        status: status.to_string(),
+        regime: regime.to_string(),
+        confidence: confidence.to_string(),
+        directional_bias,
+        dominant_gate,
+        exit_profile: exit_profile.to_string(),
+        evidence,
+    }
+}
+
 fn build_recommendations(
     summary: &MetricSummary,
     expectancy: &ExpectancyMetrics,
     comparative: &ComparativeDiagnostics,
     blockers: &[BlockerItem],
     symbols: &[SymbolDiagnosticItem],
+    regime: &RegimeDiagnostics,
     tupa_evaluation: Option<&Value>,
 ) -> Vec<RecommendationItem> {
     let mut items = Vec::new();
@@ -1285,6 +1411,26 @@ fn build_recommendations(
         });
     }
 
+    if regime.status != "supportive" {
+        items.push(RecommendationItem {
+            recommendation_id: "regime".to_string(),
+            severity: if regime.status == "fragile" {
+                "warn".to_string()
+            } else {
+                "info".to_string()
+            },
+            confidence: regime.confidence.clone(),
+            recommendation: format!(
+                "treat current regime as {} with {} bias",
+                regime.regime, regime.directional_bias
+            ),
+            evidence: regime.evidence.join(" | "),
+            expected_tradeoff:
+                "regime-aware tuning reduces reactive changes but may delay fast parameter tweaks"
+                    .to_string(),
+        });
+    }
+
     if comparative.status == "regressed" || expectancy.expectancy_pct < 0.0 {
         items.push(RecommendationItem {
             recommendation_id: "regression_guard".to_string(),
@@ -1314,7 +1460,7 @@ fn build_recommendations(
         });
     }
 
-    items.truncate(4);
+    items.truncate(5);
     items
 }
 
