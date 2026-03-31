@@ -87,6 +87,40 @@ interface AiAnalystData {
     expectancy_usdt?: number;
     expectancy_pct?: number;
   };
+  comparative_diagnostics?: {
+    status?: string;
+    reasons?: string[];
+    current_window_hours?: number;
+    previous_window_hours?: number;
+    closed_trades?: { current?: number; previous?: number; delta?: number };
+    win_rate_pct?: { current?: number; previous?: number; delta?: number };
+    expectancy_pct?: { current?: number; previous?: number; delta?: number };
+    payoff_ratio?: { current?: number; previous?: number; delta?: number };
+    thesis_invalidated_pct?: { current?: number; previous?: number; delta?: number };
+    trailing_stop_pct?: { current?: number; previous?: number; delta?: number };
+    long_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
+    short_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
+  };
+  recommendations?: Array<{
+    recommendation_id?: string;
+    severity?: 'pass' | 'warn' | 'fail' | 'info' | string;
+    confidence?: string;
+    recommendation?: string;
+    evidence?: string;
+    expected_tradeoff?: string;
+  }>;
+  symbol_diagnostics?: Array<{
+    symbol?: string;
+    status?: string;
+    recommendation?: string;
+    confidence?: string;
+    trades?: number;
+    avg_pnl_pct?: number;
+    thesis_invalidated_trades?: number;
+    trailing_stop_trades?: number;
+    avg_thesis_pnl_pct?: number;
+    avg_trailing_pnl_pct?: number;
+  }>;
   tupa_evaluation?: {
     exit_pressure?: AnalystEvaluationSignal;
     directional_bias?: AnalystEvaluationSignal;
@@ -217,6 +251,12 @@ function toneClasses(severity?: string) {
   };
 }
 
+function comparativeTone(status?: string) {
+  if (status === 'regressed') return toneClasses('fail');
+  if (status === 'mixed' || status === 'insufficient_baseline') return toneClasses('warn');
+  return toneClasses('pass');
+}
+
 // Components
 function WalletCard({ label, amount, rate, accent = '#11c4ff' }: { label: string; amount?: number; rate?: number; accent?: string }) {
   return (
@@ -258,10 +298,14 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
   const symbolRisk = analyst?.tupa_evaluation?.symbol_risk;
   const summary = analyst?.tupa_evaluation?.summary || analyst?.summary;
   const expectancy = analyst?.expectancy;
+  const comparative = analyst?.comparative_diagnostics;
+  const recommendations = analyst?.recommendations || [];
+  const symbolDiagnostics = analyst?.symbol_diagnostics || [];
   const exitTone = toneClasses(exitPressure?.severity);
   const entryTone = toneClasses(entryPressure?.severity);
   const thesisTone = toneClasses(thesisQuality?.severity);
   const symbolTone = toneClasses(symbolRisk?.severity);
+  const comparativeToneState = comparativeTone(comparative?.status);
 
   return (
     <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
@@ -378,6 +422,88 @@ function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
           {analyst?.tupa_error ? (
             <div className="mt-3 text-xs text-red-300">Tupa evaluation fallback: {analyst.tupa_error}</div>
           ) : null}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">What Changed</div>
+              <Badge className={cn('text-[10px] tracking-[0.16em]', comparativeToneState.badge)}>
+                {comparative?.status || 'stable'}
+              </Badge>
+            </div>
+            <div className={cn('mt-3 text-lg font-semibold', comparativeToneState.text)}>
+              {titleCase((comparative?.status || 'stable').replaceAll('_', ' '))}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              expectancy Δ {num(comparative?.expectancy_pct?.delta)}% · thesis Δ {num(comparative?.thesis_invalidated_pct?.delta)}%
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(comparative?.reasons || []).slice(0, 3).map((reason) => (
+                <Badge
+                  key={reason}
+                  className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300"
+                >
+                  {titleCase(reason.replaceAll('_', ' '))}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4 xl:col-span-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Top Recommendations</div>
+            <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+              {recommendations.length === 0 ? (
+                <div className="text-sm text-slate-400">No recommendations yet.</div>
+              ) : (
+                recommendations.slice(0, 4).map((item) => {
+                  const tone = toneClasses(item.severity);
+                  return (
+                    <div key={item.recommendation_id} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-100">
+                          {titleCase((item.recommendation || 'observe').replaceAll('_', ' '))}
+                        </div>
+                        <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                          {item.confidence || item.severity || 'info'}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbols To Watch</div>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {symbolDiagnostics.length === 0 ? (
+              <div className="text-sm text-slate-400">No symbol diagnostics yet.</div>
+            ) : (
+              symbolDiagnostics.slice(0, 4).map((item) => {
+                const tone = comparativeTone(item.status);
+                return (
+                  <div key={item.symbol} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-100">{item.symbol || 'N/A'}</div>
+                      <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                        {item.status || 'mixed'}
+                      </Badge>
+                    </div>
+                    <div className={cn('mt-2 text-sm font-medium', (item.avg_pnl_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                      {num(item.avg_pnl_pct)}%
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">
+                      thesis {item.thesis_invalidated_trades ?? 0} · trailing {item.trailing_stop_trades ?? 0}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

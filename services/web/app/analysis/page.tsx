@@ -61,6 +61,40 @@ type AiAnalystData = {
     expectancy_usdt?: number;
     expectancy_pct?: number;
   };
+  comparative_diagnostics?: {
+    status?: string;
+    reasons?: string[];
+    current_window_hours?: number;
+    previous_window_hours?: number;
+    closed_trades?: { current?: number; previous?: number; delta?: number };
+    win_rate_pct?: { current?: number; previous?: number; delta?: number };
+    expectancy_pct?: { current?: number; previous?: number; delta?: number };
+    payoff_ratio?: { current?: number; previous?: number; delta?: number };
+    thesis_invalidated_pct?: { current?: number; previous?: number; delta?: number };
+    trailing_stop_pct?: { current?: number; previous?: number; delta?: number };
+    long_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
+    short_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
+  };
+  recommendations?: Array<{
+    recommendation_id?: string;
+    severity?: 'pass' | 'warn' | 'fail' | 'info' | string;
+    confidence?: string;
+    recommendation?: string;
+    evidence?: string;
+    expected_tradeoff?: string;
+  }>;
+  symbol_diagnostics?: Array<{
+    symbol?: string;
+    status?: string;
+    recommendation?: string;
+    confidence?: string;
+    trades?: number;
+    avg_pnl_pct?: number;
+    thesis_invalidated_trades?: number;
+    trailing_stop_trades?: number;
+    avg_thesis_pnl_pct?: number;
+    avg_trailing_pnl_pct?: number;
+  }>;
   by_close_reason?: BreakdownItem[];
   by_side?: BreakdownItem[];
   by_symbol?: BreakdownItem[];
@@ -115,6 +149,12 @@ function toneClasses(severity?: string) {
     badge: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300',
     text: 'text-emerald-300',
   };
+}
+
+function comparativeTone(status?: string) {
+  if (status === 'regressed') return toneClasses('fail');
+  if (status === 'mixed' || status === 'insufficient_baseline') return toneClasses('warn');
+  return toneClasses('pass');
 }
 
 function BreakdownTable({
@@ -201,6 +241,8 @@ export default function AnalysisPage() {
   const entryTone = toneClasses(analyst?.tupa_evaluation?.entry_pressure?.severity);
   const thesisTone = toneClasses(analyst?.tupa_evaluation?.thesis_quality?.severity);
   const symbolTone = toneClasses(analyst?.tupa_evaluation?.symbol_risk?.severity);
+  const comparative = analyst?.comparative_diagnostics;
+  const comparativeToneState = comparativeTone(comparative?.status);
 
   return (
     <div className="min-h-screen bg-background">
@@ -356,6 +398,83 @@ export default function AnalysisPage() {
           <BreakdownTable title="By Side" items={analyst?.by_side || []} nameLabel="Side" />
         </div>
 
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Comparative Diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Status</div>
+                  <Badge className={cn('text-[10px] tracking-[0.16em]', comparativeToneState.badge)}>
+                    {comparative?.status || 'stable'}
+                  </Badge>
+                </div>
+                <div className={cn('mt-3 text-lg font-semibold', comparativeToneState.text)}>
+                  {titleCase((comparative?.status || 'stable').replaceAll('_', ' '))}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Expectancy Δ</div>
+                    <div className="mt-1 text-slate-200">{num(comparative?.expectancy_pct?.delta)}%</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Thesis Δ</div>
+                    <div className="mt-1 text-slate-200">{num(comparative?.thesis_invalidated_pct?.delta)}%</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Trailing Δ</div>
+                    <div className="mt-1 text-slate-200">{num(comparative?.trailing_stop_pct?.delta)}%</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Long Avg Δ</div>
+                    <div className="mt-1 text-slate-200">{num(comparative?.long_avg_pnl_pct?.delta)}%</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(comparative?.reasons || []).map((reason) => (
+                    <Badge key={reason} className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                      {titleCase(reason.replaceAll('_', ' '))}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Recommendations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {(analyst?.recommendations || []).length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No recommendations yet.</div>
+                ) : (
+                  (analyst?.recommendations || []).map((item) => {
+                    const tone = toneClasses(item.severity);
+                    return (
+                      <div key={item.recommendation_id} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-100">
+                            {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
+                          </div>
+                          <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                            {item.confidence || item.severity || 'info'}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
+                        <div className="mt-2 text-xs text-slate-500">{item.expected_tradeoff}</div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card className="bg-panel/50 border-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Expectancy Breakdown</CardTitle>
@@ -418,6 +537,42 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="bg-panel/50 border-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Symbol Diagnostics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {(analyst?.symbol_diagnostics || []).length === 0 ? (
+                <div className="text-sm text-muted-foreground">No symbol diagnostics yet.</div>
+              ) : (
+                (analyst?.symbol_diagnostics || []).map((item) => {
+                  const tone = comparativeTone(item.status);
+                  return (
+                    <div key={item.symbol} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-100">{item.symbol}</div>
+                        <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                          {item.status || 'mixed'}
+                        </Badge>
+                      </div>
+                      <div className={cn('mt-2 text-lg font-semibold', (item.avg_pnl_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                        {num(item.avg_pnl_pct)}%
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400">
+                        thesis {item.thesis_invalidated_trades ?? 0} · trailing {item.trailing_stop_trades ?? 0}
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className="bg-panel/50 border-border">
           <CardHeader className="pb-2">
