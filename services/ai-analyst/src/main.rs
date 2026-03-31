@@ -1282,8 +1282,9 @@ fn build_regime_diagnostics(
     let consensus_block_share = snapshot.blockers.consensus_blocks as f64 / total_blockers;
     let fragile_symbols = symbols.iter().filter(|item| item.status == "fragile").count();
 
-    let regime =
-        if snapshot.sides.long_avg_pnl_pct > 0.20 && snapshot.sides.short_avg_pnl_pct <= 0.05 {
+    let regime = if snapshot.sides.long_avg_pnl_pct > 0.20
+        && snapshot.sides.short_avg_pnl_pct <= 0.05
+    {
         "long_biased_trend"
     } else if snapshot.sides.short_avg_pnl_pct > 0.20
         && snapshot.sides.long_avg_pnl_pct <= 0.05
@@ -1320,14 +1321,14 @@ fn build_regime_diagnostics(
         "low"
     };
 
-    let exit_profile =
-        if snapshot.exits.trailing_stop_pct >= snapshot.exits.thesis_invalidated_pct {
-            "trailing_dominant"
-        } else if snapshot.exits.thesis_invalidated_pct >= 65.0 {
-            "thesis_dominant"
-        } else {
-            "balanced"
-        };
+    let exit_profile = if snapshot.exits.trailing_stop_pct >= snapshot.exits.thesis_invalidated_pct
+    {
+        "trailing_dominant"
+    } else if snapshot.exits.thesis_invalidated_pct >= 65.0 {
+        "thesis_dominant"
+    } else {
+        "balanced"
+    };
 
     let mut evidence = vec![
         format!(
