@@ -465,18 +465,17 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         thesis_summary: &thesis_summary,
         thesis_breakdown: &thesis_invalidation_breakdown,
     });
-    let comparative_diagnostics =
-        build_comparative_diagnostics(ComparativeDiagnosticsContext {
-            hours,
-            current_summary: &summary,
-            previous_summary: &previous_summary,
-            current_expectancy: &expectancy,
-            previous_expectancy: &previous_expectancy,
-            current_by_close_reason: &by_close_reason,
-            previous_by_close_reason: &previous_by_close_reason,
-            current_by_side: &by_side,
-            previous_by_side: &previous_by_side,
-        });
+    let comparative_diagnostics = build_comparative_diagnostics(ComparativeDiagnosticsContext {
+        hours,
+        current_summary: &summary,
+        previous_summary: &previous_summary,
+        current_expectancy: &expectancy,
+        previous_expectancy: &previous_expectancy,
+        current_by_close_reason: &by_close_reason,
+        previous_by_close_reason: &previous_by_close_reason,
+        current_by_side: &by_side,
+        previous_by_side: &previous_by_side,
+    });
     let (tupa_evaluation, tupa_error) = match run_tupa_diagnostics(&tupa_snapshot, state).await {
         Ok(value) => (Some(value), None),
         Err(err) => {
@@ -1064,9 +1063,7 @@ struct ComparativeDiagnosticsContext<'a> {
     previous_by_side: &'a [BreakdownItem],
 }
 
-fn build_comparative_diagnostics(
-    ctx: ComparativeDiagnosticsContext<'_>,
-) -> ComparativeDiagnostics {
+fn build_comparative_diagnostics(ctx: ComparativeDiagnosticsContext<'_>) -> ComparativeDiagnostics {
     let ComparativeDiagnosticsContext {
         hours,
         current_summary,
