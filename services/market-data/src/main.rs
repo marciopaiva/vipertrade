@@ -78,6 +78,11 @@ struct ExchangeSignal {
     spread_pct: f64,
     ema_fast: f64,
     ema_slow: f64,
+    bollinger_upper: f64,
+    bollinger_middle: f64,
+    bollinger_lower: f64,
+    bollinger_bandwidth: f64,
+    bollinger_percent_b: f64,
     rsi_14: f64,
     macd_line: f64,
     macd_signal: f64,
@@ -87,7 +92,21 @@ struct ExchangeSignal {
     trend_slope: f64,
 }
 
-type IndicatorBundle = (f64, f64, f64, f64, f64, f64, f64);
+#[derive(Debug, Clone, Copy)]
+struct IndicatorBundle {
+    ema_fast: f64,
+    ema_slow: f64,
+    bollinger_upper: f64,
+    bollinger_middle: f64,
+    bollinger_lower: f64,
+    bollinger_bandwidth: f64,
+    bollinger_percent_b: f64,
+    rsi_14: f64,
+    macd_line: f64,
+    macd_signal: f64,
+    macd_histogram: f64,
+    volume_ratio: f64,
+}
 
 #[derive(Debug, Deserialize)]
 struct AnalyticsScoresResponse {
@@ -479,6 +498,39 @@ fn compute_macd(candles: &[Candle]) -> Option<(f64, f64, f64)> {
     Some((macd_line, signal, histogram))
 }
 
+fn compute_bollinger(candles: &[Candle], period: usize) -> Option<(f64, f64, f64, f64, f64)> {
+    if candles.len() < period || period == 0 {
+        return None;
+    }
+
+    let window = &candles[candles.len() - period..];
+    let mean = window.iter().map(|c| c.close).sum::<f64>() / period as f64;
+    let variance = window
+        .iter()
+        .map(|c| {
+            let delta = c.close - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / period as f64;
+    let std_dev = variance.sqrt();
+    let upper = mean + (2.0 * std_dev);
+    let lower = mean - (2.0 * std_dev);
+    let bandwidth = if mean.abs() > f64::EPSILON {
+        ((upper - lower) / mean).max(0.0)
+    } else {
+        0.0
+    };
+    let last_close = window.last()?.close;
+    let percent_b = if (upper - lower).abs() > f64::EPSILON {
+        (last_close - lower) / (upper - lower)
+    } else {
+        0.5
+    };
+
+    Some((upper, mean, lower, bandwidth, percent_b))
+}
+
 fn compute_volume_ratio(candles: &[Candle], lookback: usize) -> Option<f64> {
     if candles.len() < lookback + 1 {
         return None;
@@ -519,6 +571,14 @@ fn compute_indicator_bundle_complete(
         .ok_or_else(|| format!("{} {} ema_fast incomplete", source, symbol))?;
     let ema_slow = compute_ema(candles, 50)
         .ok_or_else(|| format!("{} {} ema_slow incomplete", source, symbol))?;
+    let (
+        bollinger_upper,
+        bollinger_middle,
+        bollinger_lower,
+        bollinger_bandwidth,
+        bollinger_percent_b,
+    ) = compute_bollinger(candles, 20)
+        .ok_or_else(|| format!("{} {} bollinger incomplete", source, symbol))?;
     let rsi_14 =
         compute_rsi14(candles).ok_or_else(|| format!("{} {} rsi_14 incomplete", source, symbol))?;
     let (macd_line, macd_signal, macd_histogram) =
@@ -526,15 +586,20 @@ fn compute_indicator_bundle_complete(
     let volume_ratio = compute_volume_ratio(candles, 20)
         .ok_or_else(|| format!("{} {} volume_ratio incomplete", source, symbol))?;
 
-    Ok((
+    Ok(IndicatorBundle {
         ema_fast,
         ema_slow,
+        bollinger_upper,
+        bollinger_middle,
+        bollinger_lower,
+        bollinger_bandwidth,
+        bollinger_percent_b,
         rsi_14,
         macd_line,
         macd_signal,
         macd_histogram,
         volume_ratio,
-    ))
+    })
 }
 
 fn composite_trend_score(
@@ -729,15 +794,14 @@ fn build_exchange_signal(
         .max(0.0);
     let current_price = snapshot.current_price.max(0.0);
     let atr_14 = compute_atr14(&snapshot.candles);
-    let (ema_fast, ema_slow, rsi_14, macd_line, macd_signal, macd_histogram, volume_ratio) =
-        compute_indicator_bundle_complete(snapshot.source, symbol, &snapshot.candles)?;
+    let indicators = compute_indicator_bundle_complete(snapshot.source, symbol, &snapshot.candles)?;
     let trend_score = composite_trend_score(
         last_closed_price,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_histogram,
-        volume_ratio,
+        indicators.ema_fast,
+        indicators.ema_slow,
+        indicators.rsi_14,
+        indicators.macd_histogram,
+        indicators.volume_ratio,
     );
     let (regime, trend_slope) = classify_regime(&snapshot.candles, trend_score);
 
@@ -749,13 +813,18 @@ fn build_exchange_signal(
         funding_rate: snapshot.funding_rate,
         trend_score,
         spread_pct: snapshot.spread_pct,
-        ema_fast,
-        ema_slow,
-        rsi_14,
-        macd_line,
-        macd_signal,
-        macd_histogram,
-        volume_ratio,
+        ema_fast: indicators.ema_fast,
+        ema_slow: indicators.ema_slow,
+        bollinger_upper: indicators.bollinger_upper,
+        bollinger_middle: indicators.bollinger_middle,
+        bollinger_lower: indicators.bollinger_lower,
+        bollinger_bandwidth: indicators.bollinger_bandwidth,
+        bollinger_percent_b: indicators.bollinger_percent_b,
+        rsi_14: indicators.rsi_14,
+        macd_line: indicators.macd_line,
+        macd_signal: indicators.macd_signal,
+        macd_histogram: indicators.macd_histogram,
+        volume_ratio: indicators.volume_ratio,
         regime,
         trend_slope,
     })
@@ -1088,6 +1157,11 @@ fn aggregate_signals(
     let mut slope_sum = 0.0;
     let mut ema_fast_sum = 0.0;
     let mut ema_slow_sum = 0.0;
+    let mut bollinger_upper_sum = 0.0;
+    let mut bollinger_middle_sum = 0.0;
+    let mut bollinger_lower_sum = 0.0;
+    let mut bollinger_bandwidth_sum = 0.0;
+    let mut bollinger_percent_b_sum = 0.0;
     let mut rsi_sum = 0.0;
     let mut macd_line_sum = 0.0;
     let mut macd_signal_sum = 0.0;
@@ -1106,6 +1180,11 @@ fn aggregate_signals(
         slope_sum += w * s.trend_slope;
         ema_fast_sum += w * s.ema_fast;
         ema_slow_sum += w * s.ema_slow;
+        bollinger_upper_sum += w * s.bollinger_upper;
+        bollinger_middle_sum += w * s.bollinger_middle;
+        bollinger_lower_sum += w * s.bollinger_lower;
+        bollinger_bandwidth_sum += w * s.bollinger_bandwidth;
+        bollinger_percent_b_sum += w * s.bollinger_percent_b;
         rsi_sum += w * s.rsi_14;
         macd_line_sum += w * s.macd_line;
         macd_signal_sum += w * s.macd_signal;
@@ -1137,6 +1216,31 @@ fn aggregate_signals(
         ema_slow_sum / weight_total
     } else {
         0.0
+    };
+    let consensus_bollinger_upper = if weight_total > 0.0 {
+        bollinger_upper_sum / weight_total
+    } else {
+        0.0
+    };
+    let consensus_bollinger_middle = if weight_total > 0.0 {
+        bollinger_middle_sum / weight_total
+    } else {
+        0.0
+    };
+    let consensus_bollinger_lower = if weight_total > 0.0 {
+        bollinger_lower_sum / weight_total
+    } else {
+        0.0
+    };
+    let consensus_bollinger_bandwidth = if weight_total > 0.0 {
+        bollinger_bandwidth_sum / weight_total
+    } else {
+        0.0
+    };
+    let consensus_bollinger_percent_b = if weight_total > 0.0 {
+        bollinger_percent_b_sum / weight_total
+    } else {
+        0.5
     };
     let consensus_rsi_14 = if weight_total > 0.0 {
         rsi_sum / weight_total
@@ -1204,6 +1308,21 @@ fn aggregate_signals(
     let ema_slow = bybit_signal
         .map(|s| s.ema_slow)
         .unwrap_or(consensus_ema_slow);
+    let bollinger_upper = bybit_signal
+        .map(|s| s.bollinger_upper)
+        .unwrap_or(consensus_bollinger_upper);
+    let bollinger_middle = bybit_signal
+        .map(|s| s.bollinger_middle)
+        .unwrap_or(consensus_bollinger_middle);
+    let bollinger_lower = bybit_signal
+        .map(|s| s.bollinger_lower)
+        .unwrap_or(consensus_bollinger_lower);
+    let bollinger_bandwidth = bybit_signal
+        .map(|s| s.bollinger_bandwidth)
+        .unwrap_or(consensus_bollinger_bandwidth);
+    let bollinger_percent_b = bybit_signal
+        .map(|s| s.bollinger_percent_b)
+        .unwrap_or(consensus_bollinger_percent_b);
     let rsi_14 = bybit_signal.map(|s| s.rsi_14).unwrap_or(consensus_rsi_14);
     let macd_line = bybit_signal
         .map(|s| s.macd_line)
@@ -1236,8 +1355,18 @@ fn aggregate_signals(
         consensus_trend_slope,
         ema_fast,
         ema_slow,
+        bollinger_upper,
+        bollinger_middle,
+        bollinger_lower,
+        bollinger_bandwidth,
+        bollinger_percent_b,
         consensus_ema_fast,
         consensus_ema_slow,
+        consensus_bollinger_upper,
+        consensus_bollinger_middle,
+        consensus_bollinger_lower,
+        consensus_bollinger_bandwidth,
+        consensus_bollinger_percent_b,
         rsi_14,
         consensus_rsi_14,
         macd_line,

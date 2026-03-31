@@ -37,6 +37,17 @@ interface PositionTableProps {
 }
 
 export function PositionTable({ positions, marketSignals = [], className }: PositionTableProps) {
+  const regimeIcon = (regime?: string) => {
+    switch ((regime || 'neutral').toLowerCase()) {
+      case 'bullish':
+        return '↗';
+      case 'bearish':
+        return '↘';
+      default:
+        return '•';
+    }
+  };
+
   const regimeBadgeStyle = (regime?: string) => {
     switch ((regime || 'neutral').toLowerCase()) {
       case 'bullish':
@@ -135,10 +146,10 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
       : null;
 
     const trailingState = p.trailing_stop_activated
-      ? { label: 'Trailing Active', tone: 'active' as const }
+      ? { label: 'Live', tone: 'active' as const }
       : trailingArmedByPrice
-        ? { label: 'Ready to Arm', tone: 'armed' as const }
-        : { label: 'Waiting', tone: 'waiting' as const };
+        ? { label: 'Armed', tone: 'armed' as const }
+        : { label: 'Arming', tone: 'waiting' as const };
 
     const trailingDisplayPrice = typeof trailingLivePrice === 'number'
       ? trailingLivePrice
@@ -270,9 +281,10 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                       <Badge
                         className="h-6 w-full justify-center px-2 text-[11px] font-medium"
                         style={{
-                          backgroundColor: '#0f172acc',
-                          color: '#e2e8f0',
-                          borderColor: '#334155',
+                          backgroundColor: position.trailing_stop_activated ? '#10b98118' : position.trailingArmedByPrice ? '#f59e0b14' : '#0f172acc',
+                          color: position.trailing_stop_activated ? '#86efac' : position.trailingArmedByPrice ? '#fcd34d' : '#e2e8f0',
+                          borderColor: position.trailing_stop_activated ? '#10b98155' : position.trailingArmedByPrice ? '#f59e0b55' : '#334155',
+                          boxShadow: position.trailing_stop_activated ? '0 0 18px rgba(16,185,129,0.18)' : undefined,
                         }}
                       >
                         ${position.trailingDisplayPrice.toFixed(6)}
@@ -297,16 +309,43 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                   </div>
 
                   <div>
-                    <Badge
-                      style={{
-                        backgroundColor: position.trailing_stop_activated ? '#10b98122' : position.trailingArmedByPrice ? '#f59e0b22' : '#64748b22',
-                        color: position.trailing_stop_activated ? '#10b981' : position.trailingArmedByPrice ? '#f59e0b' : '#64748b',
-                        borderColor: position.trailing_stop_activated ? '#10b98155' : position.trailingArmedByPrice ? '#f59e0b55' : '#64748b55'
-                      }}
-                      className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium"
-                    >
-                      {position.trailingState.label}
-                    </Badge>
+                    <div className="min-w-[112px] rounded-md border border-slate-700/70 bg-slate-900/60 px-2 py-1.5">
+                      <div className="flex items-center justify-between gap-2 text-[10px] font-medium">
+                        <span
+                          style={{
+                            color: position.trailing_stop_activated ? '#34d399' : position.trailingArmedByPrice ? '#fbbf24' : '#94a3b8',
+                          }}
+                        >
+                          {position.trailingState.label}
+                        </span>
+                        <span className="text-[9px] text-slate-500">
+                          {position.trailing_stop_activated
+                            ? 'Trail on'
+                            : position.trailingArmedByPrice
+                              ? 'Ready'
+                              : `${((position.distanceToArmPct ?? 0) * 100).toFixed(2)}%`}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all duration-500',
+                            position.trailing_stop_activated
+                              ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.55)]'
+                              : position.trailingArmedByPrice
+                                ? 'bg-amber-300'
+                                : 'bg-slate-500'
+                          )}
+                          style={{
+                            width: `${
+                              position.trailing_stop_activated
+                                ? 100
+                                : Math.max(6, Math.round((position.trailingProgressPct ?? 0) * 100))
+                            }%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 xl:justify-start">
@@ -314,13 +353,15 @@ export function PositionTable({ positions, marketSignals = [], className }: Posi
                       className="h-5 min-w-[120px] justify-center px-2 text-[10px] font-medium opacity-90"
                       style={regimeBadgeStyle(position.consensusSide)}
                     >
-                      Consensus {position.consensusSide}
+                      <span className="mr-1.5 text-[11px]">{regimeIcon(position.consensusSide)}</span>
+                      Consensus
                     </Badge>
                     <Badge
                       className="h-5 min-w-[104px] justify-center px-2 text-[10px] font-medium opacity-90"
                       style={regimeBadgeStyle(position.bybitRegime)}
                     >
-                      Bybit {position.bybitRegime}
+                      <span className="mr-1.5 text-[11px]">{regimeIcon(position.bybitRegime)}</span>
+                      Bybit
                     </Badge>
                   </div>
                 </div>

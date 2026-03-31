@@ -25,8 +25,15 @@ type AnalystEvaluationSignal = {
   severity?: 'pass' | 'warn' | 'fail';
   dominant_gate?: string;
   symbol?: string;
+  recommendation?: string;
+  top_reason?: string;
   thesis_invalidated_pct?: number;
   trailing_stop_pct?: number;
+};
+
+type ThesisReasonItem = {
+  reason: string;
+  total: number;
 };
 
 type AiAnalystData = {
@@ -42,14 +49,28 @@ type AiAnalystData = {
     avg_duration_s?: number;
     win_rate_pct?: number;
   };
+  expectancy?: {
+    winning_trades?: number;
+    losing_trades?: number;
+    neutral_trades?: number;
+    avg_win_usdt?: number;
+    avg_win_pct?: number;
+    avg_loss_usdt?: number;
+    avg_loss_pct?: number;
+    payoff_ratio?: number;
+    expectancy_usdt?: number;
+    expectancy_pct?: number;
+  };
   by_close_reason?: BreakdownItem[];
   by_side?: BreakdownItem[];
   by_symbol?: BreakdownItem[];
   top_entry_blockers?: BlockerItem[];
+  thesis_invalidation_breakdown?: ThesisReasonItem[];
   tupa_evaluation?: {
     exit_pressure?: AnalystEvaluationSignal;
     directional_bias?: AnalystEvaluationSignal;
     entry_pressure?: AnalystEvaluationSignal;
+    thesis_quality?: AnalystEvaluationSignal;
     symbol_risk?: AnalystEvaluationSignal;
   };
 };
@@ -178,6 +199,7 @@ export default function AnalysisPage() {
   const analyst = useMemo(() => payload?.ai_analyst, [payload]);
   const exitTone = toneClasses(analyst?.tupa_evaluation?.exit_pressure?.severity);
   const entryTone = toneClasses(analyst?.tupa_evaluation?.entry_pressure?.severity);
+  const thesisTone = toneClasses(analyst?.tupa_evaluation?.thesis_quality?.severity);
   const symbolTone = toneClasses(analyst?.tupa_evaluation?.symbol_risk?.severity);
 
   return (
@@ -230,7 +252,7 @@ export default function AnalysisPage() {
               </div>
             ) : null}
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
                 <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Closed Trades</div>
                 <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-slate-100">
@@ -273,6 +295,36 @@ export default function AnalysisPage() {
 
               <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
                 <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Thesis Guard</div>
+                  <Badge className={cn('text-[10px] tracking-[0.16em]', thesisTone.badge)}>
+                    {analyst?.tupa_evaluation?.thesis_quality?.severity || 'pass'}
+                  </Badge>
+                </div>
+                <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', thesisTone.text)}>
+                  {titleCase((analyst?.tupa_evaluation?.thesis_quality?.reason || 'stable').replace('thesis_quality_', ''))}
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  {titleCase((analyst?.tupa_evaluation?.thesis_quality?.recommendation || 'keep_current_thesis_policy').replaceAll('_', ' '))}
+                </div>
+              </div>
+
+              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Expectancy</div>
+                <div
+                  className={cn(
+                    'mt-3 text-3xl font-semibold tracking-[-0.03em]',
+                    (analyst?.expectancy?.expectancy_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300',
+                  )}
+                >
+                  {num(analyst?.expectancy?.expectancy_pct)}%
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  payoff {num(analyst?.expectancy?.payoff_ratio)} · {usd(analyst?.expectancy?.expectancy_usdt)} / trade
+                </div>
+              </div>
+
+              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+                <div className="flex items-center justify-between gap-3">
                   <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbol Risk</div>
                   <Badge className={cn('text-[10px] tracking-[0.16em]', symbolTone.badge)}>
                     {analyst?.tupa_evaluation?.symbol_risk?.severity || 'pass'}
@@ -304,6 +356,43 @@ export default function AnalysisPage() {
           <BreakdownTable title="By Side" items={analyst?.by_side || []} nameLabel="Side" />
         </div>
 
+        <Card className="bg-panel/50 border-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Expectancy Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Win / Loss</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">
+                  {(analyst?.expectancy?.winning_trades ?? 0)} / {(analyst?.expectancy?.losing_trades ?? 0)}
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Avg Win</div>
+                <div className="mt-2 text-lg font-semibold text-emerald-300">
+                  {num(analyst?.expectancy?.avg_win_pct)}%
+                </div>
+                <div className="text-xs text-slate-500">{usd(analyst?.expectancy?.avg_win_usdt)}</div>
+              </div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Avg Loss</div>
+                <div className="mt-2 text-lg font-semibold text-red-300">
+                  {num(analyst?.expectancy?.avg_loss_pct)}%
+                </div>
+                <div className="text-xs text-slate-500">{usd(analyst?.expectancy?.avg_loss_usdt)}</div>
+              </div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Payoff Ratio</div>
+                <div className="mt-2 text-lg font-semibold text-slate-100">
+                  {num(analyst?.expectancy?.payoff_ratio)}
+                </div>
+                <div className="text-xs text-slate-500">expectancy {usd(analyst?.expectancy?.expectancy_usdt)}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <BreakdownTable title="By Symbol" items={analyst?.by_symbol || []} nameLabel="Symbol" />
 
@@ -329,6 +418,28 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="bg-panel/50 border-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Thesis Invalidation Reasons</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {(analyst?.thesis_invalidation_breakdown || []).length === 0 ? (
+                <div className="text-sm text-muted-foreground">No thesis invalidation breakdown captured yet.</div>
+              ) : (
+                (analyst?.thesis_invalidation_breakdown || []).map((item) => (
+                  <div key={item.reason} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-100 break-all">{item.reason}</div>
+                      <div className="text-sm text-amber-300">{item.total}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

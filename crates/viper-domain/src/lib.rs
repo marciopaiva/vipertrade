@@ -32,9 +32,29 @@ pub struct MarketSignal {
     #[serde(default)]
     pub ema_slow: f64,
     #[serde(default)]
+    pub bollinger_upper: f64,
+    #[serde(default)]
+    pub bollinger_middle: f64,
+    #[serde(default)]
+    pub bollinger_lower: f64,
+    #[serde(default)]
+    pub bollinger_bandwidth: f64,
+    #[serde(default)]
+    pub bollinger_percent_b: f64,
+    #[serde(default)]
     pub consensus_ema_fast: f64,
     #[serde(default)]
     pub consensus_ema_slow: f64,
+    #[serde(default)]
+    pub consensus_bollinger_upper: f64,
+    #[serde(default)]
+    pub consensus_bollinger_middle: f64,
+    #[serde(default)]
+    pub consensus_bollinger_lower: f64,
+    #[serde(default)]
+    pub consensus_bollinger_bandwidth: f64,
+    #[serde(default)]
+    pub consensus_bollinger_percent_b: f64,
     #[serde(default)]
     pub rsi_14: f64,
     #[serde(default)]
@@ -133,11 +153,60 @@ impl MarketSignal {
         if !(self.ema_slow.is_finite()) {
             return Err("market signal ema_slow must be finite".to_string());
         }
+        if !(self.bollinger_upper.is_finite()) {
+            return Err("market signal bollinger_upper must be finite".to_string());
+        }
+        if !(self.bollinger_middle.is_finite()) {
+            return Err("market signal bollinger_middle must be finite".to_string());
+        }
+        if !(self.bollinger_lower.is_finite()) {
+            return Err("market signal bollinger_lower must be finite".to_string());
+        }
+        if !(self.bollinger_upper >= self.bollinger_middle
+            && self.bollinger_middle >= self.bollinger_lower)
+        {
+            return Err(
+                "market signal bollinger bands must satisfy upper >= middle >= lower".to_string(),
+            );
+        }
+        if !(self.bollinger_bandwidth.is_finite() && self.bollinger_bandwidth >= 0.0) {
+            return Err("market signal bollinger_bandwidth must be finite and >= 0".to_string());
+        }
+        if !(self.bollinger_percent_b.is_finite()) {
+            return Err("market signal bollinger_percent_b must be finite".to_string());
+        }
         if !(self.consensus_ema_fast.is_finite()) {
             return Err("market signal consensus_ema_fast must be finite".to_string());
         }
         if !(self.consensus_ema_slow.is_finite()) {
             return Err("market signal consensus_ema_slow must be finite".to_string());
+        }
+        if !(self.consensus_bollinger_upper.is_finite()) {
+            return Err("market signal consensus_bollinger_upper must be finite".to_string());
+        }
+        if !(self.consensus_bollinger_middle.is_finite()) {
+            return Err("market signal consensus_bollinger_middle must be finite".to_string());
+        }
+        if !(self.consensus_bollinger_lower.is_finite()) {
+            return Err("market signal consensus_bollinger_lower must be finite".to_string());
+        }
+        if !(self.consensus_bollinger_upper >= self.consensus_bollinger_middle
+            && self.consensus_bollinger_middle >= self.consensus_bollinger_lower)
+        {
+            return Err(
+                "market signal consensus bollinger bands must satisfy upper >= middle >= lower"
+                    .to_string(),
+            );
+        }
+        if !(self.consensus_bollinger_bandwidth.is_finite()
+            && self.consensus_bollinger_bandwidth >= 0.0)
+        {
+            return Err(
+                "market signal consensus_bollinger_bandwidth must be finite and >= 0".to_string(),
+            );
+        }
+        if !(self.consensus_bollinger_percent_b.is_finite()) {
+            return Err("market signal consensus_bollinger_percent_b must be finite".to_string());
         }
         if !(self.rsi_14.is_finite() && (0.0..=100.0).contains(&self.rsi_14)) {
             return Err("market signal rsi_14 must be finite and between 0 and 100".to_string());
@@ -325,8 +394,18 @@ mod tests {
             consensus_trend_slope: 0.0038,
             ema_fast: 0.171,
             ema_slow: 0.168,
+            bollinger_upper: 0.176,
+            bollinger_middle: 0.169,
+            bollinger_lower: 0.162,
+            bollinger_bandwidth: 0.0828,
+            bollinger_percent_b: 0.5714,
             consensus_ema_fast: 0.1705,
             consensus_ema_slow: 0.1681,
+            consensus_bollinger_upper: 0.1758,
+            consensus_bollinger_middle: 0.1689,
+            consensus_bollinger_lower: 0.1620,
+            consensus_bollinger_bandwidth: 0.0817,
+            consensus_bollinger_percent_b: 0.5652,
             rsi_14: 61.0,
             consensus_rsi_14: 60.5,
             macd_line: 0.002,
