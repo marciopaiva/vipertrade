@@ -157,6 +157,7 @@ struct AnalysisResponse {
     recommendations: Vec<RecommendationItem>,
     symbol_diagnostics: Vec<SymbolDiagnosticItem>,
     regime_diagnostics: RegimeDiagnostics,
+    hypotheses: Vec<HypothesisItem>,
     tupa_snapshot: AnalystSnapshot,
     tupa_evaluation: Option<Value>,
     tupa_error: Option<String>,
@@ -232,6 +233,18 @@ struct RegimeDiagnostics {
     dominant_gate: String,
     exit_profile: String,
     evidence: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct HypothesisItem {
+    hypothesis_id: String,
+    priority: String,
+    confidence: String,
+    hypothesis: String,
+    evidence: String,
+    observe: String,
+    success_condition: String,
+    failure_condition: String,
 }
 
 #[derive(Debug)]
@@ -506,6 +519,14 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         &regime_diagnostics,
         tupa_evaluation.as_ref(),
     );
+    let hypotheses = build_hypotheses(
+        hours,
+        &tupa_snapshot,
+        &comparative_diagnostics,
+        &regime_diagnostics,
+        &symbol_diagnostics,
+        tupa_evaluation.as_ref(),
+    );
 
     let heuristic_summary = build_heuristic_summary(HeuristicSummaryContext {
         hours,
@@ -537,6 +558,7 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         recommendations,
         symbol_diagnostics,
         regime_diagnostics,
+        hypotheses,
         tupa_snapshot,
         tupa_evaluation,
         tupa_error,
@@ -1461,6 +1483,158 @@ fn build_recommendations(
     }
 
     items.truncate(5);
+    items
+}
+
+fn build_hypotheses(
+    hours: i64,
+    snapshot: &AnalystSnapshot,
+    comparative: &ComparativeDiagnostics,
+    regime: &RegimeDiagnostics,
+    symbols: &[SymbolDiagnosticItem],
+    tupa_evaluation: Option<&Value>,
+) -> Vec<HypothesisItem> {
+    let mut items = Vec::new();
+
+    if regime.status == "fragile" || regime.exit_profile == "thesis_dominant" {
+        items.push(HypothesisItem {
+            hypothesis_id: "regime_thesis_pressure".to_string(),
+            priority: "high".to_string(),
+            confidence: regime.confidence.clone(),
+            hypothesis: format!(
+                "current {} regime is pushing exits toward thesis invalidation faster than trailing capture can recover",
+                regime.regime
+            ),
+            evidence: format!(
+                "thesis exits {:.2}% vs trailing {:.2}%; expectancy {:+.4}%",
+                snapshot.exits.thesis_invalidated_pct,
+                snapshot.exits.trailing_stop_pct,
+                snapshot.expectancy.expectancy_pct
+            ),
+            observe: format!(
+                "observe the next 20 closes or the next {}h window, whichever comes first",
+                hours
+            ),
+            success_condition:
+                "thesis_invalidated share drops by at least 10 points while expectancy stays non-negative"
+                    .to_string(),
+            failure_condition:
+                "thesis_invalidated share stays above 70% and expectancy remains negative"
+                    .to_string(),
+        });
+    }
+
+    if comparative.status == "regressed"
+        && regime.dominant_gate == "consensus"
+        && snapshot.sides.short_trade_share_pct >= 55.0
+    {
+        items.push(HypothesisItem {
+            hypothesis_id: "short_entry_too_early".to_string(),
+            priority: "high".to_string(),
+            confidence: if snapshot.summary.closed_trades >= 30 {
+                "medium".to_string()
+            } else {
+                "low".to_string()
+            },
+            hypothesis:
+                "short entries are being accepted before consensus conditions are stable enough to survive the thesis guard"
+                    .to_string(),
+            evidence: format!(
+                "short share {:.2}%, short avg {:+.4}%, dominant gate {}",
+                snapshot.sides.short_trade_share_pct,
+                snapshot.sides.short_avg_pnl_pct,
+                regime.dominant_gate
+            ),
+            observe: "track the next 20 short closes and compare average pnl plus thesis-invalidated share"
+                .to_string(),
+            success_condition:
+                "average short pnl improves and short thesis-invalidated frequency declines"
+                    .to_string(),
+            failure_condition:
+                "short closes remain concentrated near the min-hold window with flat or negative average pnl"
+                    .to_string(),
+        });
+    }
+
+    if let Some(symbol) = symbols.iter().find(|item| item.status == "fragile") {
+        items.push(HypothesisItem {
+            hypothesis_id: format!("symbol_{}_fragility", symbol.symbol.to_lowercase()),
+            priority: "medium".to_string(),
+            confidence: symbol.confidence.clone(),
+            hypothesis: format!(
+                "{} is driving a disproportionate share of fragile performance and may need isolated tuning",
+                symbol.symbol
+            ),
+            evidence: format!(
+                "{} trades, avg pnl {:+.4}%, thesis {} vs trailing {}",
+                symbol.trades,
+                symbol.avg_pnl_pct,
+                symbol.thesis_invalidated_trades,
+                symbol.trailing_stop_trades
+            ),
+            observe: format!("track the next 5 to 10 closes for {}", symbol.symbol),
+            success_condition:
+                "symbol expectancy improves without increasing thesis-invalidated share"
+                    .to_string(),
+            failure_condition:
+                "symbol remains fragile across another window with no payoff improvement".to_string(),
+        });
+    }
+
+    if let Some(thesis) = tupa_evaluation.and_then(|value| value.get("thesis_quality")) {
+        let reason = thesis
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("thesis_quality_unknown");
+        let recommendation = thesis
+            .get("recommendation")
+            .and_then(Value::as_str)
+            .unwrap_or("review_thesis_guard");
+
+        if reason.contains("long_fragile") || reason.contains("threshold_driven") {
+            items.push(HypothesisItem {
+                hypothesis_id: "thesis_guard_long_balance".to_string(),
+                priority: "medium".to_string(),
+                confidence: "medium".to_string(),
+                hypothesis:
+                    "long thesis exits may still be responding too much to threshold pressure instead of payoff preservation"
+                        .to_string(),
+                evidence: format!(
+                    "thesis quality reason {} with recommendation {}",
+                    reason, recommendation
+                ),
+                observe: "compare the next 10 long thesis exits against the current window average"
+                    .to_string(),
+                success_condition:
+                    "average long thesis pnl improves while trailing capture remains stable"
+                        .to_string(),
+                failure_condition:
+                    "long thesis losses stay clustered with no reduction in damage".to_string(),
+            });
+        }
+    }
+
+    if items.is_empty() {
+        items.push(HypothesisItem {
+            hypothesis_id: "accumulate_sample".to_string(),
+            priority: "info".to_string(),
+            confidence: "low".to_string(),
+            hypothesis:
+                "the current window does not justify a strong tuning hypothesis yet; more sample is still the safest move"
+                    .to_string(),
+            evidence: format!(
+                "{} closed trades, comparative status {}",
+                snapshot.summary.closed_trades, comparative.status
+            ),
+            observe: format!("wait for the next {}h window before changing runtime parameters", hours),
+            success_condition:
+                "new sample strengthens either a regime or symbol-specific pattern".to_string(),
+            failure_condition:
+                "the next window remains too mixed to support a clear intervention".to_string(),
+        });
+    }
+
+    items.truncate(4);
     items
 }
 
