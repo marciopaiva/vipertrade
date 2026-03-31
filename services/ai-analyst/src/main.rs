@@ -1000,7 +1000,8 @@ async fn fetch_symbol_diagnostics(
                     "tighten_entry_or_reduce_priority".to_string(),
                     "high".to_string(),
                 )
-            } else if row.avg_pnl_pct > 0.0 && row.trailing_stop_trades > row.thesis_invalidated_trades
+            } else if row.avg_pnl_pct > 0.0
+                && row.trailing_stop_trades > row.thesis_invalidated_trades
             {
                 (
                     "healthy".to_string(),
@@ -1043,7 +1044,8 @@ fn breakdown_metric<F>(items: &[BreakdownItem], name: &str, field: F) -> f64
 where
     F: Fn(&BreakdownItem) -> f64,
 {
-    items.iter()
+    items
+        .iter()
         .find(|item| item.name.eq_ignore_ascii_case(name))
         .map(|item| field(item))
         .unwrap_or(0.0)
@@ -1188,7 +1190,10 @@ fn build_comparative_diagnostics(
             thesis_invalidated_pct_current,
             thesis_invalidated_pct_previous,
         ),
-        trailing_stop_pct: comparative_metric(trailing_stop_pct_current, trailing_stop_pct_previous),
+        trailing_stop_pct: comparative_metric(
+            trailing_stop_pct_current,
+            trailing_stop_pct_previous,
+        ),
         long_avg_pnl_pct: comparative_metric(long_avg_current, long_avg_previous),
         short_avg_pnl_pct: comparative_metric(short_avg_current, short_avg_previous),
     }
@@ -1223,7 +1228,9 @@ fn build_recommendations(
             confidence: "high".to_string(),
             recommendation: recommendation.to_string(),
             evidence: format!("thesis quality reason: {}", reason),
-            expected_tradeoff: "may reduce long-side thesis losses at the cost of fewer exits staying open".to_string(),
+            expected_tradeoff:
+                "may reduce long-side thesis losses at the cost of fewer exits staying open"
+                    .to_string(),
         });
     }
 
@@ -1259,7 +1266,9 @@ fn build_recommendations(
             confidence: "medium".to_string(),
             recommendation: format!("monitor dominant entry gate: {}", blocker.reason),
             evidence: format!("top blocker hit {} times in current window", blocker.total),
-            expected_tradeoff: "changing blocker thresholds can increase fill rate but may lower setup quality".to_string(),
+            expected_tradeoff:
+                "changing blocker thresholds can increase fill rate but may lower setup quality"
+                    .to_string(),
         });
     }
 
@@ -1273,19 +1282,22 @@ fn build_recommendations(
                 "comparative status={}, expectancy {:+.4}%",
                 comparative.status, expectancy.expectancy_pct
             ),
-            expected_tradeoff: "slower tuning cadence reduces the risk of chasing short-window noise".to_string(),
+            expected_tradeoff:
+                "slower tuning cadence reduces the risk of chasing short-window noise".to_string(),
         });
     } else if summary.closed_trades > 0 {
         items.push(RecommendationItem {
             recommendation_id: "keep_watching".to_string(),
             severity: "info".to_string(),
             confidence: "medium".to_string(),
-            recommendation: "keep the current changes running and accumulate more sample".to_string(),
+            recommendation: "keep the current changes running and accumulate more sample"
+                .to_string(),
             evidence: format!(
                 "{} closed trades, expectancy {:+.4}%, status {}",
                 summary.closed_trades, expectancy.expectancy_pct, comparative.status
             ),
-            expected_tradeoff: "more sample improves confidence before the next runtime change".to_string(),
+            expected_tradeoff: "more sample improves confidence before the next runtime change"
+                .to_string(),
         });
     }
 
