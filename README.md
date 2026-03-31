@@ -2,112 +2,88 @@
 
 <!-- markdownlint-disable MD033 -->
 <p align="center">
-  <img src="docs/assets/ViperTrade.png" alt="ViperTrade" width="280" />
+  <img src="docs/assets/ViperTrade.png" alt="ViperTrade" width="260" />
 </p>
 
+<h1 align="center">ViperTrade</h1>
+
+<p align="center"><strong>Auditable algorithmic trading with typed strategy policy and live operational telemetry.</strong></p>
+
+<p align="center">Rust microservices, TupaLang-driven strategy policy, Docker runtime parity, and operator-first observability.</p>
+
 <p align="center">
-  <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI" />
-  <img alt="Tupa" src="https://img.shields.io/badge/Tupa-Strategy%20Runtime-0ea5e9" />
+  <a href="https://github.com/marciopaiva/vipertrade/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marciopaiva/vipertrade/ci.yml?branch=main&label=CI" /></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.83-black?logo=rust" />
+  <img alt="TupaLang" src="https://img.shields.io/badge/TupaLang-typed%20strategy%20runtime-0ea5e9" />
   <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
   <img alt="Modes" src="https://img.shields.io/badge/Modes-paper%20%7C%20testnet%20%7C%20mainnet-0f766e" />
 </p>
+
+<p align="center">
+  <a href="docs/README.md">Docs</a> •
+  <a href="docs/spec/README.md">Specs</a> •
+  <a href="docs/releases/README.md">Releases</a> •
+  <a href="https://github.com/marciopaiva/tupalang">TupaLang</a>
+</p>
 <!-- markdownlint-enable MD033 -->
 
-Production-oriented Lead Trader runtime for Bybit Copy Trading, built with Rust microservices and powered by TupaLang.
+---
 
-ViperTrade is designed to run a deterministic trading decision pipeline with strong
-operational controls: health checks, replayable validation, paper/testnet/mainnet
-execution modes, reconciliation, audit-friendly events, operator controls, and a web
-dashboard for live visibility.
+ViperTrade is a production-oriented lead-trader runtime for Bybit copy trading. It is built around deterministic strategy evaluation, replayable runtime behavior, strong operational controls, and evidence-driven iteration.
 
-## Why this project exists
+Instead of hiding strategy logic inside application code, ViperTrade uses [TupaLang](https://github.com/marciopaiva/tupalang) as a typed policy layer. The Rust services handle live state, exchange interaction, persistence, and operator tooling; the `.tp` strategy layer keeps decision semantics easier to validate, review, and evolve.
 
-Most trading bots fail in production for reasons that go beyond signal quality:
+## Why ViperTrade
 
-- strategy logic becomes hard to audit
-- runtime behavior drifts from the original design
-- exchange-side edge cases break assumptions
+Most trading systems fail in production for reasons that go beyond signal quality:
+
+- strategy behavior becomes hard to audit
+- runtime behavior drifts away from original design
+- exchange and reconciliation edge cases break assumptions
 - operators lack safe controls during incidents
-- validation and release discipline is too weak for real capital
+- local validation does not match what CI or deployment actually run
 
 ViperTrade exists to close that gap between strategy design and production execution.
 
-## Why TupaLang matters here
-
-TupaLang gives this project a clear strategy layer instead of forcing all decision logic into application code.
-
-In ViperTrade, Tupa helps by:
-
-- separating strategy intent from runtime plumbing
-- validating the trading pipeline before runtime
-- allowing the strategy service to load a validated plan at startup
-- reducing hot-path complexity inside the Rust strategy service
-- making strategy changes easier to review, audit, and reason about
-- supporting a safer production workflow where pipeline changes can be validated before deployment
-
-Tupa is not used here as a demo integration. It is part of the production architecture of the system.
-
-Today, the `.tp` pipeline acts as a validated strategy contract and execution-plan shape for the
-runtime. The strategy service loads that plan in-process and combines it with Rust-side runtime
-state, market data, and guard logic. That means the pipeline is already part of the real
-production path, but some strategy semantics still live in Rust while the migration to richer
-Tupa-native policy logic continues.
-
-## Production mindset
-
-This repository is organized around repeatability and operational safety:
-
-- deterministic Rust services
-- Docker-based local/runtime parity
-- health-first operational workflows
-- staged execution modes: `paper`, `testnet`, `mainnet`
-- API-based operator controls
-- kill switch and reconciliation workflows
-- CI validation before commit/push
-- evidence-oriented release documentation
-
-## Architecture
+## Architecture At A Glance
 
 Core services:
 
 - `market-data`
   - ingests and normalizes exchange signals
 - `strategy`
-  - loads the Tupa-derived runtime plan in-process and produces decisions
+  - loads the validated Tupa-derived runtime plan and emits decisions
 - `executor`
-  - translates decisions into exchange-side actions
+  - translates decisions into paper, testnet, or mainnet actions
 - `monitor`
-  - checks reconciliation, drift, and runtime health
+  - checks drift, reconciliation, and service health
 - `api`
-  - exposes status, positions, trades, performance, and control endpoints
+  - exposes status, trades, positions, controls, and diagnostics
 - `web`
-  - provides the operator dashboard
+  - operator dashboard with live runtime context
 - `postgres` and `redis`
-  - persistence and event transport
+  - persistence, audit, and event transport
 
-## Runtime modes
+## Why TupaLang Matters Here
 
-- `paper`
-  - live market prices with wallet and positions simulated in the database
-- `testnet`
-  - real exchange interaction on Bybit testnet
-- `mainnet`
-  - real exchange execution on Bybit mainnet
+TupaLang is not used in this repository as a demo dependency. It is part of the applied architecture.
 
-This lets the same system progress from simulation to controlled live operation without changing the operational model.
+In ViperTrade, TupaLang helps by:
 
-## Recommended environment
+- separating strategy intent from runtime plumbing
+- validating the strategy pipeline before runtime
+- loading a checked execution plan in-process at service startup
+- reducing hot-path strategy complexity in Rust
+- making policy changes easier to review, audit, and explain
 
-- WSL Fedora
-- Docker Desktop on Windows with WSL integration enabled for Fedora
-- Git
-- `openssl-devel` installed on the Fedora host for local Rust/OpenSSL builds
+That gives us a cleaner split:
 
-The automation in this repository assumes `docker compose` running inside WSL through Docker Desktop.
-The supported compose entrypoint is `compose/docker-compose.yml` through `make compose-*`.
+- TupaLang
+  - strategy policy, typed contracts, explainable decisions
+- Rust runtime
+  - live market state, exchange execution, persistence, telemetry, controls
 
-## Quick start
+## Quickstart
 
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
@@ -121,7 +97,12 @@ make compose-up
 make health
 ```
 
-## Daily operator workflow
+Open:
+
+- Web dashboard: `http://localhost:3000`
+- API: `http://localhost:8080`
+
+## Daily Workflow
 
 Start the stack:
 
@@ -129,25 +110,25 @@ Start the stack:
 make compose-up
 ```
 
-Check health:
+Check service health:
 
 ```bash
 make health
 ```
 
-Validate the runtime end to end:
+Run runtime validation:
 
 ```bash
 make validate-runtime
 ```
 
-Run local CI parity before commit/push:
+Run local CI parity before commit or push:
 
 ```bash
 make validate-ci
 ```
 
-Reset paper-trading data:
+Reset the local paper database:
 
 ```bash
 make data-reset-paper-db
@@ -159,31 +140,30 @@ Stop the stack:
 make compose-down
 ```
 
-## Make targets
+## Runtime Modes
 
-The repository uses `make` as the main operator and developer interface.
+- `paper`
+  - live market data with simulated wallet and positions in Postgres
+- `testnet`
+  - real exchange interaction on Bybit testnet
+- `mainnet`
+  - real exchange execution on Bybit mainnet
 
-Main commands:
+This keeps the operational model stable while the execution surface evolves.
 
-- `make health`
-- `make validate-full`
-- `make validate-workspace-quick`
-- `make validate-ci`
-- `make validate-runtime`
-- `make build-base-images`
-- `make compose-up`
-- `make compose-down`
-- `make compose-restart`
-- `make compose-ps`
-- `make compose-logs`
-- `make data-reset-paper-db`
-- `make control-kill-switch-status`
-- `make control-kill-switch-enable`
-- `make control-kill-switch-disable`
+## What The Platform Optimizes For
 
-## Validation model
+- deterministic service behavior
+- operator-first runtime visibility
+- health checks and kill-switch controls
+- Docker-based runtime parity
+- replayable validation and CI discipline
+- audit-friendly decision history
+- staged progression from paper to real execution
 
-Fast local Rust checks:
+## Local Validation
+
+Fast workspace checks:
 
 ```bash
 make validate-workspace-quick
@@ -195,27 +175,27 @@ Full local validation:
 make validate-full
 ```
 
-Pre-push validation aligned with GitHub Actions:
+CI-aligned local run:
 
 ```bash
 make validate-ci
 ```
 
-Direct host-side Rust validation on Fedora 43 WSL:
+Direct host-side Rust validation on Fedora WSL:
 
 ```bash
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo check --workspace --locked
 ```
 
-Strict docs lint on top of local CI:
+Strict docs mode:
 
 ```bash
 CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
 ```
 
-## Builder-based Rust validation
+## Builder-Based Rust Validation
 
-After building the base images, you can run Rust checks inside the standard builder image without depending on the host toolchain:
+After building the base images, you can validate inside the standard builder image:
 
 ```bash
 docker run --rm \
@@ -235,72 +215,49 @@ docker run --rm \
 
 ## Documentation
 
-Current documentation is organized by intent:
+Documentation is organized by intent:
 
 - `docs/spec/`
-  - modular technical specification
+  - design and system specification
 - `docs/operations/`
-  - live operational procedures, gates, and policies
-- `docs/operations/evidence/`
-  - dated validation and release evidence
+  - operator workflows and runtime evidence
 - `docs/releases/`
-  - release-facing documentation
+  - release and change history
 - `docs/legacy/`
-  - historical source material
+  - archived material kept for reference
 
-Recommended entry points:
+Start here:
 
-- `docs/README.md`
-- `docs/spec/README.md`
-- `docs/spec/07-configuration.md`
-- `docs/operations/RUNBOOK.md`
-- `docs/releases/RELEASE_CHECKLIST.md`
+- [Documentation Index](docs/README.md)
+- [Spec Index](docs/spec/README.md)
+- [Release Notes](docs/releases/README.md)
 
-## CI
+## Repository Interface
 
-GitHub Actions runs on push and pull request:
+`make` is the main developer and operator interface.
 
-- Rust: `cargo fmt --check` + `cargo check --workspace --locked`
-- Web: `yarn install --frozen-lockfile` + `yarn build`
+Useful commands:
 
-Workflow:
+- `make health`
+- `make validate-full`
+- `make validate-workspace-quick`
+- `make validate-ci`
+- `make validate-runtime`
+- `make build-base-images`
+- `make compose-up`
+- `make compose-down`
+- `make compose-restart`
+- `make compose-ps`
+- `make compose-logs`
+- `make data-reset-paper-db`
+- `make control-kill-switch-status`
+- `make control-kill-switch-enable`
+- `make control-kill-switch-disable`
 
-- `.github/workflows/ci.yml`
-- `.github/workflows/ci-local-parity.yml`
+## Status
 
-## Operational note
+ViperTrade is being developed as an applied trading runtime with TupaLang as its strategy-policy layer. Paper mode, diagnostics, audit trails, and local operator tooling are active parts of the current workflow.
 
-This project is intended for disciplined operational use.
+## License
 
-That means:
-
-- staged rollout through `paper` and `testnet`
-- explicit runtime controls
-- evidence-based release decisions
-- strong handling of exchange credentials and risk settings
-
-Use `mainnet` only when the surrounding operational process is ready for it.
-
-## Risk disclosure
-
-ViperTrade does not guarantee profits, capital preservation, or any specific trading outcome.
-
-This software is an execution and decision-support system. Real results depend on
-market conditions, exchange behavior, latency, liquidity, slippage, strategy
-configuration, and operator decisions.
-
-Safe use requires deliberate configuration, including:
-
-- token universe selection
-- per-token threshold tuning
-- risk profile selection
-- position sizing
-- entry and exit thresholds
-- execution mode selection (`paper`, `testnet`, `mainnet`)
-- operational monitoring and rollback readiness
-
-Different token sets and threshold combinations can materially change runtime behavior and risk.
-
-Use this software entirely at your own risk. The operator is solely responsible for
-strategy configuration, exchange credentials, capital allocation, and production
-rollout decisions.
+MIT. See [LICENSE](LICENSE).
