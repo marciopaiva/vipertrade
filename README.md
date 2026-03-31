@@ -192,6 +192,14 @@ CI-aligned local run:
 make validate-ci
 ```
 
+Install the versioned pre-push hook:
+
+```bash
+make install-git-hooks
+```
+
+After that, every `git push` runs `make validate-ci` automatically.
+
 Direct host-side Rust validation on Fedora WSL:
 
 ```bash

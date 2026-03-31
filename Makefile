@@ -38,6 +38,7 @@ export HEADER
 	help \
 	health \
 	validate validate-full validate-workspace-quick validate-ci validate-runtime \
+	install-git-hooks \
 	build-base-images \
 	compose-up compose-down compose-restart compose-ps compose-logs \
 	data-reset-paper-db \
@@ -63,6 +64,8 @@ validate-full:            ; @$(VALIDATE_WORKSPACE) all
 validate-workspace-quick: ; @$(VALIDATE_WORKSPACE) quick
 ## Run the GitHub Actions-equivalent validation before commit/push
 validate-ci:              ; @$(VALIDATE_WORKSPACE) ci
+## Install the versioned git hooks for local parity before push
+install-git-hooks:        ; @./scripts/install-git-hooks.sh
 ## Validate the bridge runtime end to end
 validate-runtime:         ; @$(VALIDATE_RUNTIME) bridge all
 
