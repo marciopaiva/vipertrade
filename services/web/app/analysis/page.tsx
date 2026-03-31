@@ -83,6 +83,16 @@ type AiAnalystData = {
     evidence?: string;
     expected_tradeoff?: string;
   }>;
+  hypotheses?: Array<{
+    hypothesis_id?: string;
+    priority?: string;
+    confidence?: string;
+    hypothesis?: string;
+    evidence?: string;
+    observe?: string;
+    success_condition?: string;
+    failure_condition?: string;
+  }>;
   symbol_diagnostics?: Array<{
     symbol?: string;
     status?: string;
@@ -95,6 +105,15 @@ type AiAnalystData = {
     avg_thesis_pnl_pct?: number;
     avg_trailing_pnl_pct?: number;
   }>;
+  regime_diagnostics?: {
+    status?: string;
+    regime?: string;
+    confidence?: string;
+    directional_bias?: string;
+    dominant_gate?: string;
+    exit_profile?: string;
+    evidence?: string[];
+  };
   by_close_reason?: BreakdownItem[];
   by_side?: BreakdownItem[];
   by_symbol?: BreakdownItem[];
@@ -243,6 +262,8 @@ export default function AnalysisPage() {
   const symbolTone = toneClasses(analyst?.tupa_evaluation?.symbol_risk?.severity);
   const comparative = analyst?.comparative_diagnostics;
   const comparativeToneState = comparativeTone(comparative?.status);
+  const regime = analyst?.regime_diagnostics;
+  const regimeTone = comparativeTone(regime?.status);
 
   return (
     <div className="min-h-screen bg-background">
@@ -445,6 +466,54 @@ export default function AnalysisPage() {
 
           <Card className="bg-panel/50 border-border">
             <CardHeader className="pb-2">
+              <CardTitle className="text-base">Regime Diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Status</div>
+                  <Badge className={cn('text-[10px] tracking-[0.16em]', regimeTone.badge)}>
+                    {regime?.status || 'mixed'}
+                  </Badge>
+                </div>
+                <div className={cn('mt-3 text-lg font-semibold', regimeTone.text)}>
+                  {titleCase((regime?.regime || 'balanced_mixed').replaceAll('_', ' '))}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Bias</div>
+                    <div className="mt-1 text-slate-200">
+                      {titleCase((regime?.directional_bias || 'neutral').replaceAll('_', ' '))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Dominant Gate</div>
+                    <div className="mt-1 text-slate-200">{titleCase(regime?.dominant_gate || 'unknown')}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Exit Profile</div>
+                    <div className="mt-1 text-slate-200">{titleCase(regime?.exit_profile || 'balanced')}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-[0.16em] text-slate-500">Confidence</div>
+                    <div className="mt-1 text-slate-200">{titleCase(regime?.confidence || 'low')}</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(regime?.evidence || []).map((item) => (
+                    <div key={item} className="rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
               <CardTitle className="text-base">Recommendations</CardTitle>
             </CardHeader>
             <CardContent>
@@ -469,6 +538,49 @@ export default function AnalysisPage() {
                       </div>
                     );
                   })
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Hypotheses</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {(analyst?.hypotheses || []).length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No testable hypotheses yet.</div>
+                ) : (
+                  (analyst?.hypotheses || []).map((item) => (
+                    <div key={item.hypothesis_id} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-100">
+                          {item.hypothesis || 'Observe more sample'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                            {item.priority || 'info'}
+                          </Badge>
+                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                            {item.confidence || 'low'}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
+                      <div className="mt-3 grid gap-2 text-xs">
+                        <div className="rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2 text-slate-300">
+                          <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
+                        </div>
+                        <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-emerald-200">
+                          <span className="font-semibold text-emerald-100">Success:</span> {item.success_condition}
+                        </div>
+                        <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 text-red-200">
+                          <span className="font-semibold text-red-100">Failure:</span> {item.failure_condition}
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </CardContent>
