@@ -27,6 +27,8 @@ struct StrategyConfig {
     global: Value,
     pairs: HashMap<String, Value>,
     profiles: Value,
+    bollinger_std_dev_multiplier: f64,
+    bollinger_invalidation_threshold: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +96,8 @@ struct ExitEvaluation {
 struct EntryGuardState {
     blocked_side: String,
     cooldown_until: Instant,
+    cooldown_minutes: i64,
+    cooldown_reason: String,
     awaiting_flip: bool,
 }
 
@@ -107,6 +111,11 @@ struct SignalConfirmationState {
 struct ThesisInvalidationState {
     side: String,
     consecutive_invalid_ticks: usize,
+    consecutive_degrading_ticks: usize,
+    bollinger_invalidated: bool,
+    bollinger_consecutive_hits: usize,
+    bollinger_signal: String,
+    bollinger_strength: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -209,7 +218,7 @@ struct PositionHealthBreakdown {
 
 #[derive(Debug, Clone)]
 struct ThesisInvalidationEvaluation {
-    invalidated: bool,
+    stage: &'static str,
     reason: String,
     health_score: i32,
 }
@@ -224,6 +233,18 @@ struct EntryGuardEvaluation {
 struct ThesisGuardEvaluation {
     confirmed: bool,
     reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct PendingEntryCandidate {
+    signal_event: MarketSignalEvent,
+    decision: StrategyDecision,
+    pipeline_input: Value,
+    runtime_output: Value,
+    execution_time_ms: i32,
+    rank_score: f64,
+    entry_score: f64,
+    created_at: Instant,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -270,6 +291,8 @@ impl StrategyConfig {
             global,
             pairs,
             profiles: profiles_json,
+            bollinger_std_dev_multiplier: 2.0,
+            bollinger_invalidation_threshold: 0.7,
         })
     }
 
@@ -546,6 +569,42 @@ impl StrategyConfig {
                     cfg_i64(
                         &self.global,
                         &["entry_filters", "stop_loss_cooldown_minutes"],
+                        3,
+                    ),
+                )
+            })
+    }
+
+    fn thesis_invalidation_cooldown_minutes_for_side(&self, symbol: &str, side: &str) -> i64 {
+        let side_key = if side.eq_ignore_ascii_case("short") {
+            "thesis_invalidation_cooldown_minutes_short"
+        } else {
+            "thesis_invalidation_cooldown_minutes_long"
+        };
+
+        if let Some(value) = self.mode_i64(side_key) {
+            return value.max(0);
+        }
+
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_i64(
+                    v,
+                    &["entry_filters", side_key],
+                    cfg_i64(
+                        v,
+                        &["entry_filters", "thesis_invalidation_cooldown_minutes"],
+                        3,
+                    ),
+                )
+            })
+            .unwrap_or_else(|| {
+                cfg_i64(
+                    &self.global,
+                    &["entry_filters", side_key],
+                    cfg_i64(
+                        &self.global,
+                        &["entry_filters", "thesis_invalidation_cooldown_minutes"],
                         3,
                     ),
                 )
@@ -1147,6 +1206,16 @@ async fn has_recent_stop_loss_for_symbol(
     Ok(count > 0)
 }
 
+async fn count_open_trades(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint
+         FROM trades
+         WHERE status = 'open'",
+    )
+    .fetch_one(pool)
+    .await
+}
+
 fn create_hold_decision(symbol: &str, reason: &str) -> StrategyDecision {
     StrategyDecision {
         action: "HOLD".to_string(),
@@ -1159,6 +1228,134 @@ fn create_hold_decision(symbol: &str, reason: &str) -> StrategyDecision {
         reason: reason.to_string(),
         smart_copy_compatible: false,
     }
+}
+
+fn decision_rank_score(runtime_output: &Value) -> f64 {
+    get_record_f64(runtime_output, "decision", "decision_score", 0.0)
+}
+
+fn decision_entry_score(runtime_output: &Value) -> f64 {
+    get_record_f64(runtime_output, "validate_entry", "entry_score", 0.0)
+}
+
+fn build_constraints_results(runtime_output: &Value) -> Value {
+    json!({
+        "check_daily_loss": runtime_output.get("check_daily_loss").cloned(),
+        "check_consecutive_losses": runtime_output.get("check_consecutive_losses").cloned(),
+        "validate_entry": runtime_output.get("validate_entry").cloned(),
+        "check_funding": runtime_output.get("check_funding").cloned(),
+        "validate_size": runtime_output.get("validate_size").cloned(),
+        "signal_confirmation": runtime_output.get("signal_confirmation").cloned(),
+        "cooldown_guard": runtime_output.get("cooldown_guard").cloned(),
+        "thesis_confirmation": runtime_output.get("thesis_confirmation").cloned(),
+        "audit": runtime_output.get("audit").cloned(),
+    })
+}
+
+async fn finalize_strategy_decision(
+    publish_conn: &mut redis::aio::MultiplexedConnection,
+    db_pool: Option<&PgPool>,
+    signal_event: &MarketSignalEvent,
+    execution_plan: &ExecutionPlan,
+    pipeline_input: &Value,
+    runtime_output: &Value,
+    decision: StrategyDecision,
+    execution_time_ms: i32,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(pool) = db_pool {
+        let mut audit_output = runtime_output.clone();
+        if let Some(obj) = audit_output.as_object_mut() {
+            obj.insert(
+                "final_decision".to_string(),
+                serde_json::to_value(&decision).unwrap_or_else(|_| json!({})),
+            );
+        }
+        let constraints_results = build_constraints_results(runtime_output);
+        if let Err(err) = persist_tupa_audit_log(
+            pool,
+            signal_event,
+            "viper_smart_copy",
+            &execution_plan.version,
+            pipeline_input,
+            &audit_output,
+            &constraints_results,
+            &decision,
+            execution_time_ms,
+        )
+        .await
+        {
+            eprintln!(
+                "Failed to persist Tupa audit log for symbol={} err={}",
+                signal_event.signal.symbol, err
+            );
+        }
+    }
+
+    publish_decision_event(publish_conn, &signal_event.event_id, decision).await
+}
+
+async fn flush_pending_entry_candidates(
+    publish_conn: &mut redis::aio::MultiplexedConnection,
+    db_pool: Option<&PgPool>,
+    execution_plan: &ExecutionPlan,
+    pending_candidates: &mut HashMap<String, PendingEntryCandidate>,
+    max_open_positions: i64,
+) -> Result<(), Box<dyn Error>> {
+    if pending_candidates.is_empty() {
+        return Ok(());
+    }
+
+    let current_open_count = match db_pool {
+        Some(pool) => count_open_trades(pool).await.unwrap_or_else(|err| {
+            eprintln!("Failed to count open trades for portfolio selection: {}", err);
+            0
+        }),
+        None => 0,
+    };
+    let open_slots = (max_open_positions - current_open_count).max(0) as usize;
+
+    let mut candidates: Vec<PendingEntryCandidate> = pending_candidates.drain().map(|(_, c)| c).collect();
+    candidates.sort_by(|a, b| {
+        b.rank_score
+            .partial_cmp(&a.rank_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.entry_score
+                    .partial_cmp(&a.entry_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| a.created_at.cmp(&b.created_at))
+    });
+
+    for (index, candidate) in candidates.into_iter().enumerate() {
+        let final_decision = if index < open_slots {
+            candidate.decision.clone()
+        } else {
+            create_hold_decision(
+                &candidate.decision.symbol,
+                &format!(
+                    "portfolio_selection_not_selected_rank_{}_slots_{}_score_{:.0}",
+                    index + 1,
+                    open_slots,
+                    candidate.rank_score
+                ),
+            )
+        };
+
+        finalize_strategy_decision(
+            publish_conn,
+            db_pool,
+            &candidate.signal_event,
+            execution_plan,
+            &candidate.pipeline_input,
+            &candidate.runtime_output,
+            final_decision,
+            candidate.execution_time_ms,
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 fn create_close_decision(
@@ -1444,6 +1641,12 @@ fn execute_strategy_step(
             let ema_slow = get_f64(&state, "ema_slow", 0.0);
             let consensus_ema_fast = get_f64(&state, "consensus_ema_fast", ema_fast);
             let consensus_ema_slow = get_f64(&state, "consensus_ema_slow", ema_slow);
+            let bollinger_percent_b = get_f64(&state, "bollinger_percent_b", 0.5);
+            let consensus_bollinger_percent_b =
+                get_f64(&state, "consensus_bollinger_percent_b", bollinger_percent_b);
+            let bollinger_bandwidth = get_f64(&state, "bollinger_bandwidth", 0.0);
+            let consensus_bollinger_bandwidth =
+                get_f64(&state, "consensus_bollinger_bandwidth", bollinger_bandwidth);
             let rsi_14 = get_f64(&state, "rsi_14", 50.0);
             let consensus_rsi_14 = get_f64(&state, "consensus_rsi_14", rsi_14);
             let macd_line = get_f64(&state, "macd_line", 0.0);
@@ -1668,6 +1871,27 @@ fn execute_strategy_step(
                 10.0,
             );
 
+            let rsi_quality_score = rsi_quality_score_for_side(entry_side, consensus_rsi_14);
+            push_weighted_entry_component(&mut components, "rsi_quality", rsi_quality_score, 6.0);
+
+            let bollinger_extension_score =
+                bollinger_quality_score_for_side(entry_side, consensus_bollinger_percent_b);
+            push_weighted_entry_component(
+                &mut components,
+                "bollinger_extension",
+                bollinger_extension_score,
+                8.0,
+            );
+
+            let bollinger_bandwidth_score =
+                ((consensus_bollinger_bandwidth - 0.003) / 0.003).clamp(-1.0, 1.0);
+            push_weighted_entry_component(
+                &mut components,
+                "bollinger_bandwidth",
+                bollinger_bandwidth_score,
+                5.0,
+            );
+
             let macd_score = if entry_side == "long" {
                 if consensus_macd_line > consensus_macd_signal {
                     1.0
@@ -1687,6 +1911,24 @@ fn execute_strategy_step(
 
             let macd_hist_score = (consensus_macd_histogram * directional_bias).clamp(-1.0, 1.0);
             push_weighted_entry_component(&mut components, "macd_histogram", macd_hist_score, 5.0);
+
+            let macd_quality_score = macd_quality_score_for_side(
+                entry_side,
+                consensus_macd_line,
+                consensus_macd_signal,
+                consensus_macd_histogram,
+            );
+            push_weighted_entry_component(&mut components, "macd_quality", macd_quality_score, 6.0);
+
+            let entry_confluence_score =
+                ((rsi_quality_score + macd_quality_score + bollinger_extension_score) / 3.0)
+                    .clamp(-1.0, 1.0);
+            push_weighted_entry_component(
+                &mut components,
+                "entry_confluence",
+                entry_confluence_score,
+                8.0,
+            );
 
             let volume_ratio_score = if min_volume_ratio > 0.0 {
                 (consensus_volume_ratio / min_volume_ratio - 1.0).clamp(-1.0, 1.0)
@@ -1775,6 +2017,22 @@ fn execute_strategy_step(
                 format!(
                     "short_block_price_{:.5}_gt_fast_ema_{:.5}",
                     current_price, ema_fast
+                )
+            } else if raw_trend_score >= 0.0
+                && consensus_bollinger_percent_b > 1.08
+                && consensus_bollinger_bandwidth < 0.012
+            {
+                format!(
+                    "long_block_bollinger_overstretch_pb_{:.3}_bw_{:.4}",
+                    consensus_bollinger_percent_b, consensus_bollinger_bandwidth
+                )
+            } else if raw_trend_score < 0.0
+                && consensus_bollinger_percent_b < -0.08
+                && consensus_bollinger_bandwidth < 0.012
+            {
+                format!(
+                    "short_block_bollinger_overstretch_pb_{:.3}_bw_{:.4}",
+                    consensus_bollinger_percent_b, consensus_bollinger_bandwidth
                 )
             } else if consensus_rsi_14 < rsi_min || consensus_rsi_14 > rsi_max {
                 format!(
@@ -2631,6 +2889,85 @@ fn push_weighted_entry_component(
     }
 }
 
+fn rsi_quality_score_for_side(side: &str, rsi: f64) -> f64 {
+    if side.eq_ignore_ascii_case("long") {
+        if rsi < 30.0 {
+            -0.5
+        } else if rsi < 45.0 {
+            0.5
+        } else if rsi < 60.0 {
+            1.0
+        } else if rsi < 70.0 {
+            0.35
+        } else {
+            -0.5
+        }
+    } else if rsi > 70.0 {
+        -0.5
+    } else if rsi > 55.0 {
+        0.5
+    } else if rsi > 40.0 {
+        1.0
+    } else if rsi > 30.0 {
+        0.35
+    } else {
+        -0.5
+    }
+}
+
+fn macd_quality_score_for_side(side: &str, macd_line: f64, macd_signal: f64, macd_histogram: f64) -> f64 {
+    let favorable_crossover = if side.eq_ignore_ascii_case("long") {
+        macd_line > macd_signal
+    } else {
+        macd_line < macd_signal
+    };
+    let favorable_histogram = if side.eq_ignore_ascii_case("long") {
+        macd_histogram > 0.0
+    } else {
+        macd_histogram < 0.0
+    };
+
+    if !favorable_crossover {
+        -1.0
+    } else if favorable_histogram && macd_histogram.abs() >= 0.0001 {
+        1.0
+    } else if favorable_histogram {
+        0.6
+    } else {
+        0.2
+    }
+}
+
+fn bollinger_quality_score_for_side(side: &str, percent_b: f64) -> f64 {
+    if side.eq_ignore_ascii_case("long") {
+        if percent_b > 1.05 {
+            -1.0
+        } else if percent_b > 0.90 {
+            -0.35
+        } else if (0.45..=0.85).contains(&percent_b) {
+            1.0
+        } else if (0.25..0.45).contains(&percent_b) {
+            0.45
+        } else if percent_b < 0.15 {
+            -0.35
+        } else {
+            0.0
+        }
+    } else if percent_b < -0.05 {
+        -1.0
+    } else if percent_b < 0.10 {
+        -0.35
+    } else if (0.15..=0.55).contains(&percent_b) {
+        1.0
+    } else if (0.55..=0.75).contains(&percent_b) {
+        0.45
+    } else if percent_b > 0.85 {
+        -0.35
+    } else {
+        0.0
+    }
+}
+
 fn push_weighted_size_component(
     components: &mut Vec<SizePolicyComponent>,
     reason: &'static str,
@@ -2982,6 +3319,33 @@ fn position_health_breakdown(
         5.0,
     );
 
+    let consensus_bollinger_percent_b = signal.consensus_bollinger_percent_b;
+    let bollinger_position = if is_long {
+        if consensus_bollinger_percent_b >= 0.55 {
+            1.0
+        } else if consensus_bollinger_percent_b >= 0.25 {
+            0.0
+        } else if consensus_bollinger_percent_b >= 0.15 {
+            -0.5
+        } else {
+            -1.0
+        }
+    } else if consensus_bollinger_percent_b <= 0.45 {
+        1.0
+    } else if consensus_bollinger_percent_b <= 0.75 {
+        0.0
+    } else if consensus_bollinger_percent_b <= 0.85 {
+        -0.5
+    } else {
+        -1.0
+    };
+    push_weighted_health_component(
+        &mut components,
+        "bollinger_position",
+        bollinger_position,
+        5.0,
+    );
+
     if is_long {
         let ema_alignment = if signal.consensus_ema_fast > signal.consensus_ema_slow {
             1.0
@@ -3070,6 +3434,36 @@ fn position_health_summary(breakdown: &PositionHealthBreakdown) -> String {
     }
 }
 
+fn adverse_long_thesis_components(breakdown: &PositionHealthBreakdown) -> usize {
+    breakdown
+        .components
+        .iter()
+        .filter(|component| {
+            component.contribution < 0
+                && matches!(
+                    component.reason,
+                    "consensus_trend_score"
+                        | "bybit_trend_score"
+                        | "btc_trend_score"
+                        | "price_vs_fast_ema"
+                )
+        })
+        .count()
+}
+
+fn thesis_degrading_confirmation_reason(
+    current_hits: usize,
+    required_hits: usize,
+    base_reason: &str,
+) -> String {
+    temporal_confirmation_reason(
+        "thesis_degrading_confirmation",
+        current_hits,
+        required_hits,
+        base_reason,
+    )
+}
+
 fn evaluate_thesis_invalidation(
     signal: &MarketSignal,
     open: &OpenTradeSnapshot,
@@ -3078,23 +3472,40 @@ fn evaluate_thesis_invalidation(
     let health_score = breakdown.clamped_score;
 
     if open.side.eq_ignore_ascii_case("Long") {
+        let profit_pct = current_profit_pct(&open.side, open.entry_price, signal.current_price);
+        let in_profit = profit_pct > 0.002;
         let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bearish")
             || signal.bybit_regime.eq_ignore_ascii_case("bearish");
         let both_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let adverse_components = adverse_long_thesis_components(&breakdown);
+        let required_invalid_components = if in_profit { 3 } else { 2 };
 
-        let (invalidated, reason) = if opposite_side {
-            (true, "thesis_invalidated_opposite_side")
-        } else if health_score <= -35 {
-            (true, "thesis_invalidated_health_threshold")
-        } else if both_not_bullish && health_score <= -15 {
-            (true, "thesis_invalidated_no_bullish_alignment")
+        let (stage, reason) = if opposite_side {
+            ("invalidated", "thesis_invalidated_opposite_side")
+        } else if health_score <= -45
+            || (health_score <= -35 && adverse_components >= required_invalid_components)
+        {
+            ("invalidated", "thesis_invalidated_health_threshold")
+        } else if both_not_bullish
+            && health_score <= -20
+            && adverse_components >= required_invalid_components
+        {
+            ("invalidated", "thesis_invalidated_no_bullish_alignment")
+        } else if (health_score <= -25 && adverse_components >= 2)
+            || (both_not_bullish && health_score <= -15 && adverse_components >= 2)
+        {
+            ("degrading_hard", "thesis_degrading_hard_long_alignment")
+        } else if health_score <= -15
+            || (both_not_bullish && health_score <= -10 && adverse_components >= 1)
+        {
+            ("degrading_soft", "thesis_degrading_soft_long_alignment")
         } else {
-            (false, "thesis_valid")
+            ("valid", "thesis_valid")
         };
 
         ThesisInvalidationEvaluation {
-            invalidated,
+            stage,
             reason: format!("{}_{}", reason, position_health_summary(&breakdown)),
             health_score,
         }
@@ -3104,24 +3515,24 @@ fn evaluate_thesis_invalidation(
         let both_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bearish");
 
-        let (invalidated, reason) = if opposite_side {
-            (true, "thesis_invalidated_opposite_side")
+        let (stage, reason) = if opposite_side {
+            ("invalidated", "thesis_invalidated_opposite_side")
         } else if health_score >= 35 {
-            (true, "thesis_invalidated_health_threshold")
+            ("invalidated", "thesis_invalidated_health_threshold")
         } else if both_not_bearish && health_score >= 15 {
-            (true, "thesis_invalidated_no_bearish_alignment")
+            ("invalidated", "thesis_invalidated_no_bearish_alignment")
         } else {
-            (false, "thesis_valid")
+            ("valid", "thesis_valid")
         };
 
         ThesisInvalidationEvaluation {
-            invalidated,
+            stage,
             reason: format!("{}_{}", reason, position_health_summary(&breakdown)),
             health_score,
         }
     } else {
         ThesisInvalidationEvaluation {
-            invalidated: false,
+            stage: "valid",
             reason: "thesis_valid_unknown_side".to_string(),
             health_score,
         }
@@ -3140,13 +3551,20 @@ fn evaluate_thesis_guard_policy(
         .or_insert_with(|| ThesisInvalidationState {
             side: open_side.to_string(),
             consecutive_invalid_ticks: 0,
+            consecutive_degrading_ticks: 0,
+            bollinger_invalidated: false,
+            bollinger_consecutive_hits: 0,
+            bollinger_signal: String::new(),
+            bollinger_strength: 0.0,
         });
 
     if !state.side.eq_ignore_ascii_case(open_side) {
         state.side = open_side.to_string();
         state.consecutive_invalid_ticks = 1;
+        state.consecutive_degrading_ticks = 0;
     } else {
         state.consecutive_invalid_ticks += 1;
+        state.consecutive_degrading_ticks = 0;
     }
 
     if state.consecutive_invalid_ticks < required_ticks {
@@ -3172,6 +3590,56 @@ fn evaluate_thesis_guard_policy(
     }
 }
 
+fn evaluate_thesis_degrading_policy(
+    symbol: &str,
+    open_side: &str,
+    evaluation: &ThesisInvalidationEvaluation,
+    thesis_invalidations: &mut HashMap<String, ThesisInvalidationState>,
+    required_ticks: usize,
+) -> ThesisGuardEvaluation {
+    let state = thesis_invalidations
+        .entry(symbol.to_string())
+        .or_insert_with(|| ThesisInvalidationState {
+            side: open_side.to_string(),
+            consecutive_invalid_ticks: 0,
+            consecutive_degrading_ticks: 0,
+            bollinger_invalidated: false,
+            bollinger_consecutive_hits: 0,
+            bollinger_signal: String::new(),
+            bollinger_strength: 0.0,
+        });
+
+    if !state.side.eq_ignore_ascii_case(open_side) {
+        state.side = open_side.to_string();
+        state.consecutive_invalid_ticks = 0;
+        state.consecutive_degrading_ticks = 1;
+    } else {
+        state.consecutive_invalid_ticks = 0;
+        state.consecutive_degrading_ticks += 1;
+    }
+
+    if state.consecutive_degrading_ticks < required_ticks {
+        ThesisGuardEvaluation {
+            confirmed: false,
+            reason: format!(
+                "{}_health_{}_{}",
+                thesis_degrading_confirmation_reason(
+                    state.consecutive_degrading_ticks,
+                    required_ticks,
+                    "thesis_degrading"
+                ),
+                evaluation.health_score,
+                evaluation.reason
+            ),
+        }
+    } else {
+        ThesisGuardEvaluation {
+            confirmed: true,
+            reason: format!("thesis_invalidated_degrading_persisted_{}", evaluation.reason),
+        }
+    }
+}
+
 fn enforce_open_position_thesis_guard(
     symbol: &str,
     signal: &MarketSignal,
@@ -3186,9 +3654,38 @@ fn enforce_open_position_thesis_guard(
 
     let evaluation = evaluate_thesis_invalidation(signal, open);
 
-    if !evaluation.invalidated {
+    if evaluation.stage == "valid" {
         thesis_invalidations.remove(symbol);
         return None;
+    }
+
+    if evaluation.stage == "degrading_soft" {
+        thesis_invalidations.remove(symbol);
+        return Some(create_hold_decision(symbol, &evaluation.reason));
+    }
+
+    if evaluation.stage == "degrading_hard" {
+        let required_ticks = cfg.thesis_invalidation_confirmation_ticks(symbol);
+        let guard_evaluation = evaluate_thesis_degrading_policy(
+            symbol,
+            &open.side,
+            &evaluation,
+            thesis_invalidations,
+            required_ticks,
+        );
+
+        if !guard_evaluation.confirmed {
+            return Some(create_hold_decision(symbol, &guard_evaluation.reason));
+        }
+
+        thesis_invalidations.remove(symbol);
+        return create_close_decision(
+            symbol,
+            &open.side,
+            open.quantity,
+            signal.current_price,
+            &guard_evaluation.reason,
+        );
     }
 
     let required_ticks = cfg.thesis_invalidation_confirmation_ticks(symbol);
@@ -3276,6 +3773,24 @@ fn build_temporal_pipeline_state(
                 .map(|state| state.consecutive_invalid_ticks as i64)
                 .unwrap_or(0),
             "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
+        },
+        "thesis_degrading": {
+            "observed": thesis_confirmation
+                .map(|state| state.consecutive_degrading_ticks > 0)
+                .unwrap_or(false),
+            "consecutive_hits": thesis_confirmation
+                .map(|state| state.consecutive_degrading_ticks as i64)
+                .unwrap_or(0),
+            "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
+        },
+        "thesis_invalidation": {
+            "observed": thesis_confirmation
+                .map(|state| state.bollinger_invalidated)
+                .unwrap_or(false),
+            "consecutive_hits": thesis_confirmation
+                .map(|state| state.bollinger_consecutive_hits as i64)
+                .unwrap_or(0),
+            "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
         }
     })
 }
@@ -3331,8 +3846,8 @@ fn evaluate_entry_guard_policy(
             return EntryGuardEvaluation {
                 blocked: true,
                 reason: format!(
-                    "cooldown_stop_loss_{}m_{}",
-                    cooldown_minutes, proposed_reason
+                    "cooldown_{}_{}m_{}",
+                    guard.cooldown_reason, guard.cooldown_minutes, proposed_reason
                 ),
             };
         }
@@ -3532,10 +4047,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
     let mut messages = pubsub.on_message();
+    let mut pending_candidates = HashMap::<String, PendingEntryCandidate>::new();
     let mut entry_guards = HashMap::<String, EntryGuardState>::new();
     let mut signal_confirmations = HashMap::<String, SignalConfirmationState>::new();
     let mut thesis_invalidations = HashMap::<String, ThesisInvalidationState>::new();
     let default_stop_loss_cooldown_minutes = 3_i64;
+    let selection_window_ms = std::env::var("STRATEGY_ENTRY_SELECTION_WINDOW_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(3_000);
+    let selection_window = Duration::from_millis(selection_window_ms);
+    let paper_max_open_positions = std::env::var("EXECUTOR_PAPER_MAX_OPEN_POSITIONS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(4);
+    let mut selection_tick = tokio::time::interval(Duration::from_millis(500));
+    selection_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let wallet_api_base_url = resolve_wallet_api_base_url();
     let wallet_http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -3576,8 +4105,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
+                if let Err(err) = flush_pending_entry_candidates(
+                    &mut publish_conn,
+                    db_pool.as_ref(),
+                    &execution_plan,
+                    &mut pending_candidates,
+                    paper_max_open_positions,
+                ).await {
+                    eprintln!("Failed to flush pending entry candidates during shutdown: {}", err);
+                }
                 println!("Received shutdown signal, stopping viper-strategy");
                 break;
+            }
+            _ = selection_tick.tick() => {
+                let should_flush = pending_candidates
+                    .values()
+                    .map(|candidate| candidate.created_at.elapsed() >= selection_window)
+                    .any(|ready| ready);
+                if should_flush {
+                    if let Err(err) = flush_pending_entry_candidates(
+                        &mut publish_conn,
+                        db_pool.as_ref(),
+                        &execution_plan,
+                        &mut pending_candidates,
+                        paper_max_open_positions,
+                    ).await {
+                        eprintln!("Failed to flush pending entry candidates: {}", err);
+                    }
+                }
             }
             maybe_msg = messages.next() => {
                 let Some(msg) = maybe_msg else {
@@ -3692,10 +4247,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 )
                             };
 
-                            if let Err(err) =
-                                publish_decision_event(&mut publish_conn, &signal_event.event_id, decision)
-                                    .await
-                            {
+                            if let Err(err) = finalize_strategy_decision(
+                                &mut publish_conn,
+                                db_pool.as_ref(),
+                                &signal_event,
+                                &execution_plan,
+                                &json!(&signal_event.signal),
+                                &json!({
+                                    "open_trade_exit_trigger": exit_evaluation.trigger,
+                                    "open_trade_exit_reason": exit_evaluation.reason,
+                                }),
+                                decision,
+                                0,
+                            ).await {
                                 eprintln!("Failed to publish open-position decision: {}", err);
                             }
                             continue;
@@ -3727,6 +4291,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     obj.insert(
                         "account_equity_usdt".to_string(),
                         json!(cached_account_equity_usdt),
+                    );
+                    obj.insert(
+                        "config".to_string(),
+                        json!({
+                            "bollinger": {
+                                "std_dev_multiplier": cfg.bollinger_std_dev_multiplier,
+                                "invalidation_threshold": cfg.bollinger_invalidation_threshold
+                            }
+                        }),
                     );
                     obj.insert(
                         "temporal".to_string(),
@@ -3811,6 +4384,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else if decision.action == "HOLD"
                             && (decision.reason.starts_with("awaiting_signal_confirmation_")
                                 || decision.reason.starts_with("cooldown_stop_loss_")
+                                || decision.reason.starts_with("cooldown_thesis_invalidated_")
                                 || decision.reason.starts_with("blocked_until_trend_flip_"))
                         {
                             if let Some(temporal_reason) =
@@ -3819,10 +4393,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 decision.reason =
                                     format!("{}_{}", decision.reason, temporal_reason);
                             }
-                        }
-
-                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
-                            signal_confirmations.remove(&symbol);
                         }
 
                         if decision.reason == "stop_loss_triggered" {
@@ -3848,58 +4418,81 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             + Duration::from_secs(
                                                 (cooldown_minutes * 60) as u64,
                                             ),
+                                        cooldown_minutes,
+                                        cooldown_reason: "stop_loss".to_string(),
                                         awaiting_flip: true,
                                     },
                                 );
                                 signal_confirmations.remove(&symbol);
                             }
+                        } else if decision.reason.starts_with("thesis_invalidated") {
+                            let blocked_side = if decision.action == "CLOSE_LONG" {
+                                "Long"
+                            } else if decision.action == "CLOSE_SHORT" {
+                                "Short"
+                            } else {
+                                ""
+                            };
+                            if !blocked_side.is_empty() {
+                                let cooldown_minutes = cfg
+                                    .thesis_invalidation_cooldown_minutes_for_side(
+                                        &symbol,
+                                        &blocked_side.to_lowercase(),
+                                    );
+                                if cooldown_minutes > 0 {
+                                    entry_guards.insert(
+                                        symbol.clone(),
+                                        EntryGuardState {
+                                            blocked_side: blocked_side.to_string(),
+                                            cooldown_until: Instant::now()
+                                                + Duration::from_secs(
+                                                    (cooldown_minutes * 60) as u64,
+                                                ),
+                                            cooldown_minutes,
+                                            cooldown_reason: "thesis_invalidated".to_string(),
+                                            awaiting_flip: true,
+                                        },
+                                    );
+                                    signal_confirmations.remove(&symbol);
+                                }
+                            }
                         }
 
-                        if let Some(pool) = &db_pool {
-                            let mut audit_output = runtime_output.clone();
-                            if let Some(obj) = audit_output.as_object_mut() {
-                                obj.insert(
-                                    "final_decision".to_string(),
-                                    serde_json::to_value(&decision).unwrap_or_else(|_| json!({})),
-                                );
-                            }
-                            let constraints_results = json!({
-                                "check_daily_loss": runtime_output.get("check_daily_loss").cloned(),
-                                "check_consecutive_losses": runtime_output.get("check_consecutive_losses").cloned(),
-                                "validate_entry": runtime_output.get("validate_entry").cloned(),
-                                "check_funding": runtime_output.get("check_funding").cloned(),
-                                "validate_size": runtime_output.get("validate_size").cloned(),
-                                "signal_confirmation": runtime_output.get("signal_confirmation").cloned(),
-                                "cooldown_guard": runtime_output.get("cooldown_guard").cloned(),
-                                "thesis_confirmation": runtime_output.get("thesis_confirmation").cloned(),
-                                "audit": runtime_output.get("audit").cloned(),
-                            });
-                            let execution_time_ms =
-                                pipeline_started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
-                            if let Err(err) = persist_tupa_audit_log(
-                                pool,
-                                &signal_event,
-                                "viper_smart_copy",
-                                &execution_plan.version,
-                                &pipeline_input,
-                                &audit_output,
-                                &constraints_results,
-                                &decision,
+                        let execution_time_ms =
+                            pipeline_started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+
+                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                            let rank_score = decision_rank_score(&runtime_output);
+                            let entry_score = decision_entry_score(&runtime_output);
+                            let candidate = PendingEntryCandidate {
+                                signal_event: signal_event.clone(),
+                                decision,
+                                pipeline_input,
+                                runtime_output,
                                 execution_time_ms,
-                            )
-                            .await
-                            {
-                                eprintln!(
-                                    "Failed to persist Tupa audit log for symbol={} err={}",
-                                    symbol, err
-                                );
+                                rank_score,
+                                entry_score,
+                                created_at: Instant::now(),
+                            };
+                            match pending_candidates.get(&symbol) {
+                                Some(existing)
+                                    if existing.rank_score > candidate.rank_score
+                                        || (existing.rank_score == candidate.rank_score
+                                            && existing.entry_score >= candidate.entry_score) => {}
+                                _ => {
+                                    pending_candidates.insert(symbol.clone(), candidate);
+                                }
                             }
-                        }
-
-                        if let Err(err) =
-                            publish_decision_event(&mut publish_conn, &signal_event.event_id, decision)
-                                .await
-                        {
+                        } else if let Err(err) = finalize_strategy_decision(
+                            &mut publish_conn,
+                            db_pool.as_ref(),
+                            &signal_event,
+                            &execution_plan,
+                            &pipeline_input,
+                            &runtime_output,
+                            decision,
+                            execution_time_ms,
+                        ).await {
                             eprintln!(
                                 "Invalid strategy decision event contract for {}: {}",
                                 signal_event.signal.symbol, err
@@ -3955,6 +4548,8 @@ mod tests {
             }),
             pairs: HashMap::new(),
             profiles: json!({}),
+            bollinger_std_dev_multiplier: 2.0,
+            bollinger_invalidation_threshold: 0.7,
         }
     }
 
@@ -3968,6 +4563,62 @@ mod tests {
             trailing_stop_activated: false,
             trailing_stop_peak_price: 0.0,
             trailing_stop_final_distance_pct: 0.0,
+        }
+    }
+
+    fn sample_market_signal() -> MarketSignal {
+        MarketSignal {
+            symbol: "DOGEUSDT".to_string(),
+            current_price: 100.0,
+            bybit_price: 100.0,
+            atr_14: 1.0,
+            volume_24h: 100_000_000,
+            funding_rate: 0.0,
+            trend_score: 0.0,
+            spread_pct: 0.0,
+            consensus_atr_14: 1.0,
+            consensus_volume_24h: 100_000_000,
+            consensus_funding_rate: 0.0,
+            consensus_trend_score: 0.0,
+            consensus_spread_pct: 0.0,
+            consensus_trend_slope: 0.0,
+            ema_fast: 100.0,
+            ema_slow: 99.0,
+            bollinger_upper: 103.0,
+            bollinger_middle: 100.0,
+            bollinger_lower: 97.0,
+            bollinger_bandwidth: 0.06,
+            bollinger_percent_b: 0.5,
+            consensus_ema_fast: 100.0,
+            consensus_ema_slow: 99.0,
+            consensus_bollinger_upper: 102.5,
+            consensus_bollinger_middle: 99.8,
+            consensus_bollinger_lower: 97.1,
+            consensus_bollinger_bandwidth: 0.0541,
+            consensus_bollinger_percent_b: 0.5370,
+            rsi_14: 50.0,
+            consensus_rsi_14: 50.0,
+            macd_line: 0.0,
+            macd_signal: 0.0,
+            macd_histogram: 0.0,
+            consensus_macd_line: 0.0,
+            consensus_macd_signal: 0.0,
+            consensus_macd_histogram: 0.0,
+            volume_ratio: 1.0,
+            consensus_volume_ratio: 1.0,
+            btc_regime: "neutral".to_string(),
+            btc_trend_score: 0.0,
+            btc_consensus_count: 0,
+            btc_volume_ratio: 1.0,
+            regime: "bullish".to_string(),
+            consensus_side: "bullish".to_string(),
+            consensus_count: 3,
+            exchanges_available: 3,
+            consensus_ratio: 1.0,
+            trend_slope: 0.0,
+            bybit_regime: "bullish".to_string(),
+            bullish_exchanges: 3,
+            bearish_exchanges: 0,
         }
     }
 
@@ -4081,7 +4732,7 @@ mod tests {
     #[test]
     fn thesis_guard_policy_uses_temporal_confirmation_reason() {
         let evaluation = ThesisInvalidationEvaluation {
-            invalidated: true,
+            stage: "invalidated",
             reason: "thesis_invalidated_health_threshold".to_string(),
             health_score: -42,
         };
@@ -4094,5 +4745,83 @@ mod tests {
         assert!(guard.reason.contains("thesis_confirmation_pending_1"));
         assert!(guard.reason.contains("remaining_2"));
         assert!(guard.reason.contains("health_-42"));
+    }
+
+    #[test]
+    fn long_thesis_does_not_invalidate_on_weak_alignment_noise() {
+        let open = sample_open_trade();
+        let mut signal = sample_market_signal();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "neutral".to_string();
+        signal.btc_regime = "bearish".to_string();
+        signal.current_price = 99.0;
+        signal.bybit_price = 99.0;
+        signal.consensus_ema_fast = 100.0;
+        signal.consensus_ema_slow = 99.0;
+        signal.consensus_macd_histogram = -0.01;
+
+        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+
+        assert_eq!(evaluation.stage, "valid");
+        assert!(evaluation.reason.starts_with("thesis_valid_"));
+    }
+
+    #[test]
+    fn long_thesis_invalidates_when_multiple_core_components_break() {
+        let open = sample_open_trade();
+        let mut signal = sample_market_signal();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "neutral".to_string();
+        signal.consensus_trend_score = -0.22;
+        signal.trend_score = -0.24;
+        signal.btc_trend_score = -0.28;
+        signal.current_price = 99.0;
+        signal.bybit_price = 99.0;
+        signal.consensus_ema_fast = 100.0;
+        signal.consensus_ema_slow = 99.0;
+
+        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+
+        assert_eq!(evaluation.stage, "invalidated");
+        assert!(evaluation.reason.contains("thesis_invalidated_no_bullish_alignment"));
+    }
+
+    #[test]
+    fn long_thesis_enters_degrading_before_invalidation() {
+        let open = sample_open_trade();
+        let mut signal = sample_market_signal();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "bullish".to_string();
+        signal.consensus_trend_score = -0.12;
+        signal.current_price = 99.0;
+        signal.bybit_price = 99.0;
+        signal.consensus_ema_fast = 100.0;
+        signal.consensus_ema_slow = 99.0;
+
+        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+
+        assert_eq!(evaluation.stage, "degrading_soft");
+        assert!(evaluation.reason.contains("thesis_degrading_soft_long_alignment"));
+    }
+
+    #[test]
+    fn long_thesis_enters_hard_degrading_before_invalidation() {
+        let open = sample_open_trade();
+        let mut signal = sample_market_signal();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "neutral".to_string();
+        signal.consensus_trend_score = -0.18;
+        signal.trend_score = -0.12;
+        signal.current_price = 99.0;
+        signal.bybit_price = 99.0;
+        signal.consensus_ema_fast = 100.0;
+        signal.consensus_ema_slow = 99.0;
+
+        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+
+        assert_eq!(evaluation.stage, "degrading_hard");
+        assert!(evaluation
+            .reason
+            .contains("thesis_degrading_hard_long_alignment"));
     }
 }
