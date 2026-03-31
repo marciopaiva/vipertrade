@@ -22,16 +22,16 @@ global:
       fixed_take_profit_enabled: false
       trailing_enabled: true
       trailing_stop:
-        activate_after_profit_pct: 0.0045
-        initial_trail_pct: 0.0012
+        activate_after_profit_pct: 0.0020
+        initial_trail_pct: 0.0008
         ratchet_levels:
-          - at_profit_pct: 0.006
-            trail_pct: 0.001
-          - at_profit_pct: 0.0075
-            trail_pct: 0.0008
-          - at_profit_pct: 0.009
+          - at_profit_pct: 0.003
+            trail_pct: 0.0007
+          - at_profit_pct: 0.0045
             trail_pct: 0.0006
-        move_to_break_even_at: 0.005
+          - at_profit_pct: 0.006
+            trail_pct: 0.0005
+        move_to_break_even_at: 0.0016
       min_hold_seconds: 180
       min_trend_score_long: 0.28
       min_trend_score_short: 0.34
@@ -52,6 +52,8 @@ global:
       stop_loss_cooldown_minutes_short: 8
       entry_filters:
         thesis_invalidation_confirmation_ticks: 2
+        thesis_invalidation_cooldown_minutes_long: 3
+        thesis_invalidation_cooldown_minutes_short: 3
     TESTNET:
       name: "testnet_smoke"
       permissive_entry: true
@@ -435,10 +437,10 @@ XLMUSDT:
         move_to_break_even_at: 0.025
   
   entry_filters:
-    min_trend_score_long: 0.32
+    min_trend_score_long: 0.36
     min_trend_score_short: 0.28
     min_trend_score: 0.32
-    min_signal_confirmation_ticks_long: 3
+    min_signal_confirmation_ticks_long: 5
     min_signal_confirmation_ticks_short: 3
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
@@ -633,10 +635,10 @@ NEARUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.36
+    min_trend_score_long: 0.38
     min_trend_score_short: 0.37
     min_trend_score: 0.30
-    min_signal_confirmation_ticks_long: 6
+    min_signal_confirmation_ticks_long: 7
     min_signal_confirmation_ticks_short: 6
     min_signal_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 6
@@ -699,11 +701,11 @@ LTCUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.27
-    min_trend_score_short: 0.33
+    min_trend_score_long: 0.30
+    min_trend_score_short: 0.35
     min_trend_score: 0.24
-    min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 6
+    min_signal_confirmation_ticks_long: 5
+    min_signal_confirmation_ticks_short: 7
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0042
