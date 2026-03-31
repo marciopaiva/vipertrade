@@ -4772,13 +4772,14 @@ mod tests {
         let open = sample_open_trade();
         let mut signal = sample_market_signal();
         signal.consensus_side = "neutral".to_string();
-        signal.bybit_regime = "neutral".to_string();
-        signal.btc_regime = "bearish".to_string();
-        signal.current_price = 99.0;
-        signal.bybit_price = 99.0;
+        signal.bybit_regime = "bullish".to_string();
+        signal.btc_regime = "neutral".to_string();
+        signal.current_price = 100.0;
+        signal.bybit_price = 100.0;
         signal.consensus_ema_fast = 100.0;
         signal.consensus_ema_slow = 99.0;
         signal.consensus_macd_histogram = -0.01;
+        signal.consensus_bollinger_percent_b = 0.40;
 
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
@@ -4813,12 +4814,13 @@ mod tests {
         let open = sample_open_trade();
         let mut signal = sample_market_signal();
         signal.consensus_side = "neutral".to_string();
-        signal.bybit_regime = "bullish".to_string();
+        signal.bybit_regime = "neutral".to_string();
         signal.consensus_trend_score = -0.12;
         signal.current_price = 99.0;
         signal.bybit_price = 99.0;
         signal.consensus_ema_fast = 100.0;
         signal.consensus_ema_slow = 99.0;
+        signal.consensus_bollinger_percent_b = 0.20;
 
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
@@ -4836,10 +4838,12 @@ mod tests {
         signal.bybit_regime = "neutral".to_string();
         signal.consensus_trend_score = -0.18;
         signal.trend_score = -0.12;
+        signal.btc_trend_score = -0.10;
         signal.current_price = 99.0;
         signal.bybit_price = 99.0;
         signal.consensus_ema_fast = 100.0;
         signal.consensus_ema_slow = 99.0;
+        signal.consensus_bollinger_percent_b = 0.10;
 
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
