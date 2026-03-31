@@ -508,8 +508,11 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
             (None, Some(err.to_string()))
         }
     };
-    let regime_diagnostics =
-        build_regime_diagnostics(&tupa_snapshot, tupa_evaluation.as_ref(), &symbol_diagnostics);
+    let regime_diagnostics = build_regime_diagnostics(
+        &tupa_snapshot,
+        tupa_evaluation.as_ref(),
+        &symbol_diagnostics,
+    );
     let recommendations = build_recommendations(
         &summary,
         &expectancy,
