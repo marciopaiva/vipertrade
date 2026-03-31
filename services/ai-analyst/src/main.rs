@@ -465,17 +465,18 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         thesis_summary: &thesis_summary,
         thesis_breakdown: &thesis_invalidation_breakdown,
     });
-    let comparative_diagnostics = build_comparative_diagnostics(
-        hours,
-        &summary,
-        &previous_summary,
-        &expectancy,
-        &previous_expectancy,
-        &by_close_reason,
-        &previous_by_close_reason,
-        &by_side,
-        &previous_by_side,
-    );
+    let comparative_diagnostics =
+        build_comparative_diagnostics(ComparativeDiagnosticsContext {
+            hours,
+            current_summary: &summary,
+            previous_summary: &previous_summary,
+            current_expectancy: &expectancy,
+            previous_expectancy: &previous_expectancy,
+            current_by_close_reason: &by_close_reason,
+            previous_by_close_reason: &previous_by_close_reason,
+            current_by_side: &by_side,
+            previous_by_side: &previous_by_side,
+        });
     let (tupa_evaluation, tupa_error) = match run_tupa_diagnostics(&tupa_snapshot, state).await {
         Ok(value) => (Some(value), None),
         Err(err) => {
@@ -1047,21 +1048,36 @@ where
     items
         .iter()
         .find(|item| item.name.eq_ignore_ascii_case(name))
-        .map(|item| field(item))
+        .map(field)
         .unwrap_or(0.0)
 }
 
-fn build_comparative_diagnostics(
+struct ComparativeDiagnosticsContext<'a> {
     hours: i64,
-    current_summary: &MetricSummary,
-    previous_summary: &MetricSummary,
-    current_expectancy: &ExpectancyMetrics,
-    previous_expectancy: &ExpectancyMetrics,
-    current_by_close_reason: &[BreakdownItem],
-    previous_by_close_reason: &[BreakdownItem],
-    current_by_side: &[BreakdownItem],
-    previous_by_side: &[BreakdownItem],
+    current_summary: &'a MetricSummary,
+    previous_summary: &'a MetricSummary,
+    current_expectancy: &'a ExpectancyMetrics,
+    previous_expectancy: &'a ExpectancyMetrics,
+    current_by_close_reason: &'a [BreakdownItem],
+    previous_by_close_reason: &'a [BreakdownItem],
+    current_by_side: &'a [BreakdownItem],
+    previous_by_side: &'a [BreakdownItem],
+}
+
+fn build_comparative_diagnostics(
+    ctx: ComparativeDiagnosticsContext<'_>,
 ) -> ComparativeDiagnostics {
+    let ComparativeDiagnosticsContext {
+        hours,
+        current_summary,
+        previous_summary,
+        current_expectancy,
+        previous_expectancy,
+        current_by_close_reason,
+        previous_by_close_reason,
+        current_by_side,
+        previous_by_side,
+    } = ctx;
     let thesis_invalidated_pct_current =
         breakdown_metric(current_by_close_reason, "thesis_invalidated", |item| {
             if current_summary.closed_trades > 0 {
