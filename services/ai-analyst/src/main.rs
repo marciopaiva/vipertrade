@@ -1280,15 +1280,16 @@ fn build_regime_diagnostics(
         + snapshot.blockers.macd_blocks)
         .max(1) as f64;
     let consensus_block_share = snapshot.blockers.consensus_blocks as f64 / total_blockers;
-    let fragile_symbols = symbols.iter().filter(|item| item.status == "fragile").count();
+    let fragile_symbols = symbols
+        .iter()
+        .filter(|item| item.status == "fragile")
+        .count();
 
     let regime = if snapshot.sides.long_avg_pnl_pct > 0.20
         && snapshot.sides.short_avg_pnl_pct <= 0.05
     {
         "long_biased_trend"
-    } else if snapshot.sides.short_avg_pnl_pct > 0.20
-        && snapshot.sides.long_avg_pnl_pct <= 0.05
-    {
+    } else if snapshot.sides.short_avg_pnl_pct > 0.20 && snapshot.sides.long_avg_pnl_pct <= 0.05 {
         "short_biased_trend"
     } else if consensus_block_share >= 0.45 {
         "consensus_gated_mixed"
