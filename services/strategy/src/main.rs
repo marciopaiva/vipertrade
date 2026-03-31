@@ -114,8 +114,6 @@ struct ThesisInvalidationState {
     consecutive_degrading_ticks: usize,
     bollinger_invalidated: bool,
     bollinger_consecutive_hits: usize,
-    bollinger_signal: String,
-    bollinger_strength: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +243,14 @@ struct PendingEntryCandidate {
     rank_score: f64,
     entry_score: f64,
     created_at: Instant,
+}
+
+struct FinalizeDecisionContext<'a> {
+    signal_event: &'a MarketSignalEvent,
+    execution_plan: &'a ExecutionPlan,
+    pipeline_input: &'a Value,
+    runtime_output: &'a Value,
+    execution_time_ms: i32,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1255,43 +1261,39 @@ fn build_constraints_results(runtime_output: &Value) -> Value {
 async fn finalize_strategy_decision(
     publish_conn: &mut redis::aio::MultiplexedConnection,
     db_pool: Option<&PgPool>,
-    signal_event: &MarketSignalEvent,
-    execution_plan: &ExecutionPlan,
-    pipeline_input: &Value,
-    runtime_output: &Value,
+    ctx: FinalizeDecisionContext<'_>,
     decision: StrategyDecision,
-    execution_time_ms: i32,
 ) -> Result<(), Box<dyn Error>> {
     if let Some(pool) = db_pool {
-        let mut audit_output = runtime_output.clone();
+        let mut audit_output = ctx.runtime_output.clone();
         if let Some(obj) = audit_output.as_object_mut() {
             obj.insert(
                 "final_decision".to_string(),
                 serde_json::to_value(&decision).unwrap_or_else(|_| json!({})),
             );
         }
-        let constraints_results = build_constraints_results(runtime_output);
+        let constraints_results = build_constraints_results(ctx.runtime_output);
         if let Err(err) = persist_tupa_audit_log(
             pool,
-            signal_event,
+            ctx.signal_event,
             "viper_smart_copy",
-            &execution_plan.version,
-            pipeline_input,
+            &ctx.execution_plan.version,
+            ctx.pipeline_input,
             &audit_output,
             &constraints_results,
             &decision,
-            execution_time_ms,
+            ctx.execution_time_ms,
         )
         .await
         {
             eprintln!(
                 "Failed to persist Tupa audit log for symbol={} err={}",
-                signal_event.signal.symbol, err
+                ctx.signal_event.signal.symbol, err
             );
         }
     }
 
-    publish_decision_event(publish_conn, &signal_event.event_id, decision).await
+    publish_decision_event(publish_conn, &ctx.signal_event.event_id, decision).await
 }
 
 async fn flush_pending_entry_candidates(
@@ -1349,12 +1351,14 @@ async fn flush_pending_entry_candidates(
         finalize_strategy_decision(
             publish_conn,
             db_pool,
-            &candidate.signal_event,
-            execution_plan,
-            &candidate.pipeline_input,
-            &candidate.runtime_output,
+            FinalizeDecisionContext {
+                signal_event: &candidate.signal_event,
+                execution_plan,
+                pipeline_input: &candidate.pipeline_input,
+                runtime_output: &candidate.runtime_output,
+                execution_time_ms: candidate.execution_time_ms,
+            },
             final_decision,
-            candidate.execution_time_ms,
         )
         .await?;
     }
@@ -3563,8 +3567,6 @@ fn evaluate_thesis_guard_policy(
             consecutive_degrading_ticks: 0,
             bollinger_invalidated: false,
             bollinger_consecutive_hits: 0,
-            bollinger_signal: String::new(),
-            bollinger_strength: 0.0,
         });
 
     if !state.side.eq_ignore_ascii_case(open_side) {
@@ -3614,8 +3616,6 @@ fn evaluate_thesis_degrading_policy(
             consecutive_degrading_ticks: 0,
             bollinger_invalidated: false,
             bollinger_consecutive_hits: 0,
-            bollinger_signal: String::new(),
-            bollinger_strength: 0.0,
         });
 
     if !state.side.eq_ignore_ascii_case(open_side) {
@@ -4262,16 +4262,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if let Err(err) = finalize_strategy_decision(
                                 &mut publish_conn,
                                 db_pool.as_ref(),
-                                &signal_event,
-                                &execution_plan,
-                                &json!(&signal_event.signal),
-                                &json!({
-                                    "open_trade_exit_trigger": exit_evaluation.trigger,
-                                    "open_trade_exit_reason": exit_evaluation.reason,
-                                }),
+                                FinalizeDecisionContext {
+                                    signal_event: &signal_event,
+                                    execution_plan: &execution_plan,
+                                    pipeline_input: &json!(&signal_event.signal),
+                                    runtime_output: &json!({
+                                        "open_trade_exit_trigger": exit_evaluation.trigger,
+                                        "open_trade_exit_reason": exit_evaluation.reason,
+                                    }),
+                                    execution_time_ms: 0,
+                                },
                                 decision,
-                                0,
-                            ).await {
+                            )
+                            .await
+                            {
                                 eprintln!("Failed to publish open-position decision: {}", err);
                             }
                             continue;
@@ -4498,13 +4502,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else if let Err(err) = finalize_strategy_decision(
                             &mut publish_conn,
                             db_pool.as_ref(),
-                            &signal_event,
-                            &execution_plan,
-                            &pipeline_input,
-                            &runtime_output,
+                            FinalizeDecisionContext {
+                                signal_event: &signal_event,
+                                execution_plan: &execution_plan,
+                                pipeline_input: &pipeline_input,
+                                runtime_output: &runtime_output,
+                                execution_time_ms,
+                            },
                             decision,
-                            execution_time_ms,
-                        ).await {
+                        )
+                        .await
+                        {
                             eprintln!(
                                 "Invalid strategy decision event contract for {}: {}",
                                 signal_event.signal.symbol, err
