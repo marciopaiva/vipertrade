@@ -44,15 +44,21 @@ BEFORE_COUNTS="$(run_psql -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades),
   (SELECT COUNT(*) FROM trades WHERE status = 'open'),
   (SELECT COUNT(*) FROM position_snapshots),
-  (SELECT COUNT(*) FROM strategy_decision_audit);")"
+  (SELECT COUNT(*) FROM strategy_decision_audit),
+  (SELECT COUNT(*) FROM tupa_audit_logs),
+  (SELECT COUNT(*) FROM system_events),
+  (SELECT COUNT(*) FROM bybit_fills);")"
 
-IFS='|' read -r BEFORE_TRADES BEFORE_OPEN BEFORE_SNAPSHOTS BEFORE_AUDIT <<< "$BEFORE_COUNTS"
+IFS='|' read -r BEFORE_TRADES BEFORE_OPEN BEFORE_SNAPSHOTS BEFORE_AUDIT BEFORE_TUPA_AUDIT BEFORE_EVENTS BEFORE_FILLS <<< "$BEFORE_COUNTS"
 
 echo "Before reset:"
 echo "- trades: $BEFORE_TRADES"
 echo "- open trades: $BEFORE_OPEN"
 echo "- position_snapshots: $BEFORE_SNAPSHOTS"
 echo "- strategy_decision_audit: $BEFORE_AUDIT"
+echo "- tupa_audit_logs: $BEFORE_TUPA_AUDIT"
+echo "- system_events: $BEFORE_EVENTS"
+echo "- bybit_fills: $BEFORE_FILLS"
 echo ""
 
 if [[ "${1:-}" != "--yes" ]]; then
@@ -68,15 +74,21 @@ run_psql -c "BEGIN;
 DELETE FROM position_snapshots;
 DELETE FROM trades;
 DELETE FROM strategy_decision_audit;
+DELETE FROM tupa_audit_logs;
+DELETE FROM system_events;
+DELETE FROM bybit_fills;
 COMMIT;"
 
 AFTER_COUNTS="$(run_psql -At -F '|' -c "SELECT
   (SELECT COUNT(*) FROM trades),
   (SELECT COUNT(*) FROM trades WHERE status = 'open'),
   (SELECT COUNT(*) FROM position_snapshots),
-  (SELECT COUNT(*) FROM strategy_decision_audit);")"
+  (SELECT COUNT(*) FROM strategy_decision_audit),
+  (SELECT COUNT(*) FROM tupa_audit_logs),
+  (SELECT COUNT(*) FROM system_events),
+  (SELECT COUNT(*) FROM bybit_fills);")"
 
-IFS='|' read -r AFTER_TRADES AFTER_OPEN AFTER_SNAPSHOTS AFTER_AUDIT <<< "$AFTER_COUNTS"
+IFS='|' read -r AFTER_TRADES AFTER_OPEN AFTER_SNAPSHOTS AFTER_AUDIT AFTER_TUPA_AUDIT AFTER_EVENTS AFTER_FILLS <<< "$AFTER_COUNTS"
 
 STATUS_JSON="$(run_api 'curl -s http://localhost:8080/api/v1/status || true')"
 
@@ -87,6 +99,9 @@ echo "- trades: $AFTER_TRADES"
 echo "- open trades: $AFTER_OPEN"
 echo "- position_snapshots: $AFTER_SNAPSHOTS"
 echo "- strategy_decision_audit: $AFTER_AUDIT"
+echo "- tupa_audit_logs: $AFTER_TUPA_AUDIT"
+echo "- system_events: $AFTER_EVENTS"
+echo "- bybit_fills: $AFTER_FILLS"
 echo ""
 
 echo "Runtime status:"
