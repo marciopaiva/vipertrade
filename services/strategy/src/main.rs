@@ -549,6 +549,12 @@ impl StrategyConfig {
             })
     }
 
+    fn thesis_degrading_confirmation_ticks(&self, symbol: &str) -> usize {
+        self.thesis_invalidation_confirmation_ticks(symbol)
+            .saturating_sub(1)
+            .max(1)
+    }
+
     fn stop_loss_cooldown_minutes_for_side(&self, symbol: &str, side: &str) -> i64 {
         let side_key = if side.eq_ignore_ascii_case("short") {
             "stop_loss_cooldown_minutes_short"
@@ -3677,7 +3683,7 @@ fn enforce_open_position_thesis_guard(
     }
 
     if evaluation.stage == "degrading_hard" {
-        let required_ticks = cfg.thesis_invalidation_confirmation_ticks(symbol);
+        let required_ticks = cfg.thesis_degrading_confirmation_ticks(symbol);
         let guard_evaluation = evaluate_thesis_degrading_policy(
             symbol,
             &open.side,
@@ -3793,7 +3799,7 @@ fn build_temporal_pipeline_state(
             "consecutive_hits": thesis_confirmation
                 .map(|state| state.consecutive_degrading_ticks as i64)
                 .unwrap_or(0),
-            "required_hits": cfg.thesis_invalidation_confirmation_ticks(symbol) as i64
+            "required_hits": cfg.thesis_degrading_confirmation_ticks(symbol) as i64
         },
         "thesis_invalidation": {
             "observed": thesis_confirmation
