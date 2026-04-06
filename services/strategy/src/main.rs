@@ -440,9 +440,11 @@ impl StrategyConfig {
 
         // CORREÇÃO 2026-04-02: Verifica configuração por símbolo PRIMEIRO
         // Bug anterior: mode_f64 era verificado primeiro, ignorando config por símbolo
-        if let Some(pair_value) = self.pair_cfg(symbol)
+        if let Some(pair_value) = self
+            .pair_cfg(symbol)
             .and_then(|v| cfg_get(v, &["entry_filters", side_key]))
-            .and_then(Value::as_f64) {
+            .and_then(Value::as_f64)
+        {
             return pair_value;
         }
 
