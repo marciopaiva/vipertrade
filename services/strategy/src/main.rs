@@ -4883,8 +4883,8 @@ mod tests {
         let mut open = sample_open_trade();
         open.side = "Short".to_string();
         let mut signal = sample_market_signal();
-        signal.consensus_side = "bearish".to_string();
-        signal.bybit_regime = "neutral".to_string();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "bearish".to_string();
         signal.consensus_trend_score = -0.22;
         signal.trend_score = -0.18;
         signal.current_price = 99.0;
