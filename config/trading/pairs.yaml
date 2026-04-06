@@ -8,8 +8,12 @@
 
 global:
   mode_profiles:
+    # ═══════════════════════════════════════════════════════════
+    # PAPER MODE - OTIMIZADO (2026-04-01)
+    # Mudanças: thesis invalidation menos sensível, filtros mais rigorosos
+    # ═══════════════════════════════════════════════════════════
     PAPER:
-      name: "standard_guarded"
+      name: "standard_guarded_v2"
       permissive_entry: false
       require_multi_exchange_consensus: true
       require_btc_macro_alignment: true
@@ -32,13 +36,17 @@ global:
           - at_profit_pct: 0.006
             trail_pct: 0.0005
         move_to_break_even_at: 0.0016
-      min_hold_seconds: 180
-      min_trend_score_long: 0.28
-      min_trend_score_short: 0.34
-      min_signal_confirmation_ticks_long: 3
-      min_signal_confirmation_ticks_short: 6
-      btc_macro_min_trend_score_long: 0.05
-      btc_macro_min_trend_score_short: 0.10
+      # Aumentado de 180 para 300 segundos - evita saídas prematuras
+      min_hold_seconds: 300
+      # Aumentado para filtrar entradas marginais - CORRIGIDO 2026-04-02
+      min_trend_score_long: 0.50
+      min_trend_score_short: 0.45
+      # Reduzida assimetria Long/Short
+      min_signal_confirmation_ticks_long: 4
+      min_signal_confirmation_ticks_short: 5
+      # BTC Macro mais rigoroso
+      btc_macro_min_trend_score_long: 0.15
+      btc_macro_min_trend_score_short: 0.20
       btc_macro_min_consensus_count_long: 2
       btc_macro_min_consensus_count_short: 3
       btc_macro_neutral_penalty: 0.05
@@ -51,9 +59,11 @@ global:
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
       entry_filters:
-        thesis_invalidation_confirmation_ticks: 2
-        thesis_invalidation_cooldown_minutes_long: 3
-        thesis_invalidation_cooldown_minutes_short: 3
+        # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
+        thesis_invalidation_confirmation_ticks: 4
+        # Aumentado cooldown para evitar reentrada imediata após perda
+        thesis_invalidation_cooldown_minutes_long: 8
+        thesis_invalidation_cooldown_minutes_short: 10
     TESTNET:
       name: "testnet_smoke"
       permissive_entry: true
@@ -90,8 +100,12 @@ global:
       rsi_short_max: 100
       stop_loss_cooldown_minutes_long: 0
       stop_loss_cooldown_minutes_short: 0
+    # ═══════════════════════════════════════════════════════════
+    # MAINNET MODE - OTIMIZADO (2026-04-01)
+    # Mudanças: thesis invalidation menos sensível, filtros mais rigorosos
+    # ═══════════════════════════════════════════════════════════
     MAINNET:
-      name: "standard_guarded"
+      name: "standard_guarded_v2"
       permissive_entry: false
       require_multi_exchange_consensus: true
       require_btc_macro_alignment: true
@@ -114,13 +128,17 @@ global:
           - at_profit_pct: 0.009
             trail_pct: 0.0006
         move_to_break_even_at: 0.005
-      min_hold_seconds: 180
-      min_trend_score_long: 0.28
-      min_trend_score_short: 0.34
-      min_signal_confirmation_ticks_long: 3
-      min_signal_confirmation_ticks_short: 6
-      btc_macro_min_trend_score_long: 0.05
-      btc_macro_min_trend_score_short: 0.10
+      # Aumentado de 180 para 300 segundos - evita saídas prematuras
+      min_hold_seconds: 300
+      # Aumentado para filtrar entradas marginais
+      min_trend_score_long: 0.40
+      min_trend_score_short: 0.45
+      # Reduzida assimetria Long/Short
+      min_signal_confirmation_ticks_long: 4
+      min_signal_confirmation_ticks_short: 5
+      # BTC Macro mais rigoroso
+      btc_macro_min_trend_score_long: 0.15
+      btc_macro_min_trend_score_short: 0.20
       btc_macro_min_consensus_count_long: 2
       btc_macro_min_consensus_count_short: 3
       btc_macro_neutral_penalty: 0.05
@@ -132,6 +150,12 @@ global:
       rsi_short_max: 48
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
+      entry_filters:
+        # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
+        thesis_invalidation_confirmation_ticks: 4
+        # Aumentado cooldown para evitar reentrada imediata após perda
+        thesis_invalidation_cooldown_minutes_long: 8
+        thesis_invalidation_cooldown_minutes_short: 10
 
   # Smart Copy constraints
   smart_copy:
@@ -148,14 +172,16 @@ global:
     max_daily_loss_pct: 0.03
     max_consecutive_losses: 3
   
-  # Entry timing filters
+  # Entry timing filters - OTIMIZADO (2026-04-01)
   entry_filters:
     min_volume_24h_usdt: 30000000  # $30M mínimo
     max_spread_pct: 0.001  # 0.1% máximo
     max_atr_pct: 0.05  # 5% volatilidade máxima
     max_funding_rate_pct: 0.015  # 1.5% funding máximo
-    min_trend_score: 0.25
-    min_signal_confirmation_ticks: 2
+    # Aumentado de 0.25 para filtrar melhor
+    min_trend_score: 0.35
+    # Aumentado de 2 para 4
+    min_signal_confirmation_ticks: 4
     min_volume_ratio: 1.0
     min_volume_ratio_long: 0.90
     min_volume_ratio_short: 0.95
@@ -163,17 +189,22 @@ global:
     rsi_long_max: 80
     rsi_short_min: 20
     rsi_short_max: 50
-    btc_macro_min_trend_score_long: 0.05
-    btc_macro_min_trend_score_short: 0.10
+    # BTC Macro mais rigoroso
+    btc_macro_min_trend_score_long: 0.15
+    btc_macro_min_trend_score_short: 0.20
     btc_macro_min_consensus_count_long: 2
     btc_macro_min_consensus_count_short: 3
     btc_macro_neutral_penalty: 0.05
-    stop_loss_cooldown_minutes: 3
-    stop_loss_cooldown_minutes_short: 5
-    min_signal_confirmation_ticks_short: 4
+    # Aumentado cooldown
+    stop_loss_cooldown_minutes: 5
+    stop_loss_cooldown_minutes_short: 8
+    min_signal_confirmation_ticks_short: 5
 
 # ═══════════════════════════════════════════════════════════
 # DOGEUSDT - Meme Coin (Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+# Performance: Short +0,34 (88% WR) | Long -0,10 (0% WR)
+# Ajuste 2026-04-02: Desabilita Long, mantém Short excelente
 # ═══════════════════════════════════════════════════════════
 
 DOGEUSDT:
@@ -190,14 +221,14 @@ DOGEUSDT:
     MAINNET:
       risk:
         max_position_wallet_pct: 0.08
-  
+
   # Risk parameters (mais conservador devido à volatilidade)
   risk:
     stop_loss_pct: 0.0025      # 0.25% para teste scalp
     take_profit_pct: 0.003      # 0.30% para teste scalp
     max_position_usdt: 15.00   # Máx 15% do capital
     atr_multiplier: 0.5        # Reduz sizing em alta volatilidade
-  
+
   # Trailing Stop Dinâmico (específico para DOGE)
   trailing_stop:
     enabled: true
@@ -229,20 +260,27 @@ DOGEUSDT:
           - at_profit_pct: 0.10
             trail_pct: 0.035
         move_to_break_even_at: 0.03
-  
+
   entry_filters:
-    min_trend_score_long: 0.43
+    # ✅ Reabilitado após bug fix v2.2 - filtros agora funcionam por símbolo
+    allow_long: true
+    allow_short: true
+    # Filtros rigorosos para proteger contra entradas ruins
+    min_trend_score_long: 0.55   # Era desabilitado, agora com filtro forte
     min_trend_score_short: 0.35
     min_trend_score: 0.38
-    min_signal_confirmation_ticks_long: 4
+    min_signal_confirmation_ticks_long: 6
     min_signal_confirmation_ticks_short: 4
     min_signal_confirmation_ticks: 3
-    thesis_invalidation_confirmation_ticks: 1
+    thesis_invalidation_confirmation_ticks: 4
     stop_loss_cooldown_minutes_short: 5
     max_atr_pct: 0.0055
   
 # ═══════════════════════════════════════════════════════════
 # XRPUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+# Performance: Short +0,10 (60% WR) | Long: 0 trades
+# Ajuste 2026-04-02: Short mantido, Long com filtros rigorosos
 # ═══════════════════════════════════════════════════════════
 
 XRPUSDT:
@@ -259,13 +297,13 @@ XRPUSDT:
     MAINNET:
       risk:
         max_position_wallet_pct: 0.12
-  
+
   risk:
     stop_loss_pct: 0.0025
     take_profit_pct: 0.003
     max_position_usdt: 20.00
     atr_multiplier: 0.6
-  
+
   trailing_stop:
     enabled: true
     by_profile:
@@ -296,21 +334,26 @@ XRPUSDT:
           - at_profit_pct: 0.08
             trail_pct: 0.03
         move_to_break_even_at: 0.025
-  
+
   entry_filters:
+    # ⚠️ Long: sem trades ainda - filtros rigorosos
     allow_long: true
+    # ✅ Short: +0,10 USDT, 60% WR - bom!
     allow_short: true
-    min_trend_score_long: 0.32
-    min_trend_score_short: 0.32
-    min_trend_score: 0.22
-    min_signal_confirmation_ticks_long: 6
-    min_signal_confirmation_ticks_short: 4
-    min_signal_confirmation_ticks: 3
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0045
+    min_trend_score_long: 0.58   # Ajuste 2026-04-06: endurece Long frágil
+    min_trend_score_short: 0.40  # Era 0.32 (+25%)
+    min_trend_score: 0.46        # Ajuste 2026-04-06: sobe baseline de entrada
+    min_signal_confirmation_ticks_long: 8   # Ajuste 2026-04-06: exige mais sustentação
+    min_signal_confirmation_ticks_short: 5  # Era 4
+    min_signal_confirmation_ticks: 5        # Era 3
+    stop_loss_cooldown_minutes_short: 6
+    max_atr_pct: 0.0030  # Ajuste 2026-04-06: corta Long em volatilidade marginal
   
 # ═══════════════════════════════════════════════════════════
 # ADAUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+# Performance: Short +0,20 (60% WR) | Long -0,18 (60% WR)
+# Ajuste 2026-04-02: Short mantido, Long com filtros rigorosos
 # ═══════════════════════════════════════════════════════════
 
 ADAUSDT:
@@ -327,13 +370,13 @@ ADAUSDT:
     MAINNET:
       risk:
         max_position_wallet_pct: 0.12
-  
+
   risk:
     stop_loss_pct: 0.0025
     take_profit_pct: 0.003
     max_position_usdt: 20.00
     atr_multiplier: 0.65
-  
+
   trailing_stop:
     enabled: true
     by_profile:
@@ -364,17 +407,20 @@ ADAUSDT:
           - at_profit_pct: 0.080
             trail_pct: 0.030
         move_to_break_even_at: 0.025
-  
+
   entry_filters:
-    min_trend_score_long: 0.31
-    min_trend_score_short: 0.24
-    min_trend_score: 0.28
-    min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 4
-    min_signal_confirmation_ticks: 3
-    thesis_invalidation_confirmation_ticks: 1
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0035
+    # Aumentado após análise: 2 Longs consecutivos perdendo (-0,72%, -0,57%)
+    allow_long: true
+    allow_short: true
+    min_trend_score_long: 0.66   # Ajuste 2026-04-06: endurece Long frágil
+    min_trend_score_short: 0.40  # Era 0.35 (+14%)
+    min_trend_score: 0.55        # Ajuste 2026-04-06: sobe baseline de entrada
+    min_signal_confirmation_ticks_long: 8   # Ajuste 2026-04-06: exige mais sustentação
+    min_signal_confirmation_ticks_short: 6  # Era 5
+    min_signal_confirmation_ticks: 6        # Era 5
+    thesis_invalidation_confirmation_ticks: 5
+    stop_loss_cooldown_minutes_short: 6
+    max_atr_pct: 0.0022  # Ajuste 2026-04-06: evita Long com ATR marginal
   
 # ═══════════════════════════════════════════════════════════
 # XLMUSDT - Large Cap Alt (Média-Alta Volatilidade)
@@ -449,6 +495,9 @@ XLMUSDT:
 # ═══════════════════════════════════════════════════════════
 # SUIUSDT - Large Cap Alt (Alta Volatilidade)
 # ═══════════════════════════════════════════════════════════
+# Performance: Short -0,16 (45% WR) | Long -0,26 (40% WR)
+# Ajuste 2026-04-02: FILTROS MAIS RIGOROSOS (ambos lados perdem)
+# ═══════════════════════════════════════════════════════════
 
 SUIUSDT:
   enabled: true
@@ -503,17 +552,23 @@ SUIUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.34
-    min_trend_score_short: 0.41
-    min_trend_score: 0.34
-    min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 7
-    min_signal_confirmation_ticks: 4
-    stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0050
+    # 🔴 Ambos lados perdem - filtros muito mais rigorosos
+    allow_long: true
+    allow_short: true
+    min_trend_score_long: 0.55   # Era 0.34 (+62%)
+    min_trend_score_short: 0.50  # Era 0.41 (+22%)
+    min_trend_score: 0.50        # Era 0.34
+    min_signal_confirmation_ticks_long: 6   # Era 4
+    min_signal_confirmation_ticks_short: 8  # Era 7
+    min_signal_confirmation_ticks: 5        # Era 4
+    stop_loss_cooldown_minutes_short: 8
+    max_atr_pct: 0.0040  # Era 0.0050 (mais restritivo)
 
 # ═══════════════════════════════════════════════════════════
 # LINKUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+# Performance: Short +0,03 (40% WR) | Long -0,22 (50% WR)
+# Ajuste 2026-04-02: Short mantido (marginal), Long desabilitado
 # ═══════════════════════════════════════════════════════════
 
 LINKUSDT:
@@ -569,17 +624,23 @@ LINKUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.32
-    min_trend_score_short: 0.33
-    min_trend_score: 0.28
-    min_signal_confirmation_ticks_long: 4
-    min_signal_confirmation_ticks_short: 5
-    min_signal_confirmation_ticks: 3
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0048
+    # ✅ Reabilitado após bug fix v2.2 - Short marginal, Long com filtro forte
+    allow_long: true
+    allow_short: true
+    min_trend_score_long: 0.50   # Forte filtro para Long
+    min_trend_score_short: 0.45  # Era 0.33 (+36%)
+    min_trend_score: 0.45        # Era 0.28
+    min_signal_confirmation_ticks_long: 6   # Era 4
+    min_signal_confirmation_ticks_short: 6  # Era 5
+    min_signal_confirmation_ticks: 5        # Era 3
+    stop_loss_cooldown_minutes_short: 6
+    max_atr_pct: 0.0040  # Era 0.0048
 
 # ═══════════════════════════════════════════════════════════
 # NEARUSDT - Large Cap Alt (Média-Alta Volatilidade)
+# ═══════════════════════════════════════════════════════════
+# Performance: Short +0,13 (71% WR) | Long -0,33 (20% WR)
+# Ajuste 2026-04-02: Short excelente mantido, Long desabilitado
 # ═══════════════════════════════════════════════════════════
 
 NEARUSDT:
@@ -635,14 +696,17 @@ NEARUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.38
-    min_trend_score_short: 0.37
-    min_trend_score: 0.30
-    min_signal_confirmation_ticks_long: 7
-    min_signal_confirmation_ticks_short: 6
-    min_signal_confirmation_ticks: 4
+    # ✅ Reabilitado após bug fix v2.2 - Short excelente, Long com filtro forte
+    allow_long: true
+    allow_short: true
+    min_trend_score_long: 0.55   # Forte filtro para Long
+    min_trend_score_short: 0.40  # Era 0.37
+    min_trend_score: 0.40        # Era 0.30
+    min_signal_confirmation_ticks_long: 8   # Era 7 (máximo rigor)
+    min_signal_confirmation_ticks_short: 5  # Era 6 (funciona bem)
+    min_signal_confirmation_ticks: 5        # Era 4
     stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0048
+    max_atr_pct: 0.0045  # Era 0.0048
 
 # ═══════════════════════════════════════════════════════════
 # LTCUSDT - Large Cap Alt (Média Volatilidade)
@@ -701,14 +765,15 @@ LTCUSDT:
         move_to_break_even_at: 0.025
 
   entry_filters:
-    min_trend_score_long: 0.30
+    # Aumentado após análise: 4 LONGs, 25% WR, -0,042 USDT
+    min_trend_score_long: 0.50   # Era 0.30 (+67%)
     min_trend_score_short: 0.35
-    min_trend_score: 0.24
-    min_signal_confirmation_ticks_long: 5
+    min_trend_score: 0.42        # Era 0.24
+    min_signal_confirmation_ticks_long: 7   # Era 5
     min_signal_confirmation_ticks_short: 7
-    min_signal_confirmation_ticks: 3
+    min_signal_confirmation_ticks: 5        # Era 3
     stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0042
+    max_atr_pct: 0.0035  # Era 0.0042
   
 # ═══════════════════════════════════════════════════════════
 # RISK PROFILES (Overrides globais por perfil)

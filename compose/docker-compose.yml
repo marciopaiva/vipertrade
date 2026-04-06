@@ -88,6 +88,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -133,6 +134,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 30s
@@ -191,10 +193,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
       redis:
         condition: service_healthy
+        restart: true
       market-data:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 30s
@@ -254,10 +259,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
       redis:
         condition: service_healthy
+        restart: true
       strategy:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 30s
@@ -314,6 +322,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
       interval: 30s
@@ -353,6 +362,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
       interval: 30s
@@ -398,8 +408,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
       redis:
         condition: service_healthy
+        restart: true
+      api:
+        condition: service_healthy
+        restart: true
+      ai-analyst:
+        condition: service_healthy
+        restart: true
     restart: unless-stopped
     stop_signal: SIGINT
     stop_grace_period: 45s
@@ -453,8 +471,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
       redis:
         condition: service_healthy
+        restart: true
     restart: unless-stopped
     stop_signal: SIGINT
     stop_grace_period: 45s
@@ -493,6 +513,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
       interval: 30s
