@@ -4883,15 +4883,15 @@ mod tests {
         let mut open = sample_open_trade();
         open.side = "Short".to_string();
         let mut signal = sample_market_signal();
-        signal.consensus_side = "neutral".to_string();
+        signal.consensus_side = "bearish".to_string();
         signal.bybit_regime = "neutral".to_string();
-        signal.consensus_trend_score = 0.38;
-        signal.trend_score = 0.32;
-        signal.current_price = 101.0;
-        signal.bybit_price = 101.0;
+        signal.consensus_trend_score = -0.22;
+        signal.trend_score = -0.18;
+        signal.current_price = 99.0;
+        signal.bybit_price = 99.0;
         signal.consensus_ema_fast = 100.0;
         signal.consensus_ema_slow = 101.0;
-        signal.consensus_bollinger_percent_b = 0.82;
+        signal.consensus_bollinger_percent_b = 0.35;
 
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
