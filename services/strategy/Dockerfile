@@ -28,7 +28,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3.11 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3.11 netcat-openbsd && rm -rf /var/lib/apt/lists/*
 
 # Install Tupã CLI
 ARG TUPA_VERSION=v0.8.1
@@ -37,9 +37,11 @@ RUN chmod +x /usr/local/bin/tupa && ls -l /usr/local/bin/tupa
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-strategy /usr/local/bin/viper-strategy
+COPY scripts/docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
+RUN chmod +x /usr/local/bin/wait-for-deps.sh
 
 # Create non-root user
 RUN useradd -m -u 1000 -U viper
 USER viper
 
-CMD ["viper-strategy"]
+CMD ["wait-for-deps.sh", "postgres:5432", "redis:6379", "market-data:8081", "api:8080", "--", "viper-strategy"]

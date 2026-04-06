@@ -438,10 +438,20 @@ impl StrategyConfig {
             "min_trend_score_long"
         };
 
+        // CORREÇÃO 2026-04-02: Verifica configuração por símbolo PRIMEIRO
+        // Bug anterior: mode_f64 era verificado primeiro, ignorando config por símbolo
+        if let Some(pair_value) = self.pair_cfg(symbol)
+            .and_then(|v| cfg_get(v, &["entry_filters", side_key]))
+            .and_then(Value::as_f64) {
+            return pair_value;
+        }
+
+        // Depois usa o global mode como fallback
         if let Some(value) = self.mode_f64(side_key) {
             return value;
         }
 
+        // Fallback para configuração genérica do símbolo
         self.pair_cfg(symbol)
             .map(|v| {
                 cfg_f64(
@@ -3502,21 +3512,21 @@ fn evaluate_thesis_invalidation(
 
         let (stage, reason) = if opposite_side {
             ("invalidated", "thesis_invalidated_opposite_side")
-        } else if health_score <= -45
-            || (health_score <= -35 && adverse_components >= required_invalid_components)
+        } else if health_score <= -60
+            || (health_score <= -50 && adverse_components >= required_invalid_components)
         {
             ("invalidated", "thesis_invalidated_health_threshold")
         } else if both_not_bullish
-            && health_score <= -20
+            && health_score <= -35
             && adverse_components >= required_invalid_components
         {
             ("invalidated", "thesis_invalidated_no_bullish_alignment")
-        } else if (health_score <= -25 && adverse_components >= 2)
-            || (both_not_bullish && health_score <= -15 && adverse_components >= 2)
+        } else if (health_score <= -35 && adverse_components >= 2)
+            || (both_not_bullish && health_score <= -20 && adverse_components >= 2)
         {
             ("degrading_hard", "thesis_degrading_hard_long_alignment")
-        } else if health_score <= -15
-            || (both_not_bullish && health_score <= -10 && adverse_components >= 1)
+        } else if health_score <= -20
+            || (both_not_bullish && health_score <= -12 && adverse_components >= 1)
         {
             ("degrading_soft", "thesis_degrading_soft_long_alignment")
         } else {
@@ -3536,10 +3546,14 @@ fn evaluate_thesis_invalidation(
 
         let (stage, reason) = if opposite_side {
             ("invalidated", "thesis_invalidated_opposite_side")
-        } else if health_score >= 35 {
+        } else if health_score >= 55 {
             ("invalidated", "thesis_invalidated_health_threshold")
-        } else if both_not_bearish && health_score >= 15 {
+        } else if both_not_bearish && health_score >= 35 {
             ("invalidated", "thesis_invalidated_no_bearish_alignment")
+        } else if health_score >= 40 || (both_not_bearish && health_score >= 25) {
+            ("degrading_hard", "thesis_degrading_hard_short_alignment")
+        } else if health_score >= 25 || (both_not_bearish && health_score >= 15) {
+            ("degrading_soft", "thesis_degrading_soft_short_alignment")
         } else {
             ("valid", "thesis_valid")
         };
@@ -4799,13 +4813,14 @@ mod tests {
         let mut signal = sample_market_signal();
         signal.consensus_side = "neutral".to_string();
         signal.bybit_regime = "neutral".to_string();
-        signal.consensus_trend_score = -0.22;
-        signal.trend_score = -0.24;
-        signal.btc_trend_score = -0.28;
+        signal.consensus_trend_score = -0.62;
+        signal.trend_score = -0.58;
+        signal.btc_trend_score = -0.55;
         signal.current_price = 99.0;
         signal.bybit_price = 99.0;
         signal.consensus_ema_fast = 100.0;
         signal.consensus_ema_slow = 99.0;
+        signal.consensus_bollinger_percent_b = 0.10;
 
         let evaluation = evaluate_thesis_invalidation(&signal, &open);
 
@@ -4845,6 +4860,7 @@ mod tests {
         signal.consensus_side = "neutral".to_string();
         signal.bybit_regime = "neutral".to_string();
         signal.consensus_trend_score = -0.22;
+        signal.trend_score = -0.24;
         signal.consensus_macd_histogram = -1.0;
         signal.current_price = 99.0;
         signal.bybit_price = 99.0;
@@ -4858,5 +4874,28 @@ mod tests {
         assert!(evaluation
             .reason
             .contains("thesis_degrading_hard_long_alignment"));
+    }
+
+    #[test]
+    fn short_thesis_uses_degrading_before_invalidation() {
+        let mut open = sample_open_trade();
+        open.side = "Short".to_string();
+        let mut signal = sample_market_signal();
+        signal.consensus_side = "neutral".to_string();
+        signal.bybit_regime = "neutral".to_string();
+        signal.consensus_trend_score = 0.38;
+        signal.trend_score = 0.32;
+        signal.current_price = 101.0;
+        signal.bybit_price = 101.0;
+        signal.consensus_ema_fast = 100.0;
+        signal.consensus_ema_slow = 101.0;
+        signal.consensus_bollinger_percent_b = 0.82;
+
+        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+
+        assert_eq!(evaluation.stage, "degrading_hard");
+        assert!(evaluation
+            .reason
+            .contains("thesis_degrading_hard_short_alignment"));
     }
 }

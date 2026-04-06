@@ -309,288 +309,6 @@ function MetricCard({ label, value, accent = '#11c4ff', helper }: { label: strin
   );
 }
 
-function AiAnalystCard({ analyst }: { analyst?: AiAnalystData }) {
-  const exitPressure = analyst?.tupa_evaluation?.exit_pressure;
-  const entryPressure = analyst?.tupa_evaluation?.entry_pressure;
-  const directionalBias = analyst?.tupa_evaluation?.directional_bias;
-  const thesisQuality = analyst?.tupa_evaluation?.thesis_quality;
-  const symbolRisk = analyst?.tupa_evaluation?.symbol_risk;
-  const summary = analyst?.tupa_evaluation?.summary || analyst?.summary;
-  const expectancy = analyst?.expectancy;
-  const comparative = analyst?.comparative_diagnostics;
-  const recommendations = analyst?.recommendations || [];
-  const hypotheses = analyst?.hypotheses || [];
-  const symbolDiagnostics = analyst?.symbol_diagnostics || [];
-  const regime = analyst?.regime_diagnostics;
-  const exitTone = toneClasses(exitPressure?.severity);
-  const entryTone = toneClasses(entryPressure?.severity);
-  const thesisTone = toneClasses(thesisQuality?.severity);
-  const symbolTone = toneClasses(symbolRisk?.severity);
-  const comparativeToneState = comparativeTone(comparative?.status);
-  const regimeTone = comparativeTone(regime?.status);
-
-  return (
-    <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-      <CardHeader className="pb-1">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base text-slate-200">AI Analyst</CardTitle>
-          <div className="flex items-center gap-2">
-            {analyst?.lookback_hours ? (
-              <Badge className="border-slate-600/70 bg-slate-900/60 text-[10px] tracking-[0.16em] text-slate-300">
-                {analyst.lookback_hours}H WINDOW
-              </Badge>
-            ) : null}
-            {analyst?.generated_at ? (
-              <div className="text-[11px] text-slate-500">
-                {new Date(analyst.generated_at).toLocaleTimeString()}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0 space-y-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Directional Bias</div>
-            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', toneClasses('pass').text)}>
-              {titleCase(directionalBias?.reason?.replace('directional_bias_', '') || 'neutral')}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              {summary?.closed_trades ?? 0} trades · {usd(summary?.total_pnl_usdt)}
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Exit Pressure</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', exitTone.badge)}>
-                {exitPressure?.severity || 'pass'}
-              </Badge>
-            </div>
-            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', exitTone.text)}>
-              {num(exitPressure?.thesis_invalidated_pct)}%
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              thesis invalidated · trailing {num(exitPressure?.trailing_stop_pct)}%
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Entry Pressure</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', entryTone.badge)}>
-                {entryPressure?.severity || 'warn'}
-              </Badge>
-            </div>
-            <div className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-100">
-              {titleCase(entryPressure?.dominant_gate || 'unknown')}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              {titleCase((entryPressure?.reason || '').replace('entry_pressure_', '')) || 'No dominant gate'}
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Thesis Guard</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', thesisTone.badge)}>
-                {thesisQuality?.severity || 'pass'}
-              </Badge>
-            </div>
-            <div className={cn('mt-3 text-xl font-semibold tracking-[-0.03em]', thesisTone.text)}>
-              {titleCase((thesisQuality?.reason || 'stable').replace('thesis_quality_', ''))}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              {titleCase((thesisQuality?.recommendation || 'keep_current_thesis_policy').replaceAll('_', ' '))}
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Expectancy</div>
-            <div
-              className={cn(
-                'mt-3 text-2xl font-semibold tracking-[-0.03em]',
-                (expectancy?.expectancy_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300',
-              )}
-            >
-              {num(expectancy?.expectancy_pct)}%
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              payoff {num(expectancy?.payoff_ratio)} · {usd(expectancy?.expectancy_usdt)} / trade
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbol Risk</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', symbolTone.badge)}>
-                {symbolRisk?.severity || 'pass'}
-              </Badge>
-            </div>
-            <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', symbolTone.text)}>
-              {symbolRisk?.symbol || 'Stable'}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              {titleCase((symbolRisk?.reason || '').replace('symbol_risk_', '')) || 'No elevated symbol risk'}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 px-4 py-3">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Analyst Summary</div>
-          <div className="mt-2 text-sm leading-6 text-slate-300">
-            {analyst?.llm_summary || analyst?.heuristic_summary || 'AI analyst summary unavailable.'}
-          </div>
-          {analyst?.tupa_error ? (
-            <div className="mt-3 text-xs text-red-300">Tupa evaluation fallback: {analyst.tupa_error}</div>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">What Changed</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', comparativeToneState.badge)}>
-                {comparative?.status || 'stable'}
-              </Badge>
-            </div>
-            <div className={cn('mt-3 text-lg font-semibold', comparativeToneState.text)}>
-              {titleCase((comparative?.status || 'stable').replaceAll('_', ' '))}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              expectancy Δ {num(comparative?.expectancy_pct?.delta)}% · thesis Δ {num(comparative?.thesis_invalidated_pct?.delta)}%
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(comparative?.reasons || []).slice(0, 3).map((reason) => (
-                <Badge
-                  key={reason}
-                  className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300"
-                >
-                  {titleCase(reason.replaceAll('_', ' '))}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Current Regime</div>
-              <Badge className={cn('text-[10px] tracking-[0.16em]', regimeTone.badge)}>
-                {regime?.status || 'mixed'}
-              </Badge>
-            </div>
-            <div className={cn('mt-3 text-lg font-semibold', regimeTone.text)}>
-              {titleCase((regime?.regime || 'balanced_mixed').replaceAll('_', ' '))}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              {titleCase((regime?.directional_bias || 'neutral').replaceAll('_', ' '))} · {titleCase(regime?.exit_profile || 'balanced')}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                gate {titleCase(regime?.dominant_gate || 'unknown')}
-              </Badge>
-              <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                {regime?.confidence || 'low'} confidence
-              </Badge>
-            </div>
-          </div>
-
-          <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Top Recommendations</div>
-            <div className="mt-3 space-y-3">
-              {recommendations.length === 0 ? (
-                <div className="text-sm text-slate-400">No recommendations yet.</div>
-              ) : (
-                recommendations.slice(0, 3).map((item) => {
-                  const tone = toneClasses(item.severity);
-                  return (
-                    <div key={item.recommendation_id} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-100">
-                          {titleCase((item.recommendation || 'observe').replaceAll('_', ' '))}
-                        </div>
-                        <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
-                          {item.confidence || item.severity || 'info'}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Hypotheses</div>
-            <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-              {hypotheses.length} active
-            </Badge>
-          </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {hypotheses.length === 0 ? (
-              <div className="text-sm text-slate-400">No testable hypotheses yet.</div>
-            ) : (
-              hypotheses.slice(0, 2).map((item) => (
-                <div key={item.hypothesis_id} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-100">
-                      {item.hypothesis || 'Observe more sample'}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                        {item.priority || 'info'}
-                      </Badge>
-                      <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                        {item.confidence || 'low'}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
-                  <div className="mt-3 text-xs text-slate-300">
-                    <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 p-4">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbols To Watch</div>
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {symbolDiagnostics.length === 0 ? (
-              <div className="text-sm text-slate-400">No symbol diagnostics yet.</div>
-            ) : (
-              symbolDiagnostics.slice(0, 4).map((item) => {
-                const tone = comparativeTone(item.status);
-                return (
-                  <div key={item.symbol} className="rounded-xl border border-slate-700/60 bg-slate-950/60 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold text-slate-100">{item.symbol || 'N/A'}</div>
-                      <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
-                        {item.status || 'mixed'}
-                      </Badge>
-                    </div>
-                    <div className={cn('mt-2 text-sm font-medium', (item.avg_pnl_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
-                      {num(item.avg_pnl_pct)}%
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      thesis {item.thesis_invalidated_trades ?? 0} · trailing {item.trailing_stop_trades ?? 0}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ServicesGrid({ services }: { services: Array<{ name: string; ok: boolean; latency_ms: number }> }) {
   const flowOrder = ['bybit', 'market-data', 'strategy', 'executor', 'api', 'monitor', 'analytics', 'backtest'];
   const sortedServices = [...services].sort((a, b) => {
@@ -964,9 +682,8 @@ export default function DashboardPage() {
     return lastStableMarketSignals;
   }, [lastStableMarketSignals, liveMarketSignals]);
 
-  const decisionMatrixStale = Object.keys(liveMarketSignals).length === 0 && Object.keys(lastStableMarketSignals).length > 0;
   
-  // Build Decision Matrix from market signals
+  // Build token priority from market signals
   const tokenDecisions = useMemo<TokenDecision[]>(() => {
     const signalsObj = effectiveMarketSignals;
     const signalsArray = Object.values(signalsObj);
@@ -1135,26 +852,6 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
-        {/* Architecture Flow */}
-        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-          <CardHeader className="pb-1">
-            <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ServiceFlowDiagram
-              services={data?.services || []}
-              executionMode={tradingMode}
-              executorState={executorEnabled ? 'running' : 'down'}
-              flowContext={flowContext}
-              activeSignalsCount={Object.keys(effectiveMarketSignals).length}
-              openPositionsCount={data?.positions?.items?.length || 0}
-              closedTradesCount={(data?.trades?.items || []).filter((trade) => trade.status === 'closed').length}
-            />
-          </CardContent>
-        </Card>
-
-        <AiAnalystCard analyst={data?.ai_analyst} />
-
         {/* Wallet Card - Unified */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-1">
@@ -1268,135 +965,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Decision Matrix */}
-        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-lg text-slate-200">Decision Matrix</CardTitle>
-              {decisionMatrixStale && (
-                <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-300">
-                  Refreshing signals
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {tokenDecisions.length === 0 ? (
-              <div className="text-center text-slate-500 py-8">
-                {data?.partial ? 'Decision feed is temporarily unavailable' : 'No decision data available'}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.3fr_1fr_1fr]">
-                  <div className="rounded-[22px] border border-slate-700/50 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.12),transparent_32%),linear-gradient(180deg,rgba(30,41,59,0.55),rgba(15,23,42,0.38))] px-4 py-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Strategy Focus</div>
-                    <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-50">
-                      {flowContext.strategySymbol || 'No active setup'}
-                    </div>
-                    <div className="mt-1 text-sm text-slate-300">
-                      {flowContext.strategyState || 'Scanning market conditions'}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">{flowContext.strategyContext || 'No dominant block reason right now'}</div>
-                  </div>
-                  <div className="rounded-[22px] border border-slate-700/50 bg-slate-800/35 px-4 py-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Executor</div>
-                    <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-50">
-                      {flowContext.executorSymbol || (executorEnabled ? 'Executor idle' : 'Executor paused')}
-                    </div>
-                    <div className="mt-1 text-sm text-slate-300">
-                      {flowContext.executorAction || (executorEnabled ? 'Awaiting valid decision' : 'Stopped')}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">{flowContext.executorContext || 'No execution pressure on the hot path'}</div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
-                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Actionable</div>
-                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-emerald-300">
-                        {tokenDecisions.filter((token) => token.stateTone === 'positive').length}
-                      </div>
-                    </div>
-                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
-                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Hold</div>
-                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-violet-300">
-                        {tokenDecisions.filter((token) => token.stateTone === 'neutral').length}
-                      </div>
-                    </div>
-                    <div className="rounded-[20px] border border-slate-700/50 bg-slate-800/30 px-3 py-3">
-                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Divergence</div>
-                      <div className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-amber-300">
-                        {tokenDecisions.filter((token) => token.hasDivergence).length}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {tokenDecisions.map((token) => {
-                  const stateColor = token.stateTone === 'positive' ? '#10b981'
-                    : token.stateTone === 'negative' ? '#ef4444'
-                    : '#6366f1';
-                  const alignmentColor = token.bybitAligned ? '#10b981'
-                    : token.hasDivergence ? '#f59e0b'
-                    : '#64748b';
-                  const trendPositive = token.trendScore >= 0;
-
-                    return (
-                      <div
-                        key={token.symbol}
-                        className="rounded-[22px] border border-slate-700/50 bg-[linear-gradient(180deg,rgba(30,41,59,0.58),rgba(15,23,42,0.38))] p-4 shadow-[0_12px_28px_rgba(2,6,23,0.18)]"
-                      >
-                        <div className="flex justify-between items-start gap-3">
-                          <div>
-                            <div className="text-lg font-semibold tracking-[-0.02em] text-slate-50">{token.symbol}</div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {token.consensusLabel}
-                            </div>
-                          </div>
-                          <Badge
-                            style={{ backgroundColor: stateColor + '22', color: stateColor, borderColor: stateColor + '55' }}
-                            className="text-xs"
-                          >
-                            {token.stateLabel}
-                          </Badge>
-                        </div>
-
-                        <div className="mt-5 flex items-end justify-between gap-3">
-                          <div>
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Trend</div>
-                            <div className={cn('mt-1 text-3xl font-semibold tracking-[-0.04em]', trendPositive ? 'text-slate-50' : 'text-red-300')}>
-                              {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
-                            </div>
-                            <div className="mt-2 text-xs text-slate-500">
-                              {token.stateContext || `${token.consensusCount}/${token.exchangesAvailable} exchanges aligned`}
-                            </div>
-                          </div>
-                          <Badge
-                            style={{ backgroundColor: alignmentColor + '22', color: alignmentColor, borderColor: alignmentColor + '55' }}
-                            className="text-xs"
-                          >
-                            {token.bybitAligned ? 'Aligned' : token.hasDivergence ? 'Divergent' : 'Watching'}
-                          </Badge>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-700/50 pt-3">
-                          <div className="rounded-2xl bg-slate-900/35 px-3 py-2">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Consensus</div>
-                            <div className="mt-1 text-sm font-semibold text-slate-200 truncate">{token.consensusSide}</div>
-                          </div>
-                          <div className="rounded-2xl bg-slate-900/35 px-3 py-2">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Bybit</div>
-                            <div className="mt-1 text-sm font-semibold text-slate-200 truncate">{token.bybitRegime}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* Positions */}
         <PositionTable 
           positions={data?.positions?.items || []} 
@@ -1405,6 +973,24 @@ export default function DashboardPage() {
 
         {/* Closed Trades */}
         <ClosedTradesTable trades={data?.trades?.items || []} />
+
+        {/* Architecture Flow */}
+        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ServiceFlowDiagram
+              services={data?.services || []}
+              executionMode={tradingMode}
+              executorState={executorEnabled ? 'running' : 'down'}
+              flowContext={flowContext}
+              activeSignalsCount={Object.keys(effectiveMarketSignals).length}
+              openPositionsCount={data?.positions?.items?.length || 0}
+              closedTradesCount={(data?.trades?.items || []).filter((trade) => trade.status === 'closed').length}
+            />
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

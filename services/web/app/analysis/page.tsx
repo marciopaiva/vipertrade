@@ -36,6 +36,21 @@ type ThesisReasonItem = {
   total: number;
 };
 
+type TokenDecision = {
+  symbol: string;
+  consensusSide: string;
+  consensusLabel: string;
+  bybitRegime: string;
+  consensusCount: number;
+  exchangesAvailable: number;
+  trendScore: number;
+  stateLabel: string;
+  stateTone: 'positive' | 'negative' | 'neutral';
+  stateContext?: string;
+  bybitAligned: boolean;
+  hasDivergence: boolean;
+};
+
 type AiAnalystData = {
   generated_at?: string;
   lookback_hours?: number;
@@ -131,6 +146,9 @@ type AiAnalystData = {
 type DashboardResponse = {
   ai_analyst?: AiAnalystData;
   warnings?: string[];
+  positions?: { items?: Array<{ symbol: string; side: string; notional_usdt: number }> };
+  events?: { items?: Array<{ event_type?: string; symbol?: string; data?: any }> };
+  market_signals?: { items?: any[] | Record<string, any> };
 };
 
 function usd(value: number | null | undefined) {
@@ -264,6 +282,100 @@ export default function AnalysisPage() {
   const comparativeToneState = comparativeTone(comparative?.status);
   const regime = analyst?.regime_diagnostics;
   const regimeTone = comparativeTone(regime?.status);
+  const marketSignals = useMemo<Record<string, any>>(() => {
+    const items = payload?.market_signals?.items;
+    if (!items) return {};
+    if (Array.isArray(items)) {
+      return Object.fromEntries(items.map((signal: any) => [signal.symbol, signal]));
+    }
+    return items as Record<string, any>;
+  }, [payload?.market_signals?.items]);
+
+  const tokenDecisions = useMemo<TokenDecision[]>(() => {
+    const signalsArray = Object.values(marketSignals);
+    if (signalsArray.length === 0) return [];
+
+    const events = payload?.events?.items || [];
+    const positions = payload?.positions?.items || [];
+    const latestExecutorEventBySymbol = new Map<string, { action?: string; status?: string }>();
+
+    for (const event of events) {
+      if (event.event_type !== 'executor_event_processed' || !event.symbol || latestExecutorEventBySymbol.has(event.symbol)) {
+        continue;
+      }
+      latestExecutorEventBySymbol.set(event.symbol, {
+        action: event.data?.action ? String(event.data.action) : undefined,
+        status: event.data?.status ? String(event.data.status) : undefined,
+      });
+    }
+
+    return signalsArray
+      .map((signal: any) => {
+        const consensusSide = signal.consensus_side || signal.regime || 'neutral';
+        const consensusCount = signal.consensus_count || 0;
+        const exchanges = signal.exchanges_available || 0;
+        const executorEvent = latestExecutorEventBySymbol.get(signal.symbol);
+        const openPosition = positions.find((position) => position.symbol === signal.symbol);
+
+        let stateLabel = 'Watching';
+        let stateTone: 'positive' | 'negative' | 'neutral' = 'neutral';
+        let stateContext: string | undefined;
+        let consensusLabel = 'Mixed Consensus';
+
+        if (consensusSide === 'bullish' && consensusCount >= 2) {
+          consensusLabel = 'Bullish Consensus';
+        } else if (consensusSide === 'bearish' && consensusCount >= 2) {
+          consensusLabel = 'Bearish Consensus';
+        } else if (consensusSide === 'bullish') {
+          consensusLabel = 'Bullish Watch';
+        } else if (consensusSide === 'bearish') {
+          consensusLabel = 'Bearish Watch';
+        }
+
+        if (openPosition) {
+          stateLabel = `Open ${String(openPosition.side)}`;
+          stateTone = String(openPosition.side).toLowerCase() === 'long' ? 'positive' : 'negative';
+          stateContext = `${usd(openPosition.notional_usdt)} live`;
+        } else if (executorEvent?.status === 'paper_open') {
+          const action = String(executorEvent.action || '').toUpperCase();
+          stateLabel = action === 'ENTER_LONG' ? 'Enter Long' : action === 'ENTER_SHORT' ? 'Enter Short' : 'Opening';
+          stateTone = action === 'ENTER_LONG' ? 'positive' : action === 'ENTER_SHORT' ? 'negative' : 'neutral';
+          stateContext = 'Executor accepted';
+        } else if (executorEvent?.status === 'ignored_hold') {
+          stateLabel = 'Hold';
+          stateTone = 'neutral';
+          stateContext = 'Strategy blocked entry';
+        } else if (executorEvent?.status?.startsWith('blocked_')) {
+          stateLabel = 'Blocked';
+          stateTone = 'neutral';
+          stateContext = titleCase(executorEvent.status);
+        }
+
+        const bybitAligned = consensusSide !== 'neutral' && (signal.bybit_regime || 'neutral') === consensusSide;
+        const hasDivergence = exchanges > 0 && consensusCount < exchanges;
+
+        return {
+          symbol: signal.symbol,
+          consensusSide,
+          consensusLabel,
+          bybitRegime: signal.bybit_regime || 'neutral',
+          consensusCount,
+          exchangesAvailable: exchanges,
+          trendScore: signal.trend_score || 0,
+          stateLabel,
+          stateTone,
+          stateContext,
+          bybitAligned,
+          hasDivergence,
+        };
+      })
+      .sort((a, b) => {
+        const tonePriority: Record<string, number> = { positive: 0, negative: 1, neutral: 2 };
+        return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
+          b.consensusCount - a.consensusCount ||
+          Math.abs(b.trendScore) - Math.abs(a.trendScore);
+      });
+  }, [marketSignals, payload?.events?.items, payload?.positions?.items]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -411,6 +523,83 @@ export default function AnalysisPage() {
                 <div className="mt-3 text-xs text-red-300">Tupa evaluation fallback: {analyst.tupa_error}</div>
               ) : null}
             </div>
+
+            <Card className="bg-panel/40 border-border">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-base">Decision Matrix</CardTitle>
+                  <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                    {tokenDecisions.length} tracked
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tokenDecisions.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No decision data available.</div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {tokenDecisions.map((token) => {
+                      const stateColor = token.stateTone === 'positive' ? '#10b981'
+                        : token.stateTone === 'negative' ? '#ef4444'
+                        : '#6366f1';
+                      const alignmentColor = token.bybitAligned ? '#10b981'
+                        : token.hasDivergence ? '#f59e0b'
+                        : '#64748b';
+                      const trendPositive = token.trendScore >= 0;
+
+                      return (
+                        <div
+                          key={token.symbol}
+                          className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-100">{token.symbol}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {token.stateContext || token.consensusLabel}
+                              </div>
+                            </div>
+                            <Badge
+                              style={{ backgroundColor: stateColor + '22', color: stateColor, borderColor: stateColor + '55' }}
+                              className="text-[10px]"
+                            >
+                              {token.stateLabel}
+                            </Badge>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2">
+                              <div className="uppercase tracking-[0.14em] text-slate-500">Consensus</div>
+                              <div className="mt-1 font-medium text-slate-100">
+                                {token.consensusCount}/{token.exchangesAvailable}
+                              </div>
+                            </div>
+                            <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2">
+                              <div className="uppercase tracking-[0.14em] text-slate-500">Bybit</div>
+                              <div className="mt-1 font-medium text-slate-100 truncate">
+                                {titleCase(token.bybitRegime)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex items-end justify-between gap-3">
+                            <Badge
+                              style={{ backgroundColor: alignmentColor + '22', color: alignmentColor, borderColor: alignmentColor + '55' }}
+                              className="text-[10px]"
+                            >
+                              {token.bybitAligned ? 'Aligned' : token.hasDivergence ? 'Divergent' : 'Watching'}
+                            </Badge>
+                            <div className={cn('text-lg font-semibold', trendPositive ? 'text-slate-100' : 'text-red-300')}>
+                              {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </CardContent>
         </Card>
 

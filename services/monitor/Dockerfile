@@ -24,13 +24,15 @@ FROM ${RUST_RUNTIME_IMAGE}
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y ca-certificates libssl3 curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 curl netcat-openbsd && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-monitor /usr/local/bin/viper-monitor
+COPY scripts/docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
+RUN chmod +x /usr/local/bin/wait-for-deps.sh
 
 # Create non-root user
 RUN useradd -m -u 1000 -U viper
 USER viper
 
-CMD ["viper-monitor"]
+CMD ["wait-for-deps.sh", "postgres:5432", "--", "viper-monitor"]
