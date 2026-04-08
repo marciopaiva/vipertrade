@@ -36,21 +36,6 @@ type ThesisReasonItem = {
   total: number;
 };
 
-type TokenDecision = {
-  symbol: string;
-  consensusSide: string;
-  consensusLabel: string;
-  bybitRegime: string;
-  consensusCount: number;
-  exchangesAvailable: number;
-  trendScore: number;
-  stateLabel: string;
-  stateTone: 'positive' | 'negative' | 'neutral';
-  stateContext?: string;
-  bybitAligned: boolean;
-  hasDivergence: boolean;
-};
-
 type AiAnalystData = {
   generated_at?: string;
   lookback_hours?: number;
@@ -129,6 +114,29 @@ type AiAnalystData = {
     exit_profile?: string;
     evidence?: string[];
   };
+  execution_advice?: {
+    market_state?: string;
+    entry_action?: string;
+    exit_action?: string;
+    size_action?: string;
+    directional_bias?: string;
+    confidence?: string;
+    summary?: string;
+    evidence?: string[];
+    priority_actions?: string[];
+  };
+  active_position_advice?: Array<{
+    symbol?: string;
+    side?: string;
+    action?: string;
+    confidence?: string;
+    market_state?: string;
+    pnl_pct_estimate?: number;
+    duration_minutes?: number;
+    summary?: string;
+    evidence?: string[];
+    risk_flags?: string[];
+  }>;
   by_close_reason?: BreakdownItem[];
   by_side?: BreakdownItem[];
   by_symbol?: BreakdownItem[];
@@ -275,108 +283,19 @@ export default function AnalysisPage() {
 
   const analyst = useMemo(() => payload?.ai_analyst, [payload]);
   const exitTone = toneClasses(analyst?.tupa_evaluation?.exit_pressure?.severity);
-  const entryTone = toneClasses(analyst?.tupa_evaluation?.entry_pressure?.severity);
-  const thesisTone = toneClasses(analyst?.tupa_evaluation?.thesis_quality?.severity);
   const symbolTone = toneClasses(analyst?.tupa_evaluation?.symbol_risk?.severity);
   const comparative = analyst?.comparative_diagnostics;
   const comparativeToneState = comparativeTone(comparative?.status);
   const regime = analyst?.regime_diagnostics;
   const regimeTone = comparativeTone(regime?.status);
-  const marketSignals = useMemo<Record<string, any>>(() => {
-    const items = payload?.market_signals?.items;
-    if (!items) return {};
-    if (Array.isArray(items)) {
-      return Object.fromEntries(items.map((signal: any) => [signal.symbol, signal]));
-    }
-    return items as Record<string, any>;
-  }, [payload?.market_signals?.items]);
-
-  const tokenDecisions = useMemo<TokenDecision[]>(() => {
-    const signalsArray = Object.values(marketSignals);
-    if (signalsArray.length === 0) return [];
-
-    const events = payload?.events?.items || [];
-    const positions = payload?.positions?.items || [];
-    const latestExecutorEventBySymbol = new Map<string, { action?: string; status?: string }>();
-
-    for (const event of events) {
-      if (event.event_type !== 'executor_event_processed' || !event.symbol || latestExecutorEventBySymbol.has(event.symbol)) {
-        continue;
-      }
-      latestExecutorEventBySymbol.set(event.symbol, {
-        action: event.data?.action ? String(event.data.action) : undefined,
-        status: event.data?.status ? String(event.data.status) : undefined,
-      });
-    }
-
-    return signalsArray
-      .map((signal: any) => {
-        const consensusSide = signal.consensus_side || signal.regime || 'neutral';
-        const consensusCount = signal.consensus_count || 0;
-        const exchanges = signal.exchanges_available || 0;
-        const executorEvent = latestExecutorEventBySymbol.get(signal.symbol);
-        const openPosition = positions.find((position) => position.symbol === signal.symbol);
-
-        let stateLabel = 'Watching';
-        let stateTone: 'positive' | 'negative' | 'neutral' = 'neutral';
-        let stateContext: string | undefined;
-        let consensusLabel = 'Mixed Consensus';
-
-        if (consensusSide === 'bullish' && consensusCount >= 2) {
-          consensusLabel = 'Bullish Consensus';
-        } else if (consensusSide === 'bearish' && consensusCount >= 2) {
-          consensusLabel = 'Bearish Consensus';
-        } else if (consensusSide === 'bullish') {
-          consensusLabel = 'Bullish Watch';
-        } else if (consensusSide === 'bearish') {
-          consensusLabel = 'Bearish Watch';
-        }
-
-        if (openPosition) {
-          stateLabel = `Open ${String(openPosition.side)}`;
-          stateTone = String(openPosition.side).toLowerCase() === 'long' ? 'positive' : 'negative';
-          stateContext = `${usd(openPosition.notional_usdt)} live`;
-        } else if (executorEvent?.status === 'paper_open') {
-          const action = String(executorEvent.action || '').toUpperCase();
-          stateLabel = action === 'ENTER_LONG' ? 'Enter Long' : action === 'ENTER_SHORT' ? 'Enter Short' : 'Opening';
-          stateTone = action === 'ENTER_LONG' ? 'positive' : action === 'ENTER_SHORT' ? 'negative' : 'neutral';
-          stateContext = 'Executor accepted';
-        } else if (executorEvent?.status === 'ignored_hold') {
-          stateLabel = 'Hold';
-          stateTone = 'neutral';
-          stateContext = 'Strategy blocked entry';
-        } else if (executorEvent?.status?.startsWith('blocked_')) {
-          stateLabel = 'Blocked';
-          stateTone = 'neutral';
-          stateContext = titleCase(executorEvent.status);
-        }
-
-        const bybitAligned = consensusSide !== 'neutral' && (signal.bybit_regime || 'neutral') === consensusSide;
-        const hasDivergence = exchanges > 0 && consensusCount < exchanges;
-
-        return {
-          symbol: signal.symbol,
-          consensusSide,
-          consensusLabel,
-          bybitRegime: signal.bybit_regime || 'neutral',
-          consensusCount,
-          exchangesAvailable: exchanges,
-          trendScore: signal.trend_score || 0,
-          stateLabel,
-          stateTone,
-          stateContext,
-          bybitAligned,
-          hasDivergence,
-        };
-      })
-      .sort((a, b) => {
-        const tonePriority: Record<string, number> = { positive: 0, negative: 1, neutral: 2 };
-        return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
-          b.consensusCount - a.consensusCount ||
-          Math.abs(b.trendScore) - Math.abs(a.trendScore);
-      });
-  }, [marketSignals, payload?.events?.items, payload?.positions?.items]);
-
+  const executionAdvice = analyst?.execution_advice;
+  const executionTone = comparativeTone(
+    executionAdvice?.market_state === 'defensive'
+      ? 'regressed'
+      : executionAdvice?.market_state === 'constructive'
+        ? 'improved'
+        : 'mixed',
+  );
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-panel/50 backdrop-blur-sm sticky top-0 z-50">
@@ -399,7 +318,7 @@ export default function AnalysisPage() {
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-base text-slate-200">AI Analyst Deep View</CardTitle>
+              <CardTitle className="text-base text-slate-200">Analysis Overview</CardTitle>
               <div className="flex items-center gap-2">
                 {analyst?.lookback_hours ? (
                   <Badge className="border-slate-600/70 bg-slate-900/60 text-[10px] tracking-[0.16em] text-slate-300">
@@ -427,59 +346,14 @@ export default function AnalysisPage() {
               </div>
             ) : null}
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Closed Trades</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Current Window</div>
                 <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-slate-100">
                   {analyst?.summary?.closed_trades ?? 0}
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
                   {usd(analyst?.summary?.total_pnl_usdt)} · {num(analyst?.summary?.win_rate_pct)}% win rate
-                </div>
-              </div>
-
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Exit Pressure</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', exitTone.badge)}>
-                    {analyst?.tupa_evaluation?.exit_pressure?.severity || 'pass'}
-                  </Badge>
-                </div>
-                <div className={cn('mt-3 text-3xl font-semibold tracking-[-0.03em]', exitTone.text)}>
-                  {num(analyst?.tupa_evaluation?.exit_pressure?.thesis_invalidated_pct)}%
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  trailing {num(analyst?.tupa_evaluation?.exit_pressure?.trailing_stop_pct)}%
-                </div>
-              </div>
-
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Entry Pressure</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', entryTone.badge)}>
-                    {analyst?.tupa_evaluation?.entry_pressure?.severity || 'warn'}
-                  </Badge>
-                </div>
-                <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-slate-100">
-                  {titleCase(analyst?.tupa_evaluation?.entry_pressure?.dominant_gate || 'unknown')}
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  {titleCase((analyst?.tupa_evaluation?.entry_pressure?.reason || '').replace('entry_pressure_', ''))}
-                </div>
-              </div>
-
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Thesis Guard</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', thesisTone.badge)}>
-                    {analyst?.tupa_evaluation?.thesis_quality?.severity || 'pass'}
-                  </Badge>
-                </div>
-                <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', thesisTone.text)}>
-                  {titleCase((analyst?.tupa_evaluation?.thesis_quality?.reason || 'stable').replace('thesis_quality_', ''))}
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  {titleCase((analyst?.tupa_evaluation?.thesis_quality?.recommendation || 'keep_current_thesis_policy').replaceAll('_', ' '))}
                 </div>
               </div>
 
@@ -500,198 +374,210 @@ export default function AnalysisPage() {
 
               <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Symbol Risk</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', symbolTone.badge)}>
-                    {analyst?.tupa_evaluation?.symbol_risk?.severity || 'pass'}
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Current Regime</div>
+                  <Badge className={cn('text-[10px] tracking-[0.16em]', regimeTone.badge)}>
+                    {regime?.status || 'mixed'}
                   </Badge>
                 </div>
-                <div className={cn('mt-3 text-3xl font-semibold tracking-[-0.03em]', symbolTone.text)}>
-                  {analyst?.tupa_evaluation?.symbol_risk?.symbol || 'Stable'}
+                <div className={cn('mt-3 text-2xl font-semibold tracking-[-0.03em]', regimeTone.text)}>
+                  {titleCase((regime?.regime || 'balanced_mixed').replaceAll('_', ' '))}
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
-                  {titleCase(analyst?.tupa_evaluation?.directional_bias?.reason?.replace('directional_bias_', '') || 'neutral')} bias
+                  {titleCase((regime?.directional_bias || 'neutral').replaceAll('_', ' '))} · {titleCase(regime?.exit_profile || 'balanced')}
+                </div>
+              </div>
+
+              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Execution Advice</div>
+                  <Badge className={cn('text-[10px] tracking-[0.16em]', executionTone.badge)}>
+                    {titleCase(executionAdvice?.market_state || 'observation_mode')}
+                  </Badge>
+                </div>
+                <div className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-100">
+                  {titleCase((executionAdvice?.entry_action || 'only_best_setups').replaceAll('_', ' '))}
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  exit {titleCase((executionAdvice?.exit_action || 'monitor_positions_closely').replaceAll('_', ' '))} · size {titleCase((executionAdvice?.size_action || 'reduced_size').replaceAll('_', ' '))}
                 </div>
               </div>
             </div>
 
             <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Summary</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">What Matters Now</div>
               <div className="mt-2 text-sm leading-6 text-slate-300">
-                {analyst?.llm_summary || analyst?.heuristic_summary || 'No analyst summary available yet.'}
+                {executionAdvice?.summary || analyst?.llm_summary || analyst?.heuristic_summary || 'No analyst summary available yet.'}
               </div>
               {analyst?.tupa_error ? (
                 <div className="mt-3 text-xs text-red-300">Tupa evaluation fallback: {analyst.tupa_error}</div>
               ) : null}
             </div>
+          </CardContent>
+        </Card>
 
-            <Card className="bg-panel/40 border-border">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="text-base">Decision Matrix</CardTitle>
-                  <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                    {tokenDecisions.length} tracked
-                  </Badge>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Focus</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Priority Actions</div>
+                  <div className="mt-3 space-y-2">
+                    {(executionAdvice?.priority_actions || []).slice(0, 3).map((item) => (
+                      <div key={item} className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2 text-sm text-slate-300">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {tokenDecisions.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No decision data available.</div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {tokenDecisions.map((token) => {
-                      const stateColor = token.stateTone === 'positive' ? '#10b981'
-                        : token.stateTone === 'negative' ? '#ef4444'
-                        : '#6366f1';
-                      const alignmentColor = token.bybitAligned ? '#10b981'
-                        : token.hasDivergence ? '#f59e0b'
-                        : '#64748b';
-                      const trendPositive = token.trendScore >= 0;
 
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Top Recommendations</div>
+                  <div className="mt-3 space-y-2">
+                    {(analyst?.recommendations || []).slice(0, 3).map((item) => {
+                      const tone = toneClasses(item.severity);
                       return (
-                        <div
-                          key={token.symbol}
-                          className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-slate-100">{token.symbol}</div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {token.stateContext || token.consensusLabel}
-                              </div>
+                        <div key={item.recommendation_id} className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium text-slate-100">
+                              {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
                             </div>
-                            <Badge
-                              style={{ backgroundColor: stateColor + '22', color: stateColor, borderColor: stateColor + '55' }}
-                              className="text-[10px]"
-                            >
-                              {token.stateLabel}
+                            <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                              {item.confidence || item.severity || 'info'}
                             </Badge>
                           </div>
+                          <div className="mt-1 text-xs text-slate-500">{item.evidence}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                            <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2">
-                              <div className="uppercase tracking-[0.14em] text-slate-500">Consensus</div>
-                              <div className="mt-1 font-medium text-slate-100">
-                                {token.consensusCount}/{token.exchangesAvailable}
-                              </div>
-                            </div>
-                            <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2">
-                              <div className="uppercase tracking-[0.14em] text-slate-500">Bybit</div>
-                              <div className="mt-1 font-medium text-slate-100 truncate">
-                                {titleCase(token.bybitRegime)}
-                              </div>
-                            </div>
-                          </div>
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Performance Snapshot</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Comparative Status</div>
+                    <Badge className={cn('text-[10px] tracking-[0.16em]', comparativeToneState.badge)}>
+                      {comparative?.status || 'stable'}
+                    </Badge>
+                  </div>
+                  <div className={cn('mt-3 text-lg font-semibold', comparativeToneState.text)}>
+                    {titleCase((comparative?.status || 'stable').replaceAll('_', ' '))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(comparative?.reasons || []).map((reason) => (
+                      <Badge key={reason} className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                        {titleCase(reason.replaceAll('_', ' '))}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
 
-                          <div className="mt-3 flex items-end justify-between gap-3">
-                            <Badge
-                              style={{ backgroundColor: alignmentColor + '22', color: alignmentColor, borderColor: alignmentColor + '55' }}
-                              className="text-[10px]"
-                            >
-                              {token.bybitAligned ? 'Aligned' : token.hasDivergence ? 'Divergent' : 'Watching'}
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Core Metrics</div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Thesis</div>
+                      <div className={cn('mt-1', exitTone.text)}>
+                        {num(analyst?.tupa_evaluation?.exit_pressure?.thesis_invalidated_pct)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Trailing</div>
+                      <div className="mt-1 text-slate-200">
+                        {num(analyst?.tupa_evaluation?.exit_pressure?.trailing_stop_pct)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Entry Gate</div>
+                      <div className="mt-1 text-slate-200">{titleCase(analyst?.tupa_evaluation?.entry_pressure?.dominant_gate || 'unknown')}</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Risk Symbol</div>
+                      <div className={cn('mt-1', symbolTone.text)}>
+                        {analyst?.tupa_evaluation?.symbol_risk?.symbol || 'Stable'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Change Vs Previous Window</div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Expectancy Δ</div>
+                      <div className="mt-1 text-slate-200">{num(comparative?.expectancy_pct?.delta)}%</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Thesis Δ</div>
+                      <div className="mt-1 text-slate-200">{num(comparative?.thesis_invalidated_pct?.delta)}%</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Trailing Δ</div>
+                      <div className="mt-1 text-slate-200">{num(comparative?.trailing_stop_pct?.delta)}%</div>
+                    </div>
+                    <div>
+                      <div className="uppercase tracking-[0.16em] text-slate-500">Short Avg Δ</div>
+                      <div className="mt-1 text-slate-200">{num(comparative?.short_avg_pnl_pct?.delta)}%</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card className="bg-panel/50 border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Watchlist</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Fragile Symbols</div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {(analyst?.symbol_diagnostics || []).slice(0, 4).map((item) => {
+                      const tone = comparativeTone(item.status);
+                      return (
+                        <div key={item.symbol} className="rounded-lg border border-slate-700/40 bg-slate-950/50 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-semibold text-slate-100">{item.symbol}</div>
+                            <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
+                              {item.status || 'mixed'}
                             </Badge>
-                            <div className={cn('text-lg font-semibold', trendPositive ? 'text-slate-100' : 'text-red-300')}>
-                              {trendPositive ? '+' : ''}{token.trendScore.toFixed(3)}
-                            </div>
+                          </div>
+                          <div className={cn('mt-2 text-sm font-medium', (item.avg_pnl_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                            {num(item.avg_pnl_pct)}%
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </CardContent>
-        </Card>
+                </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <BreakdownTable title="By Exit Reason" items={analyst?.by_close_reason || []} nameLabel="Exit" />
-          <BreakdownTable title="By Side" items={analyst?.by_side || []} nameLabel="Side" />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Card className="bg-panel/50 border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Comparative Diagnostics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Status</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', comparativeToneState.badge)}>
-                    {comparative?.status || 'stable'}
-                  </Badge>
-                </div>
-                <div className={cn('mt-3 text-lg font-semibold', comparativeToneState.text)}>
-                  {titleCase((comparative?.status || 'stable').replaceAll('_', ' '))}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Expectancy Δ</div>
-                    <div className="mt-1 text-slate-200">{num(comparative?.expectancy_pct?.delta)}%</div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Thesis Δ</div>
-                    <div className="mt-1 text-slate-200">{num(comparative?.thesis_invalidated_pct?.delta)}%</div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Trailing Δ</div>
-                    <div className="mt-1 text-slate-200">{num(comparative?.trailing_stop_pct?.delta)}%</div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Long Avg Δ</div>
-                    <div className="mt-1 text-slate-200">{num(comparative?.long_avg_pnl_pct?.delta)}%</div>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(comparative?.reasons || []).map((reason) => (
-                    <Badge key={reason} className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                      {titleCase(reason.replaceAll('_', ' '))}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-panel/50 border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Regime Diagnostics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Status</div>
-                  <Badge className={cn('text-[10px] tracking-[0.16em]', regimeTone.badge)}>
-                    {regime?.status || 'mixed'}
-                  </Badge>
-                </div>
-                <div className={cn('mt-3 text-lg font-semibold', regimeTone.text)}>
-                  {titleCase((regime?.regime || 'balanced_mixed').replaceAll('_', ' '))}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Bias</div>
-                    <div className="mt-1 text-slate-200">
-                      {titleCase((regime?.directional_bias || 'neutral').replaceAll('_', ' '))}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Dominant Gate</div>
-                    <div className="mt-1 text-slate-200">{titleCase(regime?.dominant_gate || 'unknown')}</div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Exit Profile</div>
-                    <div className="mt-1 text-slate-200">{titleCase(regime?.exit_profile || 'balanced')}</div>
-                  </div>
-                  <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">Confidence</div>
-                    <div className="mt-1 text-slate-200">{titleCase(regime?.confidence || 'low')}</div>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {(regime?.evidence || []).map((item) => (
-                    <div key={item} className="rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
-                      {item}
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Current Hypothesis</div>
+                  {(analyst?.hypotheses || []).slice(0, 1).map((item) => (
+                    <div key={item.hypothesis_id} className="mt-3 space-y-2">
+                      <div className="text-sm font-semibold text-slate-100">{item.hypothesis}</div>
+                      <div className="text-xs text-slate-400">{item.evidence}</div>
+                      <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
+                        <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -700,202 +586,113 @@ export default function AnalysisPage() {
           </Card>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Card className="bg-panel/50 border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Recommendations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {(analyst?.recommendations || []).length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No recommendations yet.</div>
-                ) : (
-                  (analyst?.recommendations || []).map((item) => {
-                    const tone = toneClasses(item.severity);
-                    return (
-                      <div key={item.recommendation_id} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-slate-100">
-                            {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
-                          </div>
-                          <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
-                            {item.confidence || item.severity || 'info'}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
-                        <div className="mt-2 text-xs text-slate-500">{item.expected_tradeoff}</div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-panel/50 border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Hypotheses</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {(analyst?.hypotheses || []).length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No testable hypotheses yet.</div>
-                ) : (
-                  (analyst?.hypotheses || []).map((item) => (
-                    <div key={item.hypothesis_id} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-100">
-                          {item.hypothesis || 'Observe more sample'}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                            {item.priority || 'info'}
-                          </Badge>
-                          <Badge className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
-                            {item.confidence || 'low'}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="mt-2 text-xs text-slate-400">{item.evidence}</div>
-                      <div className="mt-3 grid gap-2 text-xs">
-                        <div className="rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2 text-slate-300">
-                          <span className="font-semibold text-slate-100">Observe:</span> {item.observe}
-                        </div>
-                        <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-3 py-2 text-emerald-200">
-                          <span className="font-semibold text-emerald-100">Success:</span> {item.success_condition}
-                        </div>
-                        <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 text-red-200">
-                          <span className="font-semibold text-red-100">Failure:</span> {item.failure_condition}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
         <Card className="bg-panel/50 border-border">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Expectancy Breakdown</CardTitle>
+            <CardTitle className="text-base">Active Position Advice</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Win / Loss</div>
-                <div className="mt-2 text-lg font-semibold text-slate-100">
-                  {(analyst?.expectancy?.winning_trades ?? 0)} / {(analyst?.expectancy?.losing_trades ?? 0)}
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Avg Win</div>
-                <div className="mt-2 text-lg font-semibold text-emerald-300">
-                  {num(analyst?.expectancy?.avg_win_pct)}%
-                </div>
-                <div className="text-xs text-slate-500">{usd(analyst?.expectancy?.avg_win_usdt)}</div>
-              </div>
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Avg Loss</div>
-                <div className="mt-2 text-lg font-semibold text-red-300">
-                  {num(analyst?.expectancy?.avg_loss_pct)}%
-                </div>
-                <div className="text-xs text-slate-500">{usd(analyst?.expectancy?.avg_loss_usdt)}</div>
-              </div>
-              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Payoff Ratio</div>
-                <div className="mt-2 text-lg font-semibold text-slate-100">
-                  {num(analyst?.expectancy?.payoff_ratio)}
-                </div>
-                <div className="text-xs text-slate-500">expectancy {usd(analyst?.expectancy?.expectancy_usdt)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <BreakdownTable title="By Symbol" items={analyst?.by_symbol || []} nameLabel="Symbol" />
-
-          <Card className="bg-panel/50 border-border">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Top Entry Blockers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {(analyst?.top_entry_blockers || []).length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No blockers captured.</div>
-                ) : (
-                  (analyst?.top_entry_blockers || []).map((item) => (
-                    <div key={item.reason} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-100">{titleCase(item.reason)}</div>
-                        <div className="text-sm text-amber-300">{item.total}</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="bg-panel/50 border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Symbol Diagnostics</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {(analyst?.symbol_diagnostics || []).length === 0 ? (
-                <div className="text-sm text-muted-foreground">No symbol diagnostics yet.</div>
-              ) : (
-                (analyst?.symbol_diagnostics || []).map((item) => {
-                  const tone = comparativeTone(item.status);
+            {(analyst?.active_position_advice || []).length === 0 ? (
+              <div className="text-sm text-muted-foreground">No active positions right now.</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                {(analyst?.active_position_advice || []).map((item) => {
+                  const tone = comparativeTone(
+                    item.action === 'exit_recommended'
+                      ? 'regressed'
+                      : item.action === 'hold'
+                        ? 'improved'
+                        : 'mixed',
+                  );
                   return (
-                    <div key={item.symbol} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                    <div key={`${item.symbol}-${item.side}`} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-100">{item.symbol}</div>
+                        <div>
+                          <div className="text-sm font-semibold text-slate-100">{item.symbol}</div>
+                          <div className="text-xs text-slate-500">{item.side} · {item.duration_minutes ?? 0} min open</div>
+                        </div>
                         <Badge className={cn('text-[10px] tracking-[0.16em]', tone.badge)}>
-                          {item.status || 'mixed'}
+                          {titleCase((item.action || 'hold').replaceAll('_', ' '))}
                         </Badge>
                       </div>
-                      <div className={cn('mt-2 text-lg font-semibold', (item.avg_pnl_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
-                        {num(item.avg_pnl_pct)}%
+                      <div className={cn('mt-3 text-lg font-semibold', (item.pnl_pct_estimate ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                        {num(item.pnl_pct_estimate)}%
                       </div>
-                      <div className="mt-2 text-xs text-slate-400">
-                        thesis {item.thesis_invalidated_trades ?? 0} · trailing {item.trailing_stop_trades ?? 0}
+                      <div className="mt-2 text-sm text-slate-300">
+                        {item.summary}
                       </div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {titleCase((item.recommendation || 'observe_more_sample').replaceAll('_', ' '))}
-                      </div>
+                      {(item.risk_flags || []).length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {(item.risk_flags || []).slice(0, 4).map((flag) => (
+                            <Badge key={flag} className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300">
+                              {titleCase(flag.replaceAll('_', ' '))}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(item.evidence || []).length > 0 ? (
+                        <div className="mt-3 space-y-1 text-xs text-slate-500">
+                          {(item.evidence || []).slice(0, 3).map((evidence) => (
+                            <div key={evidence}>{evidence}</div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <Card className="bg-panel/50 border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Thesis Invalidation Reasons</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {(analyst?.thesis_invalidation_breakdown || []).length === 0 ? (
-                <div className="text-sm text-muted-foreground">No thesis invalidation breakdown captured yet.</div>
-              ) : (
-                (analyst?.thesis_invalidation_breakdown || []).map((item) => (
-                  <div key={item.reason} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold text-slate-100 break-all">{item.reason}</div>
-                      <div className="text-sm text-amber-300">{item.total}</div>
-                    </div>
-                  </div>
-                ))
-              )}
+        <details className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-100">
+            Deep Details
+          </summary>
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <BreakdownTable title="By Exit Reason" items={analyst?.by_close_reason || []} nameLabel="Exit" />
+              <BreakdownTable title="By Symbol" items={analyst?.by_symbol || []} nameLabel="Symbol" />
             </div>
-          </CardContent>
-        </Card>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <Card className="bg-panel/50 border-border">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Top Entry Blockers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {(analyst?.top_entry_blockers || []).slice(0, 6).map((item) => (
+                      <div key={item.reason} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-100">{titleCase(item.reason)}</div>
+                          <div className="text-sm text-amber-300">{item.total}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-panel/50 border-border">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Thesis Invalidation Reasons</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {(analyst?.thesis_invalidation_breakdown || []).slice(0, 6).map((item) => (
+                      <div key={item.reason} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-100 break-all">{item.reason}</div>
+                          <div className="text-sm text-amber-300">{item.total}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </details>
       </main>
     </div>
   );

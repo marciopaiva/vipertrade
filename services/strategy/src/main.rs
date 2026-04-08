@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
@@ -243,6 +244,29 @@ struct PendingEntryCandidate {
     rank_score: f64,
     entry_score: f64,
     created_at: Instant,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ExecutionAdviceSnapshot {
+    market_state: String,
+    entry_action: String,
+    exit_action: String,
+    size_action: String,
+    directional_bias: String,
+    preferred_side: String,
+    confidence: String,
+    summary: String,
+    #[serde(default)]
+    evidence: Vec<String>,
+    #[serde(default)]
+    avoid_symbols: Vec<String>,
+    #[serde(default)]
+    priority_actions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiAnalystExecutionAdviceResponse {
+    execution_advice: ExecutionAdviceSnapshot,
 }
 
 struct FinalizeDecisionContext<'a> {
@@ -1115,6 +1139,13 @@ fn resolve_wallet_api_base_url() -> String {
         .unwrap_or_else(|| "http://api:8080".to_string())
 }
 
+fn resolve_ai_analyst_base_url() -> String {
+    std::env::var("AI_ANALYST_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://ai-analyst:8087".to_string())
+}
+
 async fn fetch_account_equity_usdt(
     http: &reqwest::Client,
     wallet_api_base_url: &str,
@@ -1136,6 +1167,203 @@ async fn fetch_account_equity_usdt(
             Err(_) => fallback_equity_usdt,
         },
         Err(_) => fallback_equity_usdt,
+    }
+}
+
+async fn fetch_execution_advice(
+    http: &reqwest::Client,
+    ai_analyst_base_url: &str,
+    hours: i64,
+) -> Option<ExecutionAdviceSnapshot> {
+    let url = format!(
+        "{}/analyze/recent?hours={}",
+        ai_analyst_base_url.trim_end_matches('/'),
+        hours
+    );
+    match http.get(url).send().await {
+        Ok(response) => match response.json::<AiAnalystExecutionAdviceResponse>().await {
+            Ok(body) => Some(body.execution_advice),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    }
+}
+
+fn apply_execution_advice_veto(
+    symbol: &str,
+    mut decision: StrategyDecision,
+    entry_score: f64,
+    rank_score: f64,
+    advice: Option<&ExecutionAdviceSnapshot>,
+) -> StrategyDecision {
+    if !matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+        return decision;
+    }
+
+    let Some(advice) = advice else {
+        return decision;
+    };
+
+    let intended_side = if decision.action == "ENTER_LONG" {
+        "long"
+    } else {
+        "short"
+    };
+
+    let avoid_symbol = advice
+        .avoid_symbols
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(symbol));
+    let score_floor = match (advice.market_state.as_str(), advice.entry_action.as_str()) {
+        ("defensive", "avoid_marginal_entries") => 88.0,
+        ("observation_mode", "only_best_setups") => 90.0,
+        (_, "allow_biased_entries") => 0.0,
+        _ => 0.0,
+    };
+    let bias_mismatch = advice.preferred_side != "neutral"
+        && !advice.preferred_side.eq_ignore_ascii_case(intended_side);
+    let low_entry_score = score_floor > 0.0 && entry_score < score_floor;
+    let severe_size_mode = matches!(
+        advice.size_action.as_str(),
+        "minimal_size_33" | "reduced_size_50" | "minimal_size"
+    );
+    let low_rank_score = if severe_size_mode {
+        rank_score < 82.0
+    } else {
+        false
+    };
+
+    let veto_reason = if advice.market_state == "defensive" && avoid_symbol {
+        Some(format!(
+            "ai_veto_fragile_symbol_{}_{}_{}",
+            symbol.to_lowercase(),
+            advice.market_state,
+            advice.entry_action
+        ))
+    } else if avoid_symbol && low_entry_score {
+        Some(format!(
+            "ai_veto_low_entry_score_{:.0}_floor_{:.0}_{}_{}",
+            entry_score, score_floor, advice.market_state, advice.entry_action
+        ))
+    } else if advice.market_state == "defensive" && low_entry_score && bias_mismatch {
+        Some(format!(
+            "ai_veto_bias_mismatch_{}_preferred_{}_score_{:.0}",
+            intended_side, advice.preferred_side, entry_score
+        ))
+    } else if advice.market_state == "observation_mode" && low_entry_score && low_rank_score {
+        Some(format!(
+            "ai_veto_low_rank_score_{:.0}_{}_{}",
+            rank_score, advice.market_state, advice.size_action
+        ))
+    } else if avoid_symbol && bias_mismatch {
+        Some(format!(
+            "ai_veto_fragile_bias_mismatch_{}_preferred_{}_score_{:.0}",
+            intended_side, advice.preferred_side, entry_score
+        ))
+    } else {
+        None
+    };
+
+    if let Some(reason) = veto_reason {
+        apply_hold_block(&mut decision, reason);
+    }
+
+    decision
+}
+
+fn execution_advice_size_multiplier(advice: &ExecutionAdviceSnapshot) -> f64 {
+    match advice.size_action.as_str() {
+        "full_size" | "normal_size" => 1.0,
+        "reduced_size_75" | "reduced_size" => 0.75,
+        "reduced_size_50" => 0.5,
+        "minimal_size_33" => 0.33,
+        "minimal_size" => 0.5,
+        _ => 1.0,
+    }
+}
+
+fn apply_execution_advice_sizing(
+    mut decision: StrategyDecision,
+    advice: Option<&ExecutionAdviceSnapshot>,
+    entry_score: f64,
+    rank_score: f64,
+    min_position_usdt: f64,
+) -> StrategyDecision {
+    if !matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+        return decision;
+    }
+
+    let Some(advice) = advice else {
+        return decision;
+    };
+
+    let multiplier = execution_advice_size_multiplier(advice);
+    if multiplier >= 0.999 || decision.quantity <= 0.0 || decision.entry_price <= 0.0 {
+        return decision;
+    }
+
+    let adjusted_quantity = decision.quantity * multiplier;
+    let adjusted_notional = adjusted_quantity * decision.entry_price;
+    if min_position_usdt > 0.0 && adjusted_notional < min_position_usdt {
+        return decision;
+    }
+
+    decision.quantity = adjusted_quantity;
+    decision.reason = format!(
+        "{}_ai_size_{}pct_market_{}_rank_{:.0}_entry_{:.0}",
+        decision.reason,
+        (multiplier * 100.0).round() as i32,
+        advice.market_state,
+        rank_score,
+        entry_score
+    );
+    decision
+}
+
+fn execution_advice_quarantine_minutes(advice: &ExecutionAdviceSnapshot) -> i64 {
+    match advice.market_state.as_str() {
+        "defensive" => 30,
+        "selective" => 20,
+        "observation_mode" => 15,
+        _ => 0,
+    }
+}
+
+fn sync_execution_advice_guards(
+    entry_guards: &mut HashMap<String, EntryGuardState>,
+    advice: Option<&ExecutionAdviceSnapshot>,
+) {
+    let Some(advice) = advice else {
+        return;
+    };
+
+    let cooldown_minutes = execution_advice_quarantine_minutes(advice);
+    if cooldown_minutes <= 0 {
+        return;
+    }
+
+    let cooldown_until = Instant::now() + Duration::from_secs((cooldown_minutes * 60) as u64);
+    for symbol in &advice.avoid_symbols {
+        let should_insert = match entry_guards.get(symbol) {
+            Some(existing) if Instant::now() < existing.cooldown_until => {
+                existing.cooldown_reason == "ai_quarantine"
+                    && existing.cooldown_until < cooldown_until
+            }
+            _ => true,
+        };
+
+        if should_insert {
+            entry_guards.insert(
+                symbol.to_uppercase(),
+                EntryGuardState {
+                    blocked_side: "Both".to_string(),
+                    cooldown_until,
+                    cooldown_minutes,
+                    cooldown_reason: "ai_quarantine".to_string(),
+                    awaiting_flip: false,
+                },
+            );
+        }
     }
 }
 
@@ -4103,6 +4331,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let wallet_http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()?;
+    let ai_analyst_base_url = resolve_ai_analyst_base_url();
+    let ai_analyst_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()?;
     let fallback_equity_usdt = std::env::var("INITIAL_CAPITAL_USD")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -4110,6 +4342,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(1_000.0);
     let mut cached_account_equity_usdt = fallback_equity_usdt;
     let mut last_wallet_fetch_at = Instant::now() - Duration::from_secs(60);
+    let mut cached_execution_advice: Option<ExecutionAdviceSnapshot> = None;
+    let mut last_execution_advice_fetch_at = Instant::now() - Duration::from_secs(60);
+    let execution_advice_refresh = Duration::from_secs(
+        std::env::var("AI_EXECUTION_ADVICE_REFRESH_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(30),
+    );
+    let execution_advice_lookback_hours = std::env::var("AI_EXECUTION_ADVICE_LOOKBACK_HOURS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(6);
 
     let db_pool = match resolve_database_url() {
         Some(database_url) => match PgPoolOptions::new()
@@ -4215,6 +4461,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let symbol = signal_event.signal.symbol.to_uppercase();
                 let trend = signal_event.signal.trend_score;
+
+                if cached_execution_advice.is_none()
+                    || last_execution_advice_fetch_at.elapsed() >= execution_advice_refresh
+                {
+                    if let Some(advice) = fetch_execution_advice(
+                        &ai_analyst_http,
+                        &ai_analyst_base_url,
+                        execution_advice_lookback_hours,
+                    )
+                    .await
+                    {
+                        cached_execution_advice = Some(advice);
+                    }
+                    last_execution_advice_fetch_at = Instant::now();
+                }
+
+                sync_execution_advice_guards(
+                    &mut entry_guards,
+                    cached_execution_advice.as_ref(),
+                );
 
                 if let Some(guard) = entry_guards.get_mut(&symbol) {
                     if Instant::now() >= guard.cooldown_until {
@@ -4353,13 +4619,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let pipeline_input = input.clone();
                 let pipeline_started_at = Instant::now();
-                let runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
+                let mut runtime_output = match runtime.run_pipeline_async(&execution_plan, input).await {
                     Ok(v) => v,
                     Err(e) => {
                         eprintln!("In-process Tupa runtime failed: {}", e);
                         continue;
                     }
                 };
+
+                if let Some(obj) = runtime_output.as_object_mut() {
+                    obj.insert(
+                        "execution_advice".to_string(),
+                        serde_json::to_value(cached_execution_advice.clone())
+                            .unwrap_or_else(|_| json!({})),
+                    );
+                }
 
                 let decision_value = runtime_output.get("decision").cloned();
                 let Some(decision_value) = decision_value else {
@@ -4416,6 +4690,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         );
 
                         let mut decision = decision;
+                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                            let rank_score = decision_rank_score(&runtime_output);
+                            let entry_score = decision_entry_score(&runtime_output);
+                            decision = apply_execution_advice_veto(
+                                &symbol,
+                                decision,
+                                entry_score,
+                                rank_score,
+                                cached_execution_advice.as_ref(),
+                            );
+                            decision = apply_execution_advice_sizing(
+                                decision,
+                                cached_execution_advice.as_ref(),
+                                entry_score,
+                                rank_score,
+                                cfg.min_position_usdt(),
+                            );
+                        }
                         if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
                         {
                             decision.reason = structured_hold_reason_from_state(&runtime_output);

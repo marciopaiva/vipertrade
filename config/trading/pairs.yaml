@@ -357,7 +357,7 @@ XRPUSDT:
 # ═══════════════════════════════════════════════════════════
 
 ADAUSDT:
-  enabled: true
+  enabled: false
   category: "large_cap_alt"
   volatility_profile: "medium-high"
   mode_profiles:
@@ -484,13 +484,13 @@ XLMUSDT:
   
   entry_filters:
     min_trend_score_long: 0.36
-    min_trend_score_short: 0.28
+    min_trend_score_short: 0.35
     min_trend_score: 0.32
     min_signal_confirmation_ticks_long: 5
-    min_signal_confirmation_ticks_short: 3
+    min_signal_confirmation_ticks_short: 5
     min_signal_confirmation_ticks: 3
     stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0038
+    max_atr_pct: 0.0032
 
 # ═══════════════════════════════════════════════════════════
 # SUIUSDT - Large Cap Alt (Alta Volatilidade)
