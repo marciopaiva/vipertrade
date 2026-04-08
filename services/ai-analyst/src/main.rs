@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::fs;
@@ -157,6 +158,8 @@ struct AnalysisResponse {
     recommendations: Vec<RecommendationItem>,
     symbol_diagnostics: Vec<SymbolDiagnosticItem>,
     regime_diagnostics: RegimeDiagnostics,
+    execution_advice: ExecutionAdvice,
+    active_position_advice: Vec<ActivePositionAdvice>,
     hypotheses: Vec<HypothesisItem>,
     tupa_snapshot: AnalystSnapshot,
     tupa_evaluation: Option<Value>,
@@ -245,6 +248,62 @@ struct HypothesisItem {
     observe: String,
     success_condition: String,
     failure_condition: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ExecutionAdvice {
+    market_state: String,
+    entry_action: String,
+    exit_action: String,
+    size_action: String,
+    directional_bias: String,
+    preferred_side: String,
+    confidence: String,
+    summary: String,
+    evidence: Vec<String>,
+    avoid_symbols: Vec<String>,
+    priority_actions: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActivePositionAdvice {
+    symbol: String,
+    side: String,
+    action: String,
+    confidence: String,
+    market_state: String,
+    pnl_pct_estimate: f64,
+    duration_minutes: i64,
+    summary: String,
+    evidence: Vec<String>,
+    risk_flags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PositionsResponse {
+    items: Vec<PositionItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PositionItem {
+    symbol: String,
+    side: String,
+    quantity: f64,
+    notional_usdt: f64,
+    entry_price: f64,
+    opened_at: DateTime<Utc>,
+    trailing_stop_activated: bool,
+    trailing_stop_peak_price: Option<f64>,
+    trailing_stop_final_distance_pct: Option<f64>,
+    stop_loss_price: Option<f64>,
+    trailing_activation_price: Option<f64>,
+    fixed_take_profit_price: Option<f64>,
+    break_even_price: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MarketSignalsResponse {
+    items: Value,
 }
 
 #[derive(Debug)]
@@ -522,6 +581,22 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         &regime_diagnostics,
         tupa_evaluation.as_ref(),
     );
+    let execution_advice = build_execution_advice(
+        &summary,
+        &expectancy,
+        &comparative_diagnostics,
+        &regime_diagnostics,
+        &symbol_diagnostics,
+        tupa_evaluation.as_ref(),
+    );
+    let active_position_advice = fetch_active_position_advice(
+        state,
+        &regime_diagnostics,
+        &execution_advice,
+        &symbol_diagnostics,
+    )
+    .await
+    .unwrap_or_default();
     let hypotheses = build_hypotheses(
         hours,
         &tupa_snapshot,
@@ -561,6 +636,8 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         recommendations,
         symbol_diagnostics,
         regime_diagnostics,
+        execution_advice,
+        active_position_advice,
         hypotheses,
         tupa_snapshot,
         tupa_evaluation,
@@ -1644,6 +1721,490 @@ fn build_hypotheses(
 
     items.truncate(4);
     items
+}
+
+fn build_execution_advice(
+    summary: &MetricSummary,
+    expectancy: &ExpectancyMetrics,
+    comparative: &ComparativeDiagnostics,
+    regime: &RegimeDiagnostics,
+    symbols: &[SymbolDiagnosticItem],
+    tupa_evaluation: Option<&Value>,
+) -> ExecutionAdvice {
+    let fragile_symbols = symbols
+        .iter()
+        .filter(|item| item.status == "fragile")
+        .count();
+    let avoid_symbols = symbols
+        .iter()
+        .filter(|item| item.status == "fragile")
+        .map(|item| item.symbol.clone())
+        .take(3)
+        .collect::<Vec<_>>();
+    let supportive_symbols = symbols
+        .iter()
+        .filter(|item| item.status == "healthy")
+        .count();
+    let thesis_quality_severity = tupa_evaluation
+        .and_then(|value| value.get("thesis_quality"))
+        .and_then(|value| value.get("severity"))
+        .and_then(Value::as_str)
+        .unwrap_or("warn");
+    let exit_pressure_severity = tupa_evaluation
+        .and_then(|value| value.get("exit_pressure"))
+        .and_then(|value| value.get("severity"))
+        .and_then(Value::as_str)
+        .unwrap_or("warn");
+
+    let (market_state, entry_action, size_action) = if summary.closed_trades < 5 {
+        ("observation_mode", "only_best_setups", "reduced_size_50")
+    } else if expectancy.expectancy_pct < 0.0
+        || comparative.status == "regressed"
+        || regime.status == "fragile"
+    {
+        (
+            "defensive",
+            "avoid_marginal_entries",
+            if regime.exit_profile == "thesis_dominant" {
+                "minimal_size_33"
+            } else {
+                "reduced_size_50"
+            },
+        )
+    } else if regime.status == "supportive"
+        && regime.exit_profile == "trailing_dominant"
+        && thesis_quality_severity == "pass"
+    {
+        ("constructive", "allow_biased_entries", "full_size")
+    } else {
+        ("selective", "only_best_setups", "reduced_size_75")
+    };
+
+    let exit_action = if regime.exit_profile == "thesis_dominant" && regime.status == "fragile" {
+        "tighten_existing_positions"
+    } else if exit_pressure_severity == "pass"
+        && thesis_quality_severity == "pass"
+        && expectancy.expectancy_pct >= 0.0
+    {
+        "let_winners_run"
+    } else {
+        "monitor_positions_closely"
+    };
+
+    let confidence = if summary.closed_trades >= 30 {
+        "high"
+    } else if summary.closed_trades >= 10 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    let mut evidence = vec![
+        format!(
+            "expectancy {:+.4}% with payoff {:.2}",
+            expectancy.expectancy_pct, expectancy.payoff_ratio
+        ),
+        format!(
+            "regime {} / {} / {}",
+            regime.status, regime.regime, regime.exit_profile
+        ),
+        format!(
+            "comparative status {} with bias {}",
+            comparative.status, regime.directional_bias
+        ),
+    ];
+
+    if fragile_symbols > 0 || supportive_symbols > 0 {
+        evidence.push(format!(
+            "{} fragile symbol(s), {} healthy symbol(s)",
+            fragile_symbols, supportive_symbols
+        ));
+    }
+
+    let mut priority_actions = Vec::new();
+    let preferred_side = if regime.directional_bias.contains("long") {
+        "long"
+    } else if regime.directional_bias.contains("short") {
+        "short"
+    } else {
+        "neutral"
+    };
+
+    match entry_action {
+        "avoid_marginal_entries" => {
+            priority_actions
+                .push("skip low-conviction entries and wait for stronger alignment".to_string());
+        }
+        "only_best_setups" => {
+            priority_actions
+                .push("accept only top-ranked setups that agree with the current bias".to_string());
+        }
+        "allow_biased_entries" => {
+            priority_actions.push(format!(
+                "allow entries mainly in the {} direction while the regime stays supportive",
+                regime.directional_bias.replace("directional_bias_", "")
+            ));
+        }
+        _ => {}
+    }
+
+    match exit_action {
+        "tighten_existing_positions" => {
+            priority_actions.push(
+                "protect open positions faster when thesis pressure starts to build".to_string(),
+            );
+        }
+        "let_winners_run" => {
+            priority_actions.push(
+                "favor trailing and avoid discretionary exits on positions that stay aligned"
+                    .to_string(),
+            );
+        }
+        "monitor_positions_closely" => {
+            priority_actions.push(
+                "keep open positions under closer review until the regime improves".to_string(),
+            );
+        }
+        _ => {}
+    }
+
+    if size_action == "minimal_size_33" {
+        priority_actions.push("use minimal size until expectancy and exit mix improve".to_string());
+    } else if size_action == "reduced_size_50" {
+        priority_actions
+            .push("keep size near half allocation while the market stays defensive".to_string());
+    } else if size_action == "reduced_size_75" {
+        priority_actions
+            .push("keep size reduced while sample confidence is still building".to_string());
+    }
+
+    let summary = match market_state {
+        "defensive" => format!(
+            "Market is fragile. Prefer {} with {} and {}.",
+            entry_action.replace('_', " "),
+            exit_action.replace('_', " "),
+            size_action.replace('_', " ")
+        ),
+        "constructive" => format!(
+            "Market is supportive. {} and {} with {}.",
+            entry_action.replace('_', " "),
+            exit_action.replace('_', " "),
+            size_action.replace('_', " ")
+        ),
+        "observation_mode" => format!(
+            "Sample is still small. Keep {} and {} until we have more trades.",
+            entry_action.replace('_', " "),
+            size_action.replace('_', " ")
+        ),
+        _ => format!(
+            "Market is mixed. Stay {} with {} and {}.",
+            entry_action.replace('_', " "),
+            exit_action.replace('_', " "),
+            size_action.replace('_', " ")
+        ),
+    };
+
+    ExecutionAdvice {
+        market_state: market_state.to_string(),
+        entry_action: entry_action.to_string(),
+        exit_action: exit_action.to_string(),
+        size_action: size_action.to_string(),
+        directional_bias: regime.directional_bias.clone(),
+        preferred_side: preferred_side.to_string(),
+        confidence: confidence.to_string(),
+        summary,
+        evidence,
+        avoid_symbols,
+        priority_actions,
+    }
+}
+
+fn resolve_backend_api_base_url() -> String {
+    env::var("BACKEND_API_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://api:8080/api/v1".to_string())
+}
+
+fn resolve_market_data_base_url() -> String {
+    env::var("MARKET_DATA_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://market-data:8081".to_string())
+}
+
+async fn fetch_open_positions(state: &AppState) -> Result<Vec<PositionItem>, AnalystError> {
+    let url = format!(
+        "{}/positions",
+        resolve_backend_api_base_url().trim_end_matches('/')
+    );
+    let response = state
+        .http_client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<PositionsResponse>()
+        .await?;
+    Ok(response.items)
+}
+
+async fn fetch_market_signal_map(state: &AppState) -> Result<HashMap<String, Value>, AnalystError> {
+    let url = format!(
+        "{}/latest-signals",
+        resolve_market_data_base_url().trim_end_matches('/')
+    );
+    let response = state
+        .http_client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<MarketSignalsResponse>()
+        .await?;
+
+    let items = match response.items {
+        Value::Object(map) => map.into_iter().collect::<HashMap<_, _>>(),
+        Value::Array(values) => values
+            .into_iter()
+            .filter_map(|value| {
+                let symbol = value
+                    .get("symbol")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)?;
+                Some((symbol, value))
+            })
+            .collect::<HashMap<_, _>>(),
+        _ => HashMap::new(),
+    };
+
+    Ok(items)
+}
+
+fn signal_number(signal: Option<&Value>, key: &str) -> f64 {
+    signal
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+}
+
+fn signal_text(signal: Option<&Value>, key: &str) -> String {
+    signal
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn estimate_position_pnl_pct(position: &PositionItem, signal: Option<&Value>) -> f64 {
+    let current_price =
+        signal_number(signal, "bybit_price").max(signal_number(signal, "current_price"));
+    if current_price <= 0.0 || position.entry_price <= 0.0 {
+        return 0.0;
+    }
+
+    if position.side.eq_ignore_ascii_case("Long") {
+        ((current_price / position.entry_price) - 1.0) * 100.0
+    } else {
+        ((position.entry_price / current_price) - 1.0) * 100.0
+    }
+}
+
+fn build_active_position_advice(
+    positions: &[PositionItem],
+    signals: &HashMap<String, Value>,
+    regime: &RegimeDiagnostics,
+    execution_advice: &ExecutionAdvice,
+    symbols: &[SymbolDiagnosticItem],
+) -> Vec<ActivePositionAdvice> {
+    let symbol_status = symbols
+        .iter()
+        .map(|item| (item.symbol.to_uppercase(), item.status.clone()))
+        .collect::<HashMap<_, _>>();
+
+    positions
+        .iter()
+        .map(|position| {
+            let signal = signals.get(&position.symbol);
+            let pnl_pct_estimate = estimate_position_pnl_pct(position, signal);
+            let duration_minutes = Utc::now()
+                .signed_duration_since(position.opened_at)
+                .num_minutes()
+                .max(0);
+            let preferred_side = execution_advice.preferred_side.as_str();
+            let position_side = if position.side.eq_ignore_ascii_case("Long") {
+                "long"
+            } else {
+                "short"
+            };
+            let symbol_status = symbol_status
+                .get(&position.symbol.to_uppercase())
+                .cloned()
+                .unwrap_or_else(|| "mixed".to_string());
+            let consensus_side = signal_text(signal, "consensus_side");
+            let bybit_regime = signal_text(signal, "bybit_regime");
+            let consensus_trend_score = signal_number(signal, "consensus_trend_score");
+            let fast_ema = signal_number(signal, "consensus_ema_fast");
+            let current_price =
+                signal_number(signal, "bybit_price").max(signal_number(signal, "current_price"));
+            let bollinger_percent_b = signal_number(signal, "consensus_bollinger_percent_b");
+
+            let mut risk_flags = Vec::new();
+            if symbol_status == "fragile" {
+                risk_flags.push("symbol_fragile".to_string());
+            }
+            if preferred_side != "neutral" && preferred_side != position_side {
+                risk_flags.push("market_bias_mismatch".to_string());
+            }
+            if (position_side == "long" && consensus_side == "bearish")
+                || (position_side == "short" && consensus_side == "bullish")
+            {
+                risk_flags.push("consensus_side_opposite".to_string());
+            }
+            if (position_side == "long"
+                && current_price > 0.0
+                && fast_ema > 0.0
+                && current_price < fast_ema)
+                || (position_side == "short"
+                    && current_price > 0.0
+                    && fast_ema > 0.0
+                    && current_price > fast_ema)
+            {
+                risk_flags.push("price_vs_fast_ema_unfavorable".to_string());
+            }
+            if (position_side == "long" && bollinger_percent_b < 0.20)
+                || (position_side == "short" && bollinger_percent_b > 0.80)
+            {
+                risk_flags.push("bollinger_support_weak".to_string());
+            }
+            if (position_side == "long" && consensus_trend_score < 0.0)
+                || (position_side == "short" && consensus_trend_score > 0.0)
+            {
+                risk_flags.push("consensus_trend_against_position".to_string());
+            }
+
+            let action = if risk_flags
+                .iter()
+                .any(|flag| flag == "consensus_side_opposite")
+                || (execution_advice.market_state == "defensive"
+                    && symbol_status == "fragile"
+                    && pnl_pct_estimate <= 0.0)
+            {
+                "exit_recommended"
+            } else if execution_advice.exit_action == "tighten_existing_positions"
+                && (!risk_flags.is_empty() || pnl_pct_estimate < 0.10)
+            {
+                "hold_but_tighten"
+            } else if execution_advice.market_state == "defensive" && pnl_pct_estimate < 0.0 {
+                "reduce_risk"
+            } else {
+                "hold"
+            };
+
+            let confidence = if risk_flags.len() >= 3 || duration_minutes >= 30 {
+                "high"
+            } else if risk_flags.len() >= 2 || duration_minutes >= 10 {
+                "medium"
+            } else {
+                "low"
+            };
+
+            let mut evidence = vec![
+                format!("estimated pnl {:+.3}%", pnl_pct_estimate),
+                format!("open for {} min", duration_minutes),
+                format!(
+                    "consensus {} / regime {} / trend {:+.2}",
+                    consensus_side, bybit_regime, consensus_trend_score
+                ),
+            ];
+
+            if position.trailing_stop_activated {
+                evidence.push("trailing stop already activated".to_string());
+            }
+            if let Some(distance) = position.trailing_stop_final_distance_pct {
+                evidence.push(format!(
+                    "current trailing distance {:.3}%",
+                    distance * 100.0
+                ));
+            }
+            if let Some(price) = position.break_even_price {
+                evidence.push(format!("break-even reference {:.4}", price));
+            }
+            if let Some(price) = position.stop_loss_price {
+                evidence.push(format!("stop loss {:.4}", price));
+            }
+            if let Some(price) = position.trailing_activation_price {
+                evidence.push(format!("trailing activates at {:.4}", price));
+            }
+            if let Some(price) = position.fixed_take_profit_price {
+                evidence.push(format!("fixed take profit {:.4}", price));
+            }
+            if let Some(peak_price) = position.trailing_stop_peak_price {
+                evidence.push(format!("trailing peak {:.4}", peak_price));
+            }
+            evidence.push(format!(
+                "position size {:.4} / ${:.2}",
+                position.quantity, position.notional_usdt
+            ));
+            evidence.push(format!(
+                "overall regime {} / {}",
+                regime.status, execution_advice.market_state
+            ));
+
+            let summary = match action {
+                "exit_recommended" => format!(
+                    "{} {} is losing alignment; exit is favored over waiting.",
+                    position.symbol, position.side
+                ),
+                "hold_but_tighten" => format!(
+                    "{} {} still has room, but risk control should tighten now.",
+                    position.symbol, position.side
+                ),
+                "reduce_risk" => format!(
+                    "{} {} is in a defensive market state; reduce exposure if possible.",
+                    position.symbol, position.side
+                ),
+                _ => format!(
+                    "{} {} remains acceptable to hold while alignment is intact.",
+                    position.symbol, position.side
+                ),
+            };
+
+            ActivePositionAdvice {
+                symbol: position.symbol.clone(),
+                side: position.side.clone(),
+                action: action.to_string(),
+                confidence: confidence.to_string(),
+                market_state: execution_advice.market_state.clone(),
+                pnl_pct_estimate,
+                duration_minutes,
+                summary,
+                evidence,
+                risk_flags,
+            }
+        })
+        .collect()
+}
+
+async fn fetch_active_position_advice(
+    state: &AppState,
+    regime: &RegimeDiagnostics,
+    execution_advice: &ExecutionAdvice,
+    symbols: &[SymbolDiagnosticItem],
+) -> Result<Vec<ActivePositionAdvice>, AnalystError> {
+    let positions = fetch_open_positions(state).await?;
+    if positions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let signals = fetch_market_signal_map(state).await.unwrap_or_default();
+    Ok(build_active_position_advice(
+        &positions,
+        &signals,
+        regime,
+        execution_advice,
+        symbols,
+    ))
 }
 
 fn build_heuristic_summary(ctx: HeuristicSummaryContext<'_>) -> String {
