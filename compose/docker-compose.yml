@@ -4,7 +4,10 @@ services:
   # INFRASTRUCTURE SERVICES
   # ═══════════════════════════════════════════════════════════
   postgres:
-    image: docker.io/library/postgres:16-alpine
+    build:
+      context: ..
+      dockerfile: database/Dockerfile
+    image: localhost/vipertrade-postgres:16-alpine
     container_name: vipertrade-postgres
     ports:
       - "5432:5432"
@@ -14,9 +17,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ../database/init.sql:/docker-entrypoint-initdb.d/02-init.sql:ro
-      - ../database/migrations:/docker-entrypoint-initdb.d/migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-viper} -d ${POSTGRES_DB:-vipertrade} -h 127.0.0.1"]
       interval: 10s
@@ -75,7 +75,7 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_WS_PUBLIC: ${BYBIT_WS_PUBLIC:-wss://stream-testnet.bybit.com/v5/public/linear}
-      STRATEGY_CONFIG: /app/config/pairs.yaml
+      STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       REDIS_URL: redis://redis:6379
       ANALYTICS_SCORES_URL: ${ANALYTICS_SCORES_URL:-http://analytics:8086/scores}
       ANALYTICS_MIN_EVALUATED: ${ANALYTICS_MIN_EVALUATED:-20}
@@ -83,8 +83,6 @@ services:
       REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_market_data=${LOG_LEVEL:-info},tupa=warn"
-    volumes:
-      - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -119,7 +117,7 @@ services:
     environment:
       TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
-      STRATEGY_CONFIG: /app/config/pairs.yaml
+      STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-vipertrade}
@@ -129,8 +127,6 @@ services:
       ANALYTICS_LOOKBACK_HOURS: ${ANALYTICS_LOOKBACK_HOURS:-24}
       ANALYTICS_SAMPLE_INTERVAL_SECONDS: ${ANALYTICS_SAMPLE_INTERVAL_SECONDS:-5}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    volumes:
-      - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -187,8 +183,7 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       LD_LIBRARY_PATH: /usr/local/lib
     volumes:
-      - ../config:/app/config:ro
-      - ../logs:/app/logs
+      - logs_data:/app/logs
       - tupa-cache:/root/.cache/tupa
     depends_on:
       postgres:
@@ -254,8 +249,6 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_executor=info,tupa=warn"
-    volumes:
-      - ../config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -317,8 +310,6 @@ services:
       ALERT_COOLDOWN_SEC: ${ALERT_COOLDOWN_SEC:-300}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: "vipertrade_monitor=info,tupa=warn"
-    volumes:
-      - ../config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -357,8 +348,6 @@ services:
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    volumes:
-      - ../config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -444,7 +433,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-viper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vipertrade}
       REDIS_URL: redis://redis:6379
       TRADING_MODE: ${TRADING_MODE:-paper}
-      STRATEGY_CONFIG: /app/config/pairs.yaml
+      STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
       BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
@@ -466,8 +455,7 @@ services:
       timeout: 10s
       retries: 3
     volumes:
-      - ../config/trading/pairs.yaml:/app/config/pairs.yaml:ro
-      - ../logs:/app/logs
+      - logs_data:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -536,6 +524,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  logs_data:
   tupa-cache:
 
 # ═══════════════════════════════════════════════════════════

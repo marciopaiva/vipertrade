@@ -37,7 +37,7 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 
 ## Local runtime
 
-- Docker Desktop + WSL is the standard local environment
+- Docker Desktop or Podman Desktop + WSL is the standard local environment
 - bridge networking is the standard compose mode
 - `compose/docker-compose.yml` is the only supported compose entrypoint
 - service health checks are part of the default operational flow

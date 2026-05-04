@@ -1,6 +1,6 @@
 /**
  * Trading Types
- * 
+ *
  * TypeScript type definitions for trading data structures.
  */
 
@@ -138,4 +138,9 @@ export interface DashboardData {
 export type TradingMode = 'paper' | 'testnet' | 'mainnet';
 export type TradingProfile = 'CONSERVATIVE' | 'MEDIUM' | 'AGGRESSIVE';
 export type PositionSide = 'Long' | 'Short';
-export type TradeStatus = 'open' | 'closed' | 'liquidated' | 'cancelled' | 'rejected';
+export type TradeStatus =
+  | 'open'
+  | 'closed'
+  | 'liquidated'
+  | 'cancelled'
+  | 'rejected';

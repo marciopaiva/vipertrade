@@ -24,6 +24,9 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Python build dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3 python3-dev
+
       - name: Validate make help
         run: make help >/dev/null
 
@@ -121,6 +124,9 @@ jobs:
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install Python build dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3 python3-dev
 
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client

@@ -22,28 +22,30 @@ export function useDashboard<T = unknown>(
   options: UseDashboardOptions = {}
 ): UseDashboardReturn<T> {
   const { refreshInterval = 5000, enabled = true } = options;
-  
+
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!enabled) return;
-    
+
     try {
-      const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+      const url = endpoint.startsWith('http')
+        ? endpoint
+        : `${API_BASE_URL}${endpoint}`;
       const res = await fetch(url, { cache: 'no-store' });
       const raw = await res.text();
       const body = raw ? JSON.parse(raw) : null;
-      
+
       if (!res.ok) {
         throw new Error(body?.message || `HTTP ${res.status}`);
       }
-      
+
       if (!body) {
         throw new Error('Empty response');
       }
-      
+
       setData(body);
       setError(null);
     } catch (err) {
@@ -61,7 +63,7 @@ export function useDashboard<T = unknown>(
       const interval = setInterval(fetchData, refreshInterval);
       return () => clearInterval(interval);
     }
-    
+
     return undefined;
   }, [fetchData, refreshInterval, enabled]);
 

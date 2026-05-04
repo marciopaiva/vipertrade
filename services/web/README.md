@@ -121,7 +121,7 @@ function Dashboard() {
   const { positions } = usePositions();
   const { trades } = useTrades();
   const { services } = useServiceHealth();
-  
+
   // ...
 }
 ```
@@ -133,7 +133,7 @@ import { useTradingStore } from '@/stores/tradingStore';
 
 function Component() {
   const { positions, setPositions } = useTradingStore();
-  
+
   // ...
 }
 ```
@@ -166,13 +166,13 @@ docker-compose up -d
 
 ## 📊 Routes
 
-| Route | Description |
-|-------|-------------|
-| `/` | Main dashboard |
-| `/trades` | Trade history |
-| `/positions` | Open positions |
-| `/settings` | Settings |
-| `/api/health` | Health check |
+| Route         | Description    |
+| ------------- | -------------- |
+| `/`           | Main dashboard |
+| `/trades`     | Trade history  |
+| `/positions`  | Open positions |
+| `/settings`   | Settings       |
+| `/api/health` | Health check   |
 
 ## 🎯 Performance
 

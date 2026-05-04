@@ -1,4 +1,4 @@
-# Operations Runbook (WSL Fedora + Docker Desktop)
+# Operations Runbook (WSL Fedora + Container Desktop)
 
 ## 1) Bootstrap
 
@@ -123,7 +123,7 @@ TRADING_MODE=paper
 If needed, rollback only the latest executor DB patch:
 
 ```bash
-docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+${CONTAINER_ENGINE:-podman} exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
 DROP INDEX IF EXISTS uq_system_events_executor_source_event;
 DROP TABLE IF EXISTS bybit_fills;
 SQL
@@ -166,7 +166,7 @@ make health
 1. Check divergence and severity in database:
 
 ```bash
-docker exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
+${CONTAINER_ENGINE:-podman} exec -i vipertrade-postgres psql -U viper -d vipertrade <<'SQL'
 SELECT symbol, reconciled, divergence, divergence_pct, snapshot_at
 FROM position_snapshots
 ORDER BY snapshot_at DESC
@@ -248,7 +248,7 @@ Rollback verification checklist:
 SQL verification query:
 
 ```bash
-docker exec -i vipertrade-postgres psql -U viper -d vipertrade -At -F '|' -c \
+${CONTAINER_ENGINE:-podman} exec -i vipertrade-postgres psql -U viper -d vipertrade -At -F '|' -c \
 "SELECT event_type,severity,data->>'enabled',data->>'reason',data->>'actor',to_char(timestamp,'YYYY-MM-DD HH24:MI:SS')
  FROM system_events
  WHERE event_type='api_kill_switch_set'

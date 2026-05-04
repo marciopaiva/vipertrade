@@ -37,7 +37,7 @@ export function formatDate(date: string | Date): string {
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
-  
+
   if (hours > 0) {
     return `${hours}h ${minutes % 60}m`;
   }
@@ -52,7 +52,9 @@ export function truncateAddress(address: string, length = 4): string {
   return `${address.slice(0, length)}...${address.slice(-length)}`;
 }
 
-export function getStatusColor(status: 'success' | 'warning' | 'error' | 'neutral'): string {
+export function getStatusColor(
+  status: 'success' | 'warning' | 'error' | 'neutral'
+): string {
   const colors = {
     success: '#00ff88',
     warning: '#f59e0b',
