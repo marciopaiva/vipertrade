@@ -1,6 +1,6 @@
 /**
  * ViperTrade Web Configuration
- * 
+ *
  * Centralized configuration for the web application.
  * All feature flags and settings should be defined here.
  */
@@ -23,8 +23,16 @@ export const config = {
 
   // Trading Configuration
   trading: {
-    mode: (process.env.NEXT_PUBLIC_TRADING_MODE as 'paper' | 'testnet' | 'mainnet') || 'paper',
-    profile: (process.env.NEXT_PUBLIC_TRADING_PROFILE as 'CONSERVATIVE' | 'MEDIUM' | 'AGGRESSIVE') || 'MEDIUM',
+    mode:
+      (process.env.NEXT_PUBLIC_TRADING_MODE as
+        | 'paper'
+        | 'testnet'
+        | 'mainnet') || 'paper',
+    profile:
+      (process.env.NEXT_PUBLIC_TRADING_PROFILE as
+        | 'CONSERVATIVE'
+        | 'MEDIUM'
+        | 'AGGRESSIVE') || 'MEDIUM',
   },
 
   // Feature Flags
@@ -37,8 +45,14 @@ export const config = {
 
   // UI Configuration
   ui: {
-    refreshInterval: parseInt(process.env.NEXT_PUBLIC_REFRESH_INTERVAL || '5000', 10),
-    tradesPerPage: parseInt(process.env.NEXT_PUBLIC_TRADES_PER_PAGE || '10', 10),
+    refreshInterval: parseInt(
+      process.env.NEXT_PUBLIC_REFRESH_INTERVAL || '5000',
+      10
+    ),
+    tradesPerPage: parseInt(
+      process.env.NEXT_PUBLIC_TRADES_PER_PAGE || '10',
+      10
+    ),
     darkMode: process.env.NEXT_PUBLIC_DARK_MODE !== 'false',
   },
 

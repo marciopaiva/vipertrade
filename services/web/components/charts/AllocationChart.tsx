@@ -1,6 +1,13 @@
 'use client';
 
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from 'recharts';
 
 interface AllocationChartProps {
   data: Array<{
@@ -30,27 +37,32 @@ export function AllocationChart({ data }: AllocationChartProps) {
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={({ name, percent }: any) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
+            label={({ name, percent }: any) =>
+              `${name}: ${((percent || 0) * 100).toFixed(0)}%`
+            }
             outerRadius={80}
             fill="#8884d8"
             dataKey="value"
           >
             {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
+              <Cell
+                key={`cell-${index}`}
+                fill={entry.color || COLORS[index % COLORS.length]}
+              />
             ))}
           </Pie>
-          <Tooltip 
-            contentStyle={{ 
-              backgroundColor: '#1e293b', 
+          <Tooltip
+            contentStyle={{
+              backgroundColor: '#1e293b',
               border: '1px solid #334155',
-              borderRadius: '8px'
+              borderRadius: '8px',
             }}
           />
-          <Legend 
-            wrapperStyle={{ 
+          <Legend
+            wrapperStyle={{
               paddingTop: '20px',
-              color: '#94a3b8'
-            }} 
+              color: '#94a3b8',
+            }}
           />
         </PieChart>
       </ResponsiveContainer>

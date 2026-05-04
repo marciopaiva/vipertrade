@@ -60,8 +60,11 @@ function normalizeName(name: string) {
   return name.toLowerCase();
 }
 
-function getService(services: Array<{ name: string; ok: boolean; latency_ms: number }>, matcher: string) {
-  return services.find((svc) => normalizeName(svc.name).includes(matcher));
+function getService(
+  services: Array<{ name: string; ok: boolean; latency_ms: number }>,
+  matcher: string
+) {
+  return services.find(svc => normalizeName(svc.name).includes(matcher));
 }
 
 function getStatusTone(ok: boolean | undefined, latency: number | undefined) {
@@ -127,13 +130,23 @@ function StageCard({
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_52%)] opacity-60" />
         </>
       )}
-      <div className={`absolute inset-x-6 top-0 h-px bg-gradient-to-r ${color.rail}`} />
+      <div
+        className={`absolute inset-x-6 top-0 h-px bg-gradient-to-r ${color.rail}`}
+      />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Stage</div>
-          <div className={`mt-1 font-semibold text-slate-100 ${hero ? 'text-base' : 'text-sm'}`}>{title}</div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+            Stage
+          </div>
+          <div
+            className={`mt-1 font-semibold text-slate-100 ${hero ? 'text-base' : 'text-sm'}`}
+          >
+            {title}
+          </div>
         </div>
-        <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+        <div
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}
+        >
           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
           {tone.label}
         </div>
@@ -141,21 +154,33 @@ function StageCard({
 
       <div className="mt-5 flex items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Latency</div>
-          <div className={`mt-1 font-semibold ${hero ? 'text-2xl' : 'text-xl'} ${color.accent}`}>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+            Latency
+          </div>
+          <div
+            className={`mt-1 font-semibold ${hero ? 'text-2xl' : 'text-xl'} ${color.accent}`}
+          >
             {typeof latency === 'number' ? `${latency}ms` : '--'}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Role</div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+            Role
+          </div>
           <div className="mt-1 text-xs text-slate-300">{subtitle}</div>
         </div>
       </div>
 
       {(statusLine || detailLine) && (
         <div className="mt-4 border-t border-white/5 pt-3">
-          {statusLine && <div className="text-[11px] font-medium tracking-[0.08em] text-slate-300">{statusLine}</div>}
-          {detailLine && <div className="mt-1 text-[11px] text-slate-500">{detailLine}</div>}
+          {statusLine && (
+            <div className="text-[11px] font-medium tracking-[0.08em] text-slate-300">
+              {statusLine}
+            </div>
+          )}
+          {detailLine && (
+            <div className="mt-1 text-[11px] text-slate-500">{detailLine}</div>
+          )}
         </div>
       )}
     </div>
@@ -176,13 +201,19 @@ function SourcePill({
   const tone = getStatusTone(ok, latency);
 
   return (
-    <div className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sources.pill} ${tone.ring}`}>
+    <div
+      className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sources.pill} ${tone.ring}`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${accent}`} />
-          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">{label}</span>
+          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">
+            {label}
+          </span>
         </div>
-        <span className="text-xs text-slate-400">{typeof latency === 'number' ? `${latency}ms` : '--'}</span>
+        <span className="text-xs text-slate-400">
+          {typeof latency === 'number' ? `${latency}ms` : '--'}
+        </span>
       </div>
     </div>
   );
@@ -200,13 +231,19 @@ function SidecarPill({
   const tone = getStatusTone(ok, latency);
 
   return (
-    <div className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sidecars.pill} ${tone.ring}`}>
+    <div
+      className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sidecars.pill} ${tone.ring}`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">{label}</span>
+          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">
+            {label}
+          </span>
         </div>
-        <span className="text-xs text-slate-400">{typeof latency === 'number' ? `${latency}ms` : '--'}</span>
+        <span className="text-xs text-slate-400">
+          {typeof latency === 'number' ? `${latency}ms` : '--'}
+        </span>
       </div>
     </div>
   );
@@ -233,8 +270,12 @@ function BlockConnector({
       </div>
       <div className="hidden xl:flex items-center justify-center">
         <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
-          <div className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`} />
-          <div className={`absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${dotClass} shadow-[0_0_14px_rgba(255,255,255,0.35)] animate-[flow-connector_2.8s_ease-in-out_infinite]`} />
+          <div
+            className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`}
+          />
+          <div
+            className={`absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${dotClass} shadow-[0_0_14px_rgba(255,255,255,0.35)] animate-[flow-connector_2.8s_ease-in-out_infinite]`}
+          />
         </div>
       </div>
     </>
@@ -270,7 +311,12 @@ export default function ServiceFlowDiagram({
       marketData,
       strategy,
       executor: {
-        ok: executorState === 'running' ? true : executorState === 'paused' ? true : executor?.ok ?? false,
+        ok:
+          executorState === 'running'
+            ? true
+            : executorState === 'paused'
+              ? true
+              : (executor?.ok ?? false),
         latency_ms: executor?.latency_ms ?? 0,
       },
       api,
@@ -281,19 +327,31 @@ export default function ServiceFlowDiagram({
     };
   }, [executorState, services]);
 
-  const marketTone = getStatusTone(serviceState.marketData?.ok, serviceState.marketData?.latency_ms);
-  const strategyTone = getStatusTone(serviceState.strategy?.ok, serviceState.strategy?.latency_ms);
-  const executorTone = getStatusTone(serviceState.executor?.ok, serviceState.executor?.latency_ms);
+  const marketTone = getStatusTone(
+    serviceState.marketData?.ok,
+    serviceState.marketData?.latency_ms
+  );
+  const strategyTone = getStatusTone(
+    serviceState.strategy?.ok,
+    serviceState.strategy?.latency_ms
+  );
+  const executorTone = getStatusTone(
+    serviceState.executor?.ok,
+    serviceState.executor?.latency_ms
+  );
   const showMultiSource = executionMode !== 'testnet';
   const marketStatusLine = `${activeSignalsCount} active ${activeSignalsCount === 1 ? 'symbol' : 'symbols'} · ${showMultiSource ? 'multi venue' : 'single venue'}`;
   const strategyStatusLine = flowContext?.strategySymbol
     ? `${flowContext.strategySymbol} · ${flowContext.strategyState || 'Scanning'}`
     : 'Scanning market conditions';
-  const strategyDetailLine = flowContext?.strategyContext || `${closedTradesCount} closed trades observed`;
+  const strategyDetailLine =
+    flowContext?.strategyContext ||
+    `${closedTradesCount} closed trades observed`;
   const executorStatusLine = flowContext?.executorSymbol
     ? `${flowContext.executorSymbol} · ${flowContext.executorAction || 'idle'}`
     : `${openPositionsCount} open ${openPositionsCount === 1 ? 'position' : 'positions'}`;
-  const executorDetailLine = flowContext?.executorContext || 'Awaiting valid execution pressure';
+  const executorDetailLine =
+    flowContext?.executorContext || 'Awaiting valid execution pressure';
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
@@ -334,7 +392,9 @@ export default function ServiceFlowDiagram({
       <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Sources</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              Sources
+            </div>
             <div className="mt-1 text-sm font-semibold text-slate-100">
               {showMultiSource ? 'Exchange Feeds' : 'Execution Venue'}
             </div>
@@ -346,11 +406,26 @@ export default function ServiceFlowDiagram({
 
         <div className="space-y-3">
           {showMultiSource && (
-            <SourcePill label="BINANCE" latency={serviceState.binance?.latency_ms} accent="bg-slate-100" ok={serviceState.binance?.ok} />
+            <SourcePill
+              label="BINANCE"
+              latency={serviceState.binance?.latency_ms}
+              accent="bg-slate-100"
+              ok={serviceState.binance?.ok}
+            />
           )}
-          <SourcePill label="BYBIT" latency={serviceState.bybit?.latency_ms} accent="bg-amber-400" ok={serviceState.bybit?.ok} />
+          <SourcePill
+            label="BYBIT"
+            latency={serviceState.bybit?.latency_ms}
+            accent="bg-amber-400"
+            ok={serviceState.bybit?.ok}
+          />
           {showMultiSource && (
-            <SourcePill label="OKX" latency={serviceState.okx?.latency_ms} accent="bg-slate-300" ok={serviceState.okx?.ok} />
+            <SourcePill
+              label="OKX"
+              latency={serviceState.okx?.latency_ms}
+              accent="bg-slate-300"
+              ok={serviceState.okx?.ok}
+            />
           )}
         </div>
       </div>
@@ -365,8 +440,12 @@ export default function ServiceFlowDiagram({
       <div className="relative overflow-hidden rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Core pipeline</div>
-            <div className="mt-1 text-sm font-semibold text-slate-100">Market Data to Execution</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              Core pipeline
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-100">
+              Market Data to Execution
+            </div>
           </div>
           <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
             runtime path
@@ -381,7 +460,11 @@ export default function ServiceFlowDiagram({
             latency={serviceState.marketData?.latency_ms}
             subtitle="normalize + publish"
             statusLine={marketStatusLine}
-            detailLine={serviceState.marketData?.ok === false ? 'Feed normalization degraded' : 'Venue telemetry is flowing into the runtime path'}
+            detailLine={
+              serviceState.marketData?.ok === false
+                ? 'Feed normalization degraded'
+                : 'Venue telemetry is flowing into the runtime path'
+            }
             color={STAGE_COLORS.marketData}
             tone={marketTone}
             animated
@@ -399,7 +482,11 @@ export default function ServiceFlowDiagram({
           <StageCard
             title="Executor"
             latency={serviceState.executor?.latency_ms}
-            subtitle={executorState === 'paused' ? 'orders paused' : 'orders + reconcile'}
+            subtitle={
+              executorState === 'paused'
+                ? 'orders paused'
+                : 'orders + reconcile'
+            }
             statusLine={executorStatusLine}
             detailLine={executorDetailLine}
             color={STAGE_COLORS.executor}
@@ -420,8 +507,12 @@ export default function ServiceFlowDiagram({
       <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Sidecars</div>
-            <div className="mt-1 text-sm font-semibold text-slate-100">State and Analysis</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              Sidecars
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-100">
+              State and Analysis
+            </div>
           </div>
           <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
             observers
@@ -429,11 +520,31 @@ export default function ServiceFlowDiagram({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <SidecarPill label="API" latency={serviceState.api?.latency_ms} ok={serviceState.api?.ok} />
-          <SidecarPill label="MONITOR" latency={serviceState.monitor?.latency_ms} ok={serviceState.monitor?.ok} />
-          <SidecarPill label="ANALYTICS" latency={serviceState.analytics?.latency_ms} ok={serviceState.analytics?.ok} />
-          <SidecarPill label="AI ANALYST" latency={serviceState.aiAnalyst?.latency_ms} ok={serviceState.aiAnalyst?.ok} />
-          <SidecarPill label="BACKTEST" latency={serviceState.backtest?.latency_ms} ok={serviceState.backtest?.ok} />
+          <SidecarPill
+            label="API"
+            latency={serviceState.api?.latency_ms}
+            ok={serviceState.api?.ok}
+          />
+          <SidecarPill
+            label="MONITOR"
+            latency={serviceState.monitor?.latency_ms}
+            ok={serviceState.monitor?.ok}
+          />
+          <SidecarPill
+            label="ANALYTICS"
+            latency={serviceState.analytics?.latency_ms}
+            ok={serviceState.analytics?.ok}
+          />
+          <SidecarPill
+            label="AI ANALYST"
+            latency={serviceState.aiAnalyst?.latency_ms}
+            ok={serviceState.aiAnalyst?.ok}
+          />
+          <SidecarPill
+            label="BACKTEST"
+            latency={serviceState.backtest?.latency_ms}
+            ok={serviceState.backtest?.ok}
+          />
         </div>
       </div>
     </div>

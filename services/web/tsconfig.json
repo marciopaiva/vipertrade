@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     // Target & Libs
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
+    "lib": ["dom", "dom.iterable", "esnext"],
     "target": "ES2020",
     // Modules
     "allowJs": true,
@@ -42,9 +38,7 @@
     // Path Aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"]
     },
     // Module Resolution
     "allowSyntheticDefaultImports": true
@@ -56,7 +50,5 @@
     "**/*.tsx",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules"
-  ]
+  "exclude": ["node_modules"]
 }

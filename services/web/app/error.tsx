@@ -17,7 +17,9 @@ export default function Error({
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#0a1929]">
       <div className="text-center space-y-4">
-        <h2 className="text-2xl font-bold text-red-400">Something went wrong!</h2>
+        <h2 className="text-2xl font-bold text-red-400">
+          Something went wrong!
+        </h2>
         <p className="text-cyan-300 text-sm">{error.message}</p>
         <button
           onClick={reset}
