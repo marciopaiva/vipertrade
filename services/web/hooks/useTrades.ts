@@ -24,7 +24,7 @@ export function useTrades() {
     };
 
     fetchTrades();
-  }, []);
+  }, [setTrades]);
 
   return { trades, loading, error };
 }

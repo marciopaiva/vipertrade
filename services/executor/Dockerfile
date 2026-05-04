@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y ca-certificates libssl3 curl netcat-ope
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-executor /usr/local/bin/viper-executor
+COPY --from=builder /usr/src/app/config /app/config
 COPY scripts/docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
 RUN chmod +x /usr/local/bin/wait-for-deps.sh
 

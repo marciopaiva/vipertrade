@@ -21,7 +21,7 @@ export class WebSocketClient {
         }
       };
 
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = event => {
         try {
           const data = JSON.parse(event.data);
           this.emit(data.type, data.payload);
@@ -35,7 +35,7 @@ export class WebSocketClient {
         this.reconnect();
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = error => {
         console.error('WebSocket error:', error);
       };
     } catch (error) {
@@ -46,7 +46,7 @@ export class WebSocketClient {
 
   private reconnect() {
     if (this.reconnectTimer) return;
-    
+
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, this.reconnectInterval);
@@ -64,7 +64,7 @@ export class WebSocketClient {
   }
 
   private emit(event: string, data: any) {
-    this.listeners.get(event)?.forEach((callback) => callback(data));
+    this.listeners.get(event)?.forEach(callback => callback(data));
   }
 
   disconnect() {

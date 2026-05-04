@@ -9,7 +9,11 @@ interface ViperTradeLogoProps {
   showText?: boolean;
 }
 
-export function ViperTradeLogo({ size = 'md', className, showText = true }: ViperTradeLogoProps) {
+export function ViperTradeLogo({
+  size = 'md',
+  className,
+  showText = true,
+}: ViperTradeLogoProps) {
   const sizeConfig = {
     sm: { width: 32, height: 32 },
     md: { width: 48, height: 48 },
@@ -32,7 +36,10 @@ export function ViperTradeLogo({ size = 'md', className, showText = true }: Vipe
       </div>
       {showText && (
         <div>
-          <h1 className="text-xl font-bold text-primary" style={{ letterSpacing: '0.5px' }}>
+          <h1
+            className="text-xl font-bold text-primary"
+            style={{ letterSpacing: '0.5px' }}
+          >
             ViperTrade
           </h1>
           <p className="text-xs text-muted-foreground">

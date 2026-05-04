@@ -12,9 +12,9 @@ DB_USER="${POSTGRES_USER:-viper}"
 DB_NAME="${POSTGRES_DB:-vipertrade}"
 DB_PORT="${DB_PORT:-5432}"
 
-require_docker() {
-  if ! command -v docker >/dev/null 2>&1; then
-    print_fail "Docker not found"
+require_container() {
+  if ! vt_container_available; then
+    print_fail "container engine not found"
     exit 1
   fi
 }
@@ -39,13 +39,13 @@ print_fail() {
 # PostgreSQL functions
 postgres_status() {
   print_service "PostgreSQL" "Status"
-  require_docker
+  require_container
   
-  if docker ps --filter "name=vipertrade-postgres" --format "{{.Status}}" | grep -q "Up"; then
+  if vt_container ps --filter "name=vipertrade-postgres" --format "{{.Status}}" | grep -q "Up"; then
     print_ok "PostgreSQL is running"
     
     # Check health
-    if docker exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+    if vt_container exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
       print_ok "PostgreSQL accepting connections"
     else
       print_fail "PostgreSQL not accepting connections"
@@ -57,11 +57,11 @@ postgres_status() {
 
 postgres_restart() {
   print_service "PostgreSQL" "Restarting"
-  require_docker
-  docker restart vipertrade-postgres
+  require_container
+  vt_container restart vipertrade-postgres
   sleep 3
   
-  if docker exec vipertrade-postgres pg_isready -U "$DB_USER" >/dev/null 2>&1; then
+  if vt_container exec vipertrade-postgres pg_isready -U "$DB_USER" >/dev/null 2>&1; then
     print_ok "PostgreSQL restarted successfully"
   else
     print_fail "Failed to restart PostgreSQL"
@@ -71,22 +71,22 @@ postgres_restart() {
 
 postgres_logs() {
   print_service "PostgreSQL" "Logs (last 50 lines)"
-  require_docker
-  docker logs --tail 50 vipertrade-postgres
+  require_container
+  vt_container logs --tail 50 vipertrade-postgres
 }
 
 postgres_shell() {
   print_service "PostgreSQL" "Opening shell"
-  require_docker
-  docker exec -it vipertrade-postgres psql -U "$DB_USER" -d "$DB_NAME"
+  require_container
+  vt_container exec -it vipertrade-postgres psql -U "$DB_USER" -d "$DB_NAME"
 }
 
 postgres_backup() {
   local backup_file="backup_postgres_$(date +%Y%m%d_%H%M%S).sql"
   print_service "PostgreSQL" "Creating backup: $backup_file"
   
-  require_docker
-  docker exec vipertrade-postgres pg_dump -U "$DB_USER" -d "$DB_NAME" > "$backup_file"
+  require_container
+  vt_container exec vipertrade-postgres pg_dump -U "$DB_USER" -d "$DB_NAME" > "$backup_file"
   
   if [[ -f "$backup_file" ]]; then
     local size=$(du -h "$backup_file" | cut -f1)
@@ -98,8 +98,8 @@ postgres_backup() {
 }
 
 postgres_health() {
-  require_docker
-  if docker exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+  require_container
+  if vt_container exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
     print_ok "PostgreSQL OK"
     return 0
   else
@@ -111,21 +111,21 @@ postgres_health() {
 # Redis functions
 redis_status() {
   print_service "Redis" "Status"
-  require_docker
+  require_container
   
-  if docker ps --filter "name=vipertrade-redis" --format "{{.Status}}" | grep -q "Up"; then
+  if vt_container ps --filter "name=vipertrade-redis" --format "{{.Status}}" | grep -q "Up"; then
     print_ok "Redis is running"
     
     # Check health
-    if docker exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
+    if vt_container exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
       print_ok "Redis responding to PING"
       
       # Memory info
-      local memory=$(docker exec vipertrade-redis redis-cli INFO memory | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
+      local memory=$(vt_container exec vipertrade-redis redis-cli INFO memory | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
       echo -e "  ${VT_CYAN}Memory:${VT_NC} $memory"
       
       # Keys count
-      local keys=$(docker exec vipertrade-redis redis-cli DBSIZE | cut -d: -f2 | tr -d '\r')
+      local keys=$(vt_container exec vipertrade-redis redis-cli DBSIZE | cut -d: -f2 | tr -d '\r')
       echo -e "  ${VT_CYAN}Keys:${VT_NC} $keys"
     else
       print_fail "Redis not responding"
@@ -137,11 +137,11 @@ redis_status() {
 
 redis_restart() {
   print_service "Redis" "Restarting"
-  require_docker
-  docker restart vipertrade-redis
+  require_container
+  vt_container restart vipertrade-redis
   sleep 2
   
-  if docker exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
+  if vt_container exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
     print_ok "Redis restarted successfully"
   else
     print_fail "Failed to restart Redis"
@@ -151,23 +151,23 @@ redis_restart() {
 
 redis_logs() {
   print_service "Redis" "Logs (last 50 lines)"
-  require_docker
-  docker logs --tail 50 vipertrade-redis
+  require_container
+  vt_container logs --tail 50 vipertrade-redis
 }
 
 redis_shell() {
   print_service "Redis" "Opening CLI"
-  require_docker
-  docker exec -it vipertrade-redis redis-cli
+  require_container
+  vt_container exec -it vipertrade-redis redis-cli
 }
 
 redis_backup() {
   print_service "Redis" "Creating RDB snapshot"
-  require_docker
-  docker exec vipertrade-redis redis-cli BGSAVE
+  require_container
+  vt_container exec vipertrade-redis redis-cli BGSAVE
   
   sleep 2
-  if docker exec vipertrade-redis redis-cli LASTSAVE >/dev/null 2>&1; then
+  if vt_container exec vipertrade-redis redis-cli LASTSAVE >/dev/null 2>&1; then
     print_ok "Redis RDB snapshot started"
   else
     print_fail "Failed to create snapshot"
@@ -176,8 +176,8 @@ redis_backup() {
 }
 
 redis_health() {
-  require_docker
-  if docker exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
+  require_container
+  if vt_container exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
     print_ok "Redis OK"
     return 0
   else

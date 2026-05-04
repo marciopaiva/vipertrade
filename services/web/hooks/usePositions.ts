@@ -18,7 +18,9 @@ export function usePositions() {
         setPositions(data?.items || []);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch positions');
+        setError(
+          err instanceof Error ? err.message : 'Failed to fetch positions'
+        );
       } finally {
         setLoading(false);
       }
@@ -28,7 +30,7 @@ export function usePositions() {
 
     // Setup WebSocket for real-time position updates
     const ws = getWebSocketClient();
-    ws.on('position_update', (data) => {
+    const handlePositionUpdate = (data: any) => {
       setPositions(((prev: any[]) => {
         const index = prev.findIndex(p => p.trade_id === data.trade_id);
         if (index >= 0) {
@@ -38,12 +40,13 @@ export function usePositions() {
         }
         return [data, ...prev];
       }) as any);
-    });
+    };
+    ws.on('position_update', handlePositionUpdate);
 
     return () => {
-      ws.off('position_update', () => {});
+      ws.off('position_update', handlePositionUpdate);
     };
-  }, []);
+  }, [setPositions]);
 
   return { positions, loading, error };
 }

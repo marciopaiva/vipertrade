@@ -271,6 +271,7 @@ struct ActivePositionAdvice {
     side: String,
     action: String,
     confidence: String,
+    maintenance_score: i32,
     market_state: String,
     pnl_pct_estimate: f64,
     duration_minutes: i64,
@@ -2083,22 +2084,71 @@ fn build_active_position_advice(
                 risk_flags.push("consensus_trend_against_position".to_string());
             }
 
-            let action = if risk_flags
+            let mut maintenance_score = 0_i32;
+            if preferred_side != "neutral" && preferred_side == position_side {
+                maintenance_score += 15;
+            } else if preferred_side != "neutral" {
+                maintenance_score -= 15;
+            }
+            match execution_advice.market_state.as_str() {
+                "constructive" => maintenance_score += 15,
+                "observation_mode" => maintenance_score -= 10,
+                "defensive" => maintenance_score -= 20,
+                _ => {}
+            }
+            match symbol_status.as_str() {
+                "healthy" => maintenance_score += 10,
+                "fragile" => maintenance_score -= 20,
+                _ => {}
+            }
+            if pnl_pct_estimate >= 0.30 {
+                maintenance_score += 15;
+            } else if pnl_pct_estimate > 0.0 {
+                maintenance_score += 5;
+            } else if pnl_pct_estimate <= -0.50 {
+                maintenance_score -= 15;
+            } else if pnl_pct_estimate < -0.25 {
+                maintenance_score -= 10;
+            }
+            if position.trailing_stop_activated {
+                maintenance_score += 10;
+            }
+            if risk_flags
                 .iter()
                 .any(|flag| flag == "consensus_side_opposite")
-                || (execution_advice.market_state == "defensive"
-                    && symbol_status == "fragile"
-                    && pnl_pct_estimate <= 0.0)
             {
-                "exit_recommended"
-            } else if execution_advice.exit_action == "tighten_existing_positions"
-                && (!risk_flags.is_empty() || pnl_pct_estimate < 0.10)
+                maintenance_score -= 20;
+            }
+            if risk_flags
+                .iter()
+                .any(|flag| flag == "price_vs_fast_ema_unfavorable")
             {
-                "hold_but_tighten"
-            } else if execution_advice.market_state == "defensive" && pnl_pct_estimate < 0.0 {
-                "reduce_risk"
-            } else {
+                maintenance_score -= 15;
+            }
+            if risk_flags
+                .iter()
+                .any(|flag| flag == "consensus_trend_against_position")
+            {
+                maintenance_score -= 15;
+            }
+            if risk_flags
+                .iter()
+                .any(|flag| flag == "bollinger_support_weak")
+            {
+                maintenance_score -= 10;
+            }
+            if duration_minutes >= 45 && pnl_pct_estimate < 0.10 {
+                risk_flags.push("position_stalling".to_string());
+                maintenance_score -= 10;
+            }
+            maintenance_score = maintenance_score.clamp(-100, 100);
+
+            let action = if maintenance_score >= 35 {
                 "hold"
+            } else if maintenance_score >= 10 {
+                "hold_but_tighten"
+            } else {
+                "reduce_risk"
             };
 
             let confidence = if risk_flags.len() >= 3 || duration_minutes >= 30 {
@@ -2152,21 +2202,17 @@ fn build_active_position_advice(
             ));
 
             let summary = match action {
-                "exit_recommended" => format!(
-                    "{} {} is losing alignment; exit is favored over waiting.",
-                    position.symbol, position.side
-                ),
                 "hold_but_tighten" => format!(
-                    "{} {} still has room, but risk control should tighten now.",
-                    position.symbol, position.side
+                    "{} {} still has room, but maintenance score {} calls for tighter protection.",
+                    position.symbol, position.side, maintenance_score
                 ),
                 "reduce_risk" => format!(
-                    "{} {} is in a defensive market state; reduce exposure if possible.",
-                    position.symbol, position.side
+                    "{} {} is losing support; maintenance score {} favors risk reduction over passive holding.",
+                    position.symbol, position.side, maintenance_score
                 ),
                 _ => format!(
-                    "{} {} remains acceptable to hold while alignment is intact.",
-                    position.symbol, position.side
+                    "{} {} remains acceptable to hold while alignment is intact (maintenance score {}).",
+                    position.symbol, position.side, maintenance_score
                 ),
             };
 
@@ -2175,6 +2221,7 @@ fn build_active_position_advice(
                 side: position.side.clone(),
                 action: action.to_string(),
                 confidence: confidence.to_string(),
+                maintenance_score,
                 market_state: execution_advice.market_state.clone(),
                 pnl_pct_estimate,
                 duration_minutes,

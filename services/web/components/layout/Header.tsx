@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function Header() {
   return (
     <header className="border-b border-slate-700/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
@@ -16,18 +18,30 @@ export default function Header() {
 
           {/* Navigation */}
           <nav className="flex items-center gap-6">
-            <a href="/" className="text-sm text-slate-400 hover:text-viper-cyan transition-colors">
+            <Link
+              href="/"
+              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+            >
               Dashboard
-            </a>
-            <a href="/trades" className="text-sm text-slate-400 hover:text-viper-cyan transition-colors">
+            </Link>
+            <Link
+              href="/trades"
+              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+            >
               Trades
-            </a>
-            <a href="/positions" className="text-sm text-slate-400 hover:text-viper-cyan transition-colors">
+            </Link>
+            <Link
+              href="/positions"
+              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+            >
               Positions
-            </a>
-            <a href="/settings" className="text-sm text-slate-400 hover:text-viper-cyan transition-colors">
+            </Link>
+            <Link
+              href="/settings"
+              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+            >
               Settings
-            </a>
+            </Link>
           </nav>
 
           {/* Status Indicator */}

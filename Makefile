@@ -17,7 +17,7 @@ KILL_SWITCH           ?= ./scripts/kill-switch-control.sh
 
 CARGO := cargo
 YARN  := yarn
-DOCKER := docker
+CONTAINER_ENGINE ?= $(shell if command -v podman >/dev/null 2>&1 && podman system connection list --format '{{.Default}}' 2>/dev/null | grep -qi '^true$$'; then printf podman; elif command -v docker >/dev/null 2>&1; then printf docker; elif command -v podman >/dev/null 2>&1; then printf podman; else printf docker; fi)
 
 define HEADER
 
@@ -98,5 +98,5 @@ version:
 	@printf "$(YELLOW)→$(NC) Versions:\n"
 	@printf "  $(CYAN)Rust:$(NC) $$($(CARGO) --version 2>/dev/null || echo 'not installed')\n"
 	@printf "  $(CYAN)Yarn:$(NC) $$($(YARN) --version 2>/dev/null || echo 'not installed')\n"
-	@printf "  $(CYAN)Docker:$(NC) $$($(DOCKER) --version 2>/dev/null || echo 'not installed')\n"
-	@printf "  $(CYAN)Docker Compose:$(NC) $$($(DOCKER) compose version 2>/dev/null || echo 'not installed')\n"
+	@printf "  $(CYAN)Container Engine:$(NC) $$($(CONTAINER_ENGINE) --version 2>/dev/null || { command -v $(CONTAINER_ENGINE) >/dev/null 2>&1 && echo '$(CONTAINER_ENGINE) detected'; } || echo 'not installed')\n"
+	@printf "  $(CYAN)Compose Runtime:$(NC) $$(./scripts/compose.sh --help 2>/dev/null | sed -n '/Runtime:/{n;s/^  //;p;q;}' || echo 'not installed')\n"

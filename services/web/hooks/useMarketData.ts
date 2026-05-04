@@ -19,7 +19,9 @@ export function useMarketData() {
         setMarketSignals(data?.items || []);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch market data');
+        setError(
+          err instanceof Error ? err.message : 'Failed to fetch market data'
+        );
       } finally {
         setLoading(false);
       }
@@ -29,14 +31,16 @@ export function useMarketData() {
 
     // Setup WebSocket for real-time updates
     const ws = getWebSocketClient();
-    ws.on('market_signal', (data) => {
-      setMarketSignals([data, ...marketSignals.slice(0, 99)]);
-    });
+    const handleMarketSignal = (data: any) => {
+      const currentSignals = useTradingStore.getState().marketSignals;
+      setMarketSignals([data, ...currentSignals.slice(0, 99)]);
+    };
+    ws.on('market_signal', handleMarketSignal);
 
     return () => {
-      ws.off('market_signal', () => {});
+      ws.off('market_signal', handleMarketSignal);
     };
-  }, []);
+  }, [setMarketSignals]);
 
   return { marketSignals, loading, error };
 }

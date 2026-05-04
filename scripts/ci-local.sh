@@ -54,7 +54,7 @@ host_rust_ready() {
 }
 
 require_docker_compose() {
-  docker compose version >/dev/null 2>&1
+  vt_compose_available
 }
 
 require_rust_builder_image() {
@@ -66,7 +66,7 @@ run_rust_in_docker() {
   shift
 
   vt_step "$label"
-  docker run --rm \
+  vt_container run --rm \
     --user "$(id -u):$(id -g)" \
     -e CARGO_HOME=/tmp/cargo-home \
     -e CARGO_TARGET_DIR=/tmp/cargo-target \
@@ -102,7 +102,7 @@ fi
 vt_print_header "ViperTrade - Local CI"
 
 if [[ "$SKIP_COMPOSE" != "1" ]]; then
-  require_docker_compose || { vt_fail "docker compose not found"; exit 1; }
+  require_docker_compose || { vt_fail "compose runtime not found"; exit 1; }
   [[ -x scripts/compose.sh ]] || { vt_fail "scripts/compose.sh not found or not executable"; exit 1; }
 fi
 

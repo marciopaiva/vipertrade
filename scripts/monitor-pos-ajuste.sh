@@ -3,6 +3,9 @@
 # Uso: ./monitor-pos-ajuste.sh [intervalo_segundos]
 
 INTERVAL=${1:-60}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -27,7 +30,7 @@ while true; do
     echo -e "${YELLOW}📊 VISÃO GERAL${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             'Total Trades: ' || COUNT(*) || 
             ' | Abertos: ' || COUNT(*) FILTER (WHERE status='open') ||
@@ -41,7 +44,7 @@ while true; do
     echo -e "${YELLOW}📈 PERFORMANCE POR MOTIVO DE FECHAMENTO${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             RPAD(close_reason, 20, ' ') || 
             ' | Qtd: ' || LPAD(COUNT(*)::text, 3, ' ') ||
@@ -59,7 +62,7 @@ while true; do
     echo -e "${YELLOW}💹 PERFORMANCE POR SÍMBOLO${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             RPAD(symbol, 10, ' ') || 
             ' | Trades: ' || LPAD(COUNT(*)::text, 3, ' ') ||
@@ -77,7 +80,7 @@ while true; do
     echo -e "${YELLOW}⏱️ DURAÇÃO MÉDIA DAS OPERAÇÕES${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             RPAD(close_reason, 20, ' ') ||
             ' | Avg: ' || LPAD(ROUND(AVG(duration_seconds)/60, 1)::text, 5, ' ') || ' min' ||
@@ -93,7 +96,7 @@ while true; do
     echo -e "${YELLOW}📊 LONG VS SHORT${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             RPAD(side, 6, ' ') ||
             ' | Trades: ' || LPAD(COUNT(*)::text, 3, ' ') ||
@@ -110,7 +113,7 @@ while true; do
     echo -e "${YELLOW}🕐 TRADES POR HORA (últimas 12h)${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             LPAD(EXTRACT(HOUR FROM opened_at)::text || ':00', 6, ' ') ||
             ' | Qtd: ' || LPAD(COUNT(*)::text, 3, ' ') ||
@@ -128,7 +131,7 @@ while true; do
     echo -e "${YELLOW}🔍 ÚLTIMOS 5 TRADES${NC}"
     echo "─────────────────────────────────────────────────────────────"
     
-    docker exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
+    vt_container exec vipertrade-postgres psql -U viper -d vipertrade -t -c "
         SELECT 
             RPAD(symbol, 10, ' ') ||
             RPAD(side, 6, ' ') ||

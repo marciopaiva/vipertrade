@@ -17,7 +17,9 @@ export function useServiceHealth() {
         setServices(data?.services || []);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch service health');
+        setError(
+          err instanceof Error ? err.message : 'Failed to fetch service health'
+        );
       } finally {
         setLoading(false);
       }
@@ -29,7 +31,7 @@ export function useServiceHealth() {
     const interval = setInterval(fetchHealth, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [setServices]);
 
   return { services, loading, error };
 }

@@ -10,8 +10,8 @@ SERVICE="${1:-all}"
 DB_USER="${POSTGRES_USER:-viper}"
 DB_NAME="${POSTGRES_DB:-vipertrade}"
 
-require_docker() {
-  command -v docker >/dev/null 2>&1
+require_container() {
+  vt_container_available
 }
 
 # Helper functions
@@ -34,12 +34,12 @@ print_fail() {
 # Health check functions
 check_postgres() {
   print_service "PostgreSQL"
-  if ! require_docker; then
-    print_fail "Docker"
+  if ! require_container; then
+    print_fail "Container engine"
     return 1
   fi
 
-  if docker exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+  if vt_container exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
     print_ok "PostgreSQL"
     return 0
   else
@@ -50,12 +50,12 @@ check_postgres() {
 
 check_redis() {
   print_service "Redis"
-  if ! require_docker; then
-    print_fail "Docker"
+  if ! require_container; then
+    print_fail "Container engine"
     return 1
   fi
 
-  if docker exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
+  if vt_container exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
     print_ok "Redis"
     return 0
   else
