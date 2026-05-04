@@ -11,7 +11,7 @@ export default function DashboardLoading() {
       <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-6">
         <div className="h-6 bg-slate-700 rounded w-1/3 mb-4" />
         <div className="grid grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
+          {[1, 2, 3].map(i => (
             <div key={i} className="h-20 bg-slate-700/50 rounded" />
           ))}
         </div>
@@ -21,7 +21,7 @@ export default function DashboardLoading() {
       <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-6">
         <div className="h-6 bg-slate-700 rounded w-1/4 mb-4" />
         <div className="grid grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3, 4].map(i => (
             <div key={i} className="h-32 bg-slate-700/50 rounded" />
           ))}
         </div>
@@ -31,7 +31,7 @@ export default function DashboardLoading() {
       <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-6">
         <div className="h-6 bg-slate-700 rounded w-1/4 mb-4" />
         <div className="space-y-3">
-          {[1, 2].map((i) => (
+          {[1, 2].map(i => (
             <div key={i} className="h-24 bg-slate-700/50 rounded" />
           ))}
         </div>
@@ -41,7 +41,7 @@ export default function DashboardLoading() {
       <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-6">
         <div className="h-6 bg-slate-700 rounded w-1/4 mb-4" />
         <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
+          {[1, 2, 3].map(i => (
             <div key={i} className="h-20 bg-slate-700/50 rounded" />
           ))}
         </div>

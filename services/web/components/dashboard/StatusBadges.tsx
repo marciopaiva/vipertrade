@@ -12,7 +12,13 @@ interface MetricCardProps {
   className?: string;
 }
 
-export function MetricCard({ label, value, accent = '#11c4ff', helper, className }: MetricCardProps) {
+export function MetricCard({
+  label,
+  value,
+  accent = '#11c4ff',
+  helper,
+  className,
+}: MetricCardProps) {
   return (
     <Card className={cn('border-opacity-50', className)}>
       <CardHeader className="pb-2">
@@ -21,16 +27,11 @@ export function MetricCard({ label, value, accent = '#11c4ff', helper, className
         </div>
       </CardHeader>
       <CardContent>
-        <div 
-          className="text-2xl font-bold"
-          style={{ color: accent }}
-        >
+        <div className="text-2xl font-bold" style={{ color: accent }}>
           {value}
         </div>
         {helper && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {helper}
-          </div>
+          <div className="text-xs text-muted-foreground mt-1">{helper}</div>
         )}
       </CardContent>
     </Card>
@@ -71,7 +72,11 @@ interface ExecutorStatusBadgeProps {
   className?: string;
 }
 
-export function ExecutorStatusBadge({ enabled, state = 'down', className }: ExecutorStatusBadgeProps) {
+export function ExecutorStatusBadge({
+  enabled,
+  state = 'down',
+  className,
+}: ExecutorStatusBadgeProps) {
   const config = {
     running: {
       label: 'RUNNING',
@@ -101,10 +106,7 @@ interface KillSwitchBadgeProps {
 
 export function KillSwitchBadge({ enabled, className }: KillSwitchBadgeProps) {
   return (
-    <Badge 
-      variant={enabled ? 'destructive' : 'success'} 
-      className={className}
-    >
+    <Badge variant={enabled ? 'destructive' : 'success'} className={className}>
       Kill Switch {enabled ? 'ON' : 'OFF'}
     </Badge>
   );

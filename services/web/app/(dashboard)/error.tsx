@@ -12,17 +12,17 @@ export default function DashboardError({
       <div className="text-center space-y-4">
         {/* Error Icon */}
         <div className="text-4xl">❌</div>
-        
+
         {/* Error Message */}
         <h3 className="text-xl font-bold text-viper-red">Dashboard Error</h3>
-        
+
         {/* Error Details (dev only) */}
         {process.env.NODE_ENV === 'development' && (
           <pre className="text-xs text-slate-400 bg-slate-900/50 p-3 rounded max-w-sm">
             {error.message}
           </pre>
         )}
-        
+
         {/* Action Buttons */}
         <div className="flex gap-3 justify-center">
           <button
@@ -31,7 +31,7 @@ export default function DashboardError({
           >
             Retry
           </button>
-          
+
           <a
             href="/api/health"
             target="_blank"

@@ -6,7 +6,9 @@ FROM ${RUST_BUILDER_IMAGE} AS builder
 
 WORKDIR /usr/src/app
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+
+RUN apt-get update && apt-get install -y pkg-config libssl-dev python3 python3-dev && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
 COPY . .

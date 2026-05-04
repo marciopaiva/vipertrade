@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function DashboardLayout({
   children,
 }: {
@@ -11,20 +13,43 @@ export default function DashboardLayout({
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-viper-cyan">ViperTrade</h1>
             <nav className="flex items-center gap-4">
-              <a href="/" className="text-sm text-slate-400 hover:text-viper-cyan">Dashboard</a>
-              <a href="/analysis" className="text-sm text-slate-400 hover:text-viper-cyan">Analysis</a>
-              <a href="/trades" className="text-sm text-slate-400 hover:text-viper-cyan">Trades</a>
-              <a href="/positions" className="text-sm text-slate-400 hover:text-viper-cyan">Positions</a>
-              <a href="/settings" className="text-sm text-slate-400 hover:text-viper-cyan">Settings</a>
+              <Link
+                href="/"
+                className="text-sm text-slate-400 hover:text-viper-cyan"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/analysis"
+                className="text-sm text-slate-400 hover:text-viper-cyan"
+              >
+                Analysis
+              </Link>
+              <Link
+                href="/trades"
+                className="text-sm text-slate-400 hover:text-viper-cyan"
+              >
+                Trades
+              </Link>
+              <Link
+                href="/positions"
+                className="text-sm text-slate-400 hover:text-viper-cyan"
+              >
+                Positions
+              </Link>
+              <Link
+                href="/settings"
+                className="text-sm text-slate-400 hover:text-viper-cyan"
+              >
+                Settings
+              </Link>
             </nav>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        {children}
-      </main>
+      <main className="container mx-auto px-4 py-6">{children}</main>
     </div>
   );
 }

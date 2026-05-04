@@ -96,7 +96,11 @@ interface AiAnalystData {
     win_rate_pct?: { current?: number; previous?: number; delta?: number };
     expectancy_pct?: { current?: number; previous?: number; delta?: number };
     payoff_ratio?: { current?: number; previous?: number; delta?: number };
-    thesis_invalidated_pct?: { current?: number; previous?: number; delta?: number };
+    thesis_invalidated_pct?: {
+      current?: number;
+      previous?: number;
+      delta?: number;
+    };
     trailing_stop_pct?: { current?: number; previous?: number; delta?: number };
     long_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
     short_avg_pnl_pct?: { current?: number; previous?: number; delta?: number };
@@ -175,37 +179,41 @@ interface DashboardData {
     last_24h?: { total_trades: number; total_pnl: number; win_rate: number };
     last_7d?: { total_trades: number; total_pnl: number; win_rate: number };
   };
-  positions: { items: Array<{
-    trade_id: string;
-    symbol: string;
-    side: string;
-    quantity: number;
-    notional_usdt: number;
-    entry_price: number;
-    opened_at?: string;
-    stop_loss_price?: number;
-    trailing_activation_price?: number;
-    fixed_take_profit_price?: number;
-    break_even_price?: number;
-    trailing_stop_activated?: boolean;
-    trailing_stop_peak_price?: number;
-    trailing_stop_final_distance_pct?: number;
-  }> };
-  trades: { items: Array<{
-    trade_id: string;
-    symbol: string;
-    side: string;
-    status: string;
-    quantity: number;
-    entry_price: number;
-    exit_price?: number;
-    pnl?: number;
-    pnl_pct?: number;
-    close_reason?: string;
-    opened_at: string;
-    closed_at?: string;
-    duration_seconds?: number;
-  }> };
+  positions: {
+    items: Array<{
+      trade_id: string;
+      symbol: string;
+      side: string;
+      quantity: number;
+      notional_usdt: number;
+      entry_price: number;
+      opened_at?: string;
+      stop_loss_price?: number;
+      trailing_activation_price?: number;
+      fixed_take_profit_price?: number;
+      break_even_price?: number;
+      trailing_stop_activated?: boolean;
+      trailing_stop_peak_price?: number;
+      trailing_stop_final_distance_pct?: number;
+    }>;
+  };
+  trades: {
+    items: Array<{
+      trade_id: string;
+      symbol: string;
+      side: string;
+      status: string;
+      quantity: number;
+      entry_price: number;
+      exit_price?: number;
+      pnl?: number;
+      pnl_pct?: number;
+      close_reason?: string;
+      opened_at: string;
+      closed_at?: string;
+      duration_seconds?: number;
+    }>;
+  };
   daily_trades_summary?: { count?: number };
   wallet?: {
     total_equity?: number;
@@ -220,7 +228,16 @@ interface DashboardData {
     account_type?: string;
   };
   services: Array<{ name: string; ok: boolean; latency_ms: number }>;
-  events?: { items?: Array<{ event_id: string; event_type: string; severity: string; timestamp: string; symbol?: string; data?: any }> };
+  events?: {
+    items?: Array<{
+      event_id: string;
+      event_type: string;
+      severity: string;
+      timestamp: string;
+      symbol?: string;
+      data?: any;
+    }>;
+  };
   market_signals?: { items?: any[] | Record<string, any> };
   ai_analyst?: AiAnalystData;
   partial?: boolean;
@@ -235,7 +252,11 @@ function num(value: number | null | undefined, digits = 2) {
 
 function usd(value: number | null | undefined) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '-';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function pct(value: number | null | undefined) {
@@ -248,7 +269,7 @@ function titleCase(value: string | null | undefined) {
   return value
     .replaceAll('_', ' ')
     .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 function toneClasses(severity?: string) {
@@ -272,45 +293,83 @@ function toneClasses(severity?: string) {
 
 function comparativeTone(status?: string) {
   if (status === 'regressed') return toneClasses('fail');
-  if (status === 'mixed' || status === 'insufficient_baseline') return toneClasses('warn');
+  if (status === 'mixed' || status === 'insufficient_baseline')
+    return toneClasses('warn');
   return toneClasses('pass');
 }
 
 // Components
-function WalletCard({ label, amount, rate, accent = '#11c4ff' }: { label: string; amount?: number; rate?: number; accent?: string }) {
+function WalletCard({
+  label,
+  amount,
+  rate,
+  accent = '#11c4ff',
+}: {
+  label: string;
+  amount?: number;
+  rate?: number;
+  accent?: string;
+}) {
   return (
     <Card className="bg-panel/50 border-border">
       <CardContent className="pt-6">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{label}</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
+          {label}
+        </div>
         <div className="text-2xl font-bold" style={{ color: accent }}>
           {usd(amount)}
         </div>
         {rate !== undefined && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {pct(rate)}
-          </div>
+          <div className="text-xs text-muted-foreground mt-1">{pct(rate)}</div>
         )}
       </CardContent>
     </Card>
   );
 }
 
-function MetricCard({ label, value, accent = '#11c4ff', helper }: { label: string; value: string | number; accent?: string; helper?: string }) {
+function MetricCard({
+  label,
+  value,
+  accent = '#11c4ff',
+  helper,
+}: {
+  label: string;
+  value: string | number;
+  accent?: string;
+  helper?: string;
+}) {
   return (
     <Card className="bg-panel/50 border-border">
       <CardContent className="pt-6">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{label}</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
+          {label}
+        </div>
         <div className="text-2xl font-bold" style={{ color: accent }}>
           {value}
         </div>
-        {helper && <div className="text-xs text-muted-foreground mt-1">{helper}</div>}
+        {helper && (
+          <div className="text-xs text-muted-foreground mt-1">{helper}</div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function ServicesGrid({ services }: { services: Array<{ name: string; ok: boolean; latency_ms: number }> }) {
-  const flowOrder = ['bybit', 'market-data', 'strategy', 'executor', 'api', 'monitor', 'analytics', 'backtest'];
+function ServicesGrid({
+  services,
+}: {
+  services: Array<{ name: string; ok: boolean; latency_ms: number }>;
+}) {
+  const flowOrder = [
+    'bybit',
+    'market-data',
+    'strategy',
+    'executor',
+    'api',
+    'monitor',
+    'analytics',
+    'backtest',
+  ];
   const sortedServices = [...services].sort((a, b) => {
     const aIndex = flowOrder.findIndex(f => a.name.includes(f));
     const bIndex = flowOrder.findIndex(f => b.name.includes(f));
@@ -324,22 +383,31 @@ function ServicesGrid({ services }: { services: Array<{ name: string; ok: boolea
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-          {sortedServices.map((service) => (
+          {sortedServices.map(service => (
             <div
               key={service.name}
               className={cn(
                 'p-3 rounded-lg border text-center',
-                service.ok 
-                  ? 'border-green-500/30 bg-green-500/10' 
+                service.ok
+                  ? 'border-green-500/30 bg-green-500/10'
                   : 'border-red-500/30 bg-red-500/10'
               )}
             >
-              <div className="text-xs text-muted-foreground capitalize truncate">{service.name}</div>
-              <div className={cn('text-sm font-semibold mt-1', service.ok ? 'text-green-400' : 'text-red-400')}>
+              <div className="text-xs text-muted-foreground capitalize truncate">
+                {service.name}
+              </div>
+              <div
+                className={cn(
+                  'text-sm font-semibold mt-1',
+                  service.ok ? 'text-green-400' : 'text-red-400'
+                )}
+              >
                 {service.ok ? '✓' : '✗'}
               </div>
               {service.latency_ms > 0 && (
-                <div className="text-xs text-muted-foreground mt-1">{service.latency_ms}ms</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {service.latency_ms}ms
+                </div>
               )}
             </div>
           ))}
@@ -349,28 +417,33 @@ function ServicesGrid({ services }: { services: Array<{ name: string; ok: boolea
   );
 }
 
-function ClosedTradesTable({ trades }: { trades: Array<{
-  trade_id: string;
-  symbol: string;
-  side: string;
-  status: string;
-  quantity: number;
-  entry_price: number;
-  exit_price?: number;
-  pnl?: number;
-  pnl_pct?: number;
-  close_reason?: string;
-  opened_at: string;
-  closed_at?: string;
-  duration_seconds?: number;
-}> }) {
-  const [selectedDay, setSelectedDay] = useState<string>("");
+function ClosedTradesTable({
+  trades,
+}: {
+  trades: Array<{
+    trade_id: string;
+    symbol: string;
+    side: string;
+    status: string;
+    quantity: number;
+    entry_price: number;
+    exit_price?: number;
+    pnl?: number;
+    pnl_pct?: number;
+    close_reason?: string;
+    opened_at: string;
+    closed_at?: string;
+    duration_seconds?: number;
+  }>;
+}) {
+  const [selectedDay, setSelectedDay] = useState<string>('');
   const [page, setPage] = useState(0);
+  const [nowMs] = useState(() => Date.now());
   const pageSize = 10;
 
   // Filter closed trades from last 7 days
   const closedTrades = useMemo(() => {
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = nowMs - 7 * 24 * 60 * 60 * 1000;
     return trades
       .filter(t => {
         if (t.status !== 'closed') return false;
@@ -382,21 +455,29 @@ function ClosedTradesTable({ trades }: { trades: Array<{
         const timeB = Date.parse(a.closed_at || a.opened_at);
         return timeA - timeB;
       });
-  }, [trades]);
+  }, [nowMs, trades]);
 
   // Group by day
   const tradesByDay = useMemo(() => {
-    const groups = new Map<string, { key: string; label: string; items: typeof closedTrades; latestTs: number }>();
-    
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        items: typeof closedTrades;
+        latestTs: number;
+      }
+    >();
+
     closedTrades.forEach(trade => {
       const refTime = Date.parse(trade.closed_at || trade.opened_at);
       if (!Number.isFinite(refTime)) return;
-      
+
       const closedAt = new Date(refTime);
       const key = closedAt.toISOString().slice(0, 10);
       const label = closedAt.toLocaleDateString();
       const current = groups.get(key);
-      
+
       if (current) {
         current.items.push(trade);
         current.latestTs = Math.max(current.latestTs, refTime);
@@ -404,7 +485,7 @@ function ClosedTradesTable({ trades }: { trades: Array<{
         groups.set(key, { key, label, items: [trade], latestTs: refTime });
       }
     });
-    
+
     return Array.from(groups.values()).sort((a, b) => b.latestTs - a.latestTs);
   }, [closedTrades]);
 
@@ -413,30 +494,35 @@ function ClosedTradesTable({ trades }: { trades: Array<{
     if (selectedDay && tradesByDay.some(g => g.key === selectedDay)) {
       return selectedDay;
     }
-    return tradesByDay[0]?.key || "";
+    return tradesByDay[0]?.key || '';
   }, [tradesByDay, selectedDay]);
 
-  const activeGroup = useMemo(() => tradesByDay.find(g => g.key === activeDay) || null, [activeDay, tradesByDay]);
-  const totalPages = useMemo(() => Math.max(1, Math.ceil((activeGroup?.items.length || 0) / pageSize)), [activeGroup]);
+  const activeGroup = useMemo(
+    () => tradesByDay.find(g => g.key === activeDay) || null,
+    [activeDay, tradesByDay]
+  );
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil((activeGroup?.items.length || 0) / pageSize)),
+    [activeGroup]
+  );
   const paginatedTrades = useMemo(() => {
     if (!activeGroup) return [];
     const start = page * pageSize;
     return activeGroup.items.slice(start, start + pageSize);
   }, [activeGroup, page]);
 
-  // Reset page when day changes
-  useEffect(() => {
-    setPage(0);
-  }, [activeDay]);
-
   if (closedTrades.length === 0) {
     return (
       <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-slate-200">Recent Closed Trades</CardTitle>
+          <CardTitle className="text-lg text-slate-200">
+            Recent Closed Trades
+          </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="text-center text-slate-500 py-8">No closed trades in the last 7 days</div>
+          <div className="text-center text-slate-500 py-8">
+            No closed trades in the last 7 days
+          </div>
         </CardContent>
       </Card>
     );
@@ -446,8 +532,13 @@ function ClosedTradesTable({ trades }: { trades: Array<{
     <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg text-slate-200">Recent Closed Trades</CardTitle>
-          <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
+          <CardTitle className="text-lg text-slate-200">
+            Recent Closed Trades
+          </CardTitle>
+          <Badge
+            variant="outline"
+            className="text-xs border-slate-600 text-slate-400"
+          >
             Last 7 days
           </Badge>
         </div>
@@ -461,7 +552,10 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                 key={day.key}
                 variant={activeDay === day.key ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setSelectedDay(day.key)}
+                onClick={() => {
+                  setSelectedDay(day.key);
+                  setPage(0);
+                }}
                 className="text-xs px-2 py-1 h-7"
               >
                 {day.label.split(',')[0]} ({day.items.length})
@@ -492,10 +586,16 @@ function ClosedTradesTable({ trades }: { trades: Array<{
             const reasonLabel = titleCase(trade.close_reason || 'unknown');
             const closedAt = trade.closed_at ? new Date(trade.closed_at) : null;
             const closedDateLabel = closedAt
-              ? closedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              ? closedAt.toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                })
               : '-';
             const closedTimeLabel = closedAt
-              ? closedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              ? closedAt.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
               : '-';
 
             return (
@@ -505,12 +605,18 @@ function ClosedTradesTable({ trades }: { trades: Array<{
               >
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] xl:items-center">
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-200">{trade.symbol}</div>
+                    <div className="text-sm font-bold text-slate-200">
+                      {trade.symbol}
+                    </div>
                   </div>
 
                   <div>
                     <Badge
-                      style={{ backgroundColor: sideColor + '22', color: sideColor, borderColor: sideColor + '55' }}
+                      style={{
+                        backgroundColor: sideColor + '22',
+                        color: sideColor,
+                        borderColor: sideColor + '55',
+                      }}
                       className="h-5 min-w-[58px] justify-center px-1.5 py-0.5 text-[10px]"
                     >
                       {trade.side.toUpperCase()}
@@ -518,11 +624,16 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                   </div>
 
                   <div className="text-right xl:pr-2">
-                    <div className="text-sm font-bold" style={{ color: pnlColor }}>
+                    <div
+                      className="text-sm font-bold"
+                      style={{ color: pnlColor }}
+                    >
                       {pnl ? `$${pnl.toFixed(2)}` : '-'}
                     </div>
                     <div className="text-xs" style={{ color: pnlColor }}>
-                      {trade.pnl_pct ? `${(trade.pnl_pct * 100).toFixed(2)}%` : '-'}
+                      {trade.pnl_pct
+                        ? `${(trade.pnl_pct * 100).toFixed(2)}%`
+                        : '-'}
                     </div>
                   </div>
 
@@ -552,14 +663,20 @@ function ClosedTradesTable({ trades }: { trades: Array<{
                           ${trade.exit_price.toFixed(6)}
                         </Badge>
                       ) : (
-                        <div className="flex h-6 items-center justify-center text-slate-300">-</div>
+                        <div className="flex h-6 items-center justify-center text-slate-300">
+                          -
+                        </div>
                       )}
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-xs text-slate-200">{closedDateLabel}</div>
-                    <div className="text-[11px] text-slate-400">{closedTimeLabel}</div>
+                    <div className="text-xs text-slate-200">
+                      {closedDateLabel}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {closedTimeLabel}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs">
@@ -581,7 +698,8 @@ function ClosedTradesTable({ trades }: { trades: Array<{
         {activeGroup && activeGroup.items.length > pageSize && (
           <div className="flex items-center justify-between mt-3">
             <div className="text-xs text-slate-500">
-              {activeGroup.label} · {activeGroup.items.length} trades · p.{page + 1}/{totalPages}
+              {activeGroup.label} · {activeGroup.items.length} trades · p.
+              {page + 1}/{totalPages}
             </div>
             <div className="flex gap-1">
               <Button
@@ -611,11 +729,12 @@ function ClosedTradesTable({ trades }: { trades: Array<{
 }
 
 export default function DashboardPage() {
-  const [refreshKey, setRefreshKey] = useState(0);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastStableMarketSignals, setLastStableMarketSignals] = useState<Record<string, any>>({});
+  const [lastStableMarketSignals, setLastStableMarketSignals] = useState<
+    Record<string, any>
+  >({});
 
   // Fetch from Next.js API route directly (has market_signals)
   const fetchDashboard = useCallback(async () => {
@@ -633,7 +752,6 @@ export default function DashboardPage() {
 
   const refreshAll = useCallback(async () => {
     await fetchDashboard();
-    setRefreshKey(k => k + 1);
   }, [fetchDashboard]);
 
   useEffect(() => {
@@ -658,15 +776,19 @@ export default function DashboardPage() {
       market_signals: dashboardData.market_signals || { items: {} },
       ai_analyst: dashboardData.ai_analyst,
       partial: Boolean(dashboardData.partial),
-      warnings: Array.isArray(dashboardData.warnings) ? dashboardData.warnings : [],
+      warnings: Array.isArray(dashboardData.warnings)
+        ? dashboardData.warnings
+        : [],
     };
-  }, [dashboardData, refreshKey]);
+  }, [dashboardData]);
 
   const liveMarketSignals = useMemo<Record<string, any>>(() => {
     const items = data?.market_signals?.items;
     if (!items) return {};
     if (Array.isArray(items)) {
-      return Object.fromEntries(items.map((signal: any) => [signal.symbol, signal]));
+      return Object.fromEntries(
+        items.map((signal: any) => [signal.symbol, signal])
+      );
     }
     return items as Record<string, any>;
   }, [data?.market_signals?.items]);
@@ -682,7 +804,6 @@ export default function DashboardPage() {
     return lastStableMarketSignals;
   }, [lastStableMarketSignals, liveMarketSignals]);
 
-  
   // Build token priority from market signals
   const tokenDecisions = useMemo<TokenDecision[]>(() => {
     const signalsObj = effectiveMarketSignals;
@@ -692,9 +813,16 @@ export default function DashboardPage() {
     const events = data?.events?.items || [];
     const positions = data?.positions?.items || [];
 
-    const latestExecutorEventBySymbol = new Map<string, { action?: string; status?: string }>();
+    const latestExecutorEventBySymbol = new Map<
+      string,
+      { action?: string; status?: string }
+    >();
     for (const event of events) {
-      if (event.event_type !== 'executor_event_processed' || !event.symbol || latestExecutorEventBySymbol.has(event.symbol)) {
+      if (
+        event.event_type !== 'executor_event_processed' ||
+        !event.symbol ||
+        latestExecutorEventBySymbol.has(event.symbol)
+      ) {
         continue;
       }
       latestExecutorEventBySymbol.set(event.symbol, {
@@ -702,92 +830,121 @@ export default function DashboardPage() {
         status: event.data?.status ? String(event.data.status) : undefined,
       });
     }
-    
-    return signalsArray.map((signal: any) => {
-      const consensusSide = signal.consensus_side || signal.regime || 'neutral';
-      const consensusCount = signal.consensus_count || 0;
-      const exchanges = signal.exchanges_available || 0;
-      const executorEvent = latestExecutorEventBySymbol.get(signal.symbol);
-      const openPosition = positions.find((position) => position.symbol === signal.symbol);
-      
-      let stateLabel = 'Watching';
-      let stateTone: 'positive' | 'negative' | 'neutral' = 'neutral';
-      let stateContext: string | undefined;
-      let consensusLabel = 'Mixed Consensus';
-      
-      if (consensusSide === 'bullish' && consensusCount >= 2) {
-        consensusLabel = 'Bullish Consensus';
-      } else if (consensusSide === 'bearish' && consensusCount >= 2) {
-        consensusLabel = 'Bearish Consensus';
-      } else if (consensusSide === 'bullish') {
-        consensusLabel = 'Bullish Watch';
-      } else if (consensusSide === 'bearish') {
-        consensusLabel = 'Bearish Watch';
-      }
 
-      if (openPosition) {
-        stateLabel = `Open ${String(openPosition.side)}`;
-        stateTone = String(openPosition.side).toLowerCase() === 'long' ? 'positive' : 'negative';
-        stateContext = `${usd(openPosition.notional_usdt)} live`;
-      } else if (executorEvent?.status === 'paper_open') {
-        const action = String(executorEvent.action || '').toUpperCase();
-        stateLabel = action === 'ENTER_LONG' ? 'Enter Long' : action === 'ENTER_SHORT' ? 'Enter Short' : 'Opening';
-        stateTone = action === 'ENTER_LONG' ? 'positive' : action === 'ENTER_SHORT' ? 'negative' : 'neutral';
-        stateContext = 'Executor accepted';
-      } else if (executorEvent?.status === 'ignored_hold') {
-        stateLabel = 'Hold';
-        stateTone = 'neutral';
-        stateContext = 'Strategy blocked entry';
-      } else if (executorEvent?.status?.startsWith('blocked_')) {
-        stateLabel = 'Blocked';
-        stateTone = 'neutral';
-        stateContext = titleCase(executorEvent.status);
-      }
-      
-      const bybitAligned = consensusSide !== 'neutral' && (signal.bybit_regime || 'neutral') === consensusSide;
-      const hasDivergence = exchanges > 0 && consensusCount < exchanges;
-      
-      return {
-        symbol: signal.symbol,
-        regime: signal.regime || 'neutral',
-        consensusSide,
-        consensusLabel,
-        bybitRegime: signal.bybit_regime || 'neutral',
-        consensusCount,
-        exchangesAvailable: exchanges,
-        trendScore: signal.trend_score || 0,
-        stateLabel,
-        stateTone,
-        stateContext,
-        bybitAligned,
-        hasDivergence,
-      };
-    }).sort((a: any, b: any) => {
-      const tonePriority: Record<string, number> = { positive: 0, negative: 1, neutral: 2 };
-      return tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
-             b.consensusCount - a.consensusCount ||
-             Math.abs(b.trendScore) - Math.abs(a.trendScore);
-    });
+    return signalsArray
+      .map((signal: any) => {
+        const consensusSide =
+          signal.consensus_side || signal.regime || 'neutral';
+        const consensusCount = signal.consensus_count || 0;
+        const exchanges = signal.exchanges_available || 0;
+        const executorEvent = latestExecutorEventBySymbol.get(signal.symbol);
+        const openPosition = positions.find(
+          position => position.symbol === signal.symbol
+        );
+
+        let stateLabel = 'Watching';
+        let stateTone: 'positive' | 'negative' | 'neutral' = 'neutral';
+        let stateContext: string | undefined;
+        let consensusLabel = 'Mixed Consensus';
+
+        if (consensusSide === 'bullish' && consensusCount >= 2) {
+          consensusLabel = 'Bullish Consensus';
+        } else if (consensusSide === 'bearish' && consensusCount >= 2) {
+          consensusLabel = 'Bearish Consensus';
+        } else if (consensusSide === 'bullish') {
+          consensusLabel = 'Bullish Watch';
+        } else if (consensusSide === 'bearish') {
+          consensusLabel = 'Bearish Watch';
+        }
+
+        if (openPosition) {
+          stateLabel = `Open ${String(openPosition.side)}`;
+          stateTone =
+            String(openPosition.side).toLowerCase() === 'long'
+              ? 'positive'
+              : 'negative';
+          stateContext = `${usd(openPosition.notional_usdt)} live`;
+        } else if (executorEvent?.status === 'paper_open') {
+          const action = String(executorEvent.action || '').toUpperCase();
+          stateLabel =
+            action === 'ENTER_LONG'
+              ? 'Enter Long'
+              : action === 'ENTER_SHORT'
+                ? 'Enter Short'
+                : 'Opening';
+          stateTone =
+            action === 'ENTER_LONG'
+              ? 'positive'
+              : action === 'ENTER_SHORT'
+                ? 'negative'
+                : 'neutral';
+          stateContext = 'Executor accepted';
+        } else if (executorEvent?.status === 'ignored_hold') {
+          stateLabel = 'Hold';
+          stateTone = 'neutral';
+          stateContext = 'Strategy blocked entry';
+        } else if (executorEvent?.status?.startsWith('blocked_')) {
+          stateLabel = 'Blocked';
+          stateTone = 'neutral';
+          stateContext = titleCase(executorEvent.status);
+        }
+
+        const bybitAligned =
+          consensusSide !== 'neutral' &&
+          (signal.bybit_regime || 'neutral') === consensusSide;
+        const hasDivergence = exchanges > 0 && consensusCount < exchanges;
+
+        return {
+          symbol: signal.symbol,
+          regime: signal.regime || 'neutral',
+          consensusSide,
+          consensusLabel,
+          bybitRegime: signal.bybit_regime || 'neutral',
+          consensusCount,
+          exchangesAvailable: exchanges,
+          trendScore: signal.trend_score || 0,
+          stateLabel,
+          stateTone,
+          stateContext,
+          bybitAligned,
+          hasDivergence,
+        };
+      })
+      .sort((a: any, b: any) => {
+        const tonePriority: Record<string, number> = {
+          positive: 0,
+          negative: 1,
+          neutral: 2,
+        };
+        return (
+          tonePriority[a.stateTone] - tonePriority[b.stateTone] ||
+          b.consensusCount - a.consensusCount ||
+          Math.abs(b.trendScore) - Math.abs(a.trendScore)
+        );
+      });
   }, [data?.events?.items, data?.positions?.items, effectiveMarketSignals]);
 
   const flowContext = useMemo<FlowContext>(() => {
     const signalsObj = effectiveMarketSignals;
     const latestExecutorEvent = (data?.events?.items || []).find(
-      (event) => event.event_type === 'executor_event_processed' && event.symbol
+      event => event.event_type === 'executor_event_processed' && event.symbol
     );
     const leadToken = latestExecutorEvent?.symbol
-      ? tokenDecisions.find((token) => token.symbol === latestExecutorEvent.symbol) || tokenDecisions[0]
+      ? tokenDecisions.find(
+          token => token.symbol === latestExecutorEvent.symbol
+        ) || tokenDecisions[0]
       : tokenDecisions[0];
     const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
 
     const openPosition = (data?.positions?.items || [])[0];
-    const lastClosedTrade = (data?.trades?.items || []).find((trade) => trade.status === 'closed');
+    const lastClosedTrade = (data?.trades?.items || []).find(
+      trade => trade.status === 'closed'
+    );
 
-    const strategyState = leadToken
-      ? leadToken.stateLabel
-      : 'scan idle';
+    const strategyState = leadToken ? leadToken.stateLabel : 'scan idle';
     const strategyContext = leadSignal
-      ? leadToken?.stateContext || `${leadSignal.consensus_count || 0}/${leadSignal.exchanges_available || 0} consensus`
+      ? leadToken?.stateContext ||
+        `${leadSignal.consensus_count || 0}/${leadSignal.exchanges_available || 0} consensus`
       : undefined;
 
     const executorSymbol =
@@ -815,7 +972,13 @@ export default function DashboardPage() {
       executorAction,
       executorContext,
     };
-  }, [data?.events?.items, data?.positions?.items, data?.trades?.items, effectiveMarketSignals, tokenDecisions]);
+  }, [
+    data?.events?.items,
+    data?.positions?.items,
+    data?.trades?.items,
+    effectiveMarketSignals,
+    tokenDecisions,
+  ]);
 
   if (loading && !dashboardData) {
     return (
@@ -828,7 +991,11 @@ export default function DashboardPage() {
     );
   }
 
-  const tradingMode = data?.status?.trading_mode?.toLowerCase() as 'paper' | 'testnet' | 'mainnet' || 'paper';
+  const tradingMode =
+    (data?.status?.trading_mode?.toLowerCase() as
+      | 'paper'
+      | 'testnet'
+      | 'mainnet') || 'paper';
   const executorEnabled = data?.status?.executor?.enabled ?? false;
 
   return (
@@ -856,30 +1023,68 @@ export default function DashboardPage() {
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base text-slate-200">Wallet Overview</CardTitle>
+              <CardTitle className="text-base text-slate-200">
+                Wallet Overview
+              </CardTitle>
             </div>
           </CardHeader>
           <CardContent className="pt-0 space-y-4">
             <div className="relative overflow-hidden rounded-[28px] border border-slate-700/60 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.74),rgba(15,23,42,0.42))] px-6 py-5">
               <div className="absolute right-4 top-4 hidden sm:block">
-                <svg width="120" height="56" viewBox="0 0 120 56" className="opacity-80">
+                <svg
+                  width="120"
+                  height="56"
+                  viewBox="0 0 120 56"
+                  className="opacity-80"
+                >
                   <defs>
-                    <linearGradient id="walletLine" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <linearGradient
+                      id="walletLine"
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="0%"
+                    >
                       <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
-                      <stop offset="100%" stopColor="#34d399" stopOpacity="0.95" />
+                      <stop
+                        offset="100%"
+                        stopColor="#34d399"
+                        stopOpacity="0.95"
+                      />
                     </linearGradient>
-                    <linearGradient id="walletFill" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.28" />
+                    <linearGradient
+                      id="walletFill"
+                      x1="0%"
+                      y1="0%"
+                      x2="0%"
+                      y2="100%"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="#10b981"
+                        stopOpacity="0.28"
+                      />
                       <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
                     </linearGradient>
                   </defs>
-                  <path d="M10 42 L34 36 L58 30 L82 18 L110 6" fill="none" stroke="url(#walletLine)" strokeWidth="2.5" strokeLinecap="round" />
-                  <path d="M10 42 L34 36 L58 30 L82 18 L110 6 L110 56 L10 56 Z" fill="url(#walletFill)" />
+                  <path
+                    d="M10 42 L34 36 L58 30 L82 18 L110 6"
+                    fill="none"
+                    stroke="url(#walletLine)"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M10 42 L34 36 L58 30 L82 18 L110 6 L110 56 L10 56 Z"
+                    fill="url(#walletFill)"
+                  />
                 </svg>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-[11px] uppercase tracking-[0.32em] text-slate-500">Portfolio</div>
+                <div className="text-[11px] uppercase tracking-[0.32em] text-slate-500">
+                  Portfolio
+                </div>
                 <Badge className="border-emerald-500/40 bg-emerald-500/10 text-[10px] tracking-[0.18em] text-emerald-300">
                   Live
                 </Badge>
@@ -889,12 +1094,14 @@ export default function DashboardPage() {
                 <div className="text-5xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-6xl">
                   {usd(data?.wallet?.total_equity)}
                 </div>
-                <div className={cn(
-                  'rounded-full border px-3 py-1 text-sm font-semibold',
-                  (data?.performance?.last_7d?.total_pnl ?? 0) >= 0
-                    ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-                    : 'border-red-500/35 bg-red-500/10 text-red-300'
-                )}>
+                <div
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-sm font-semibold',
+                    (data?.performance?.last_7d?.total_pnl ?? 0) >= 0
+                      ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                      : 'border-red-500/35 bg-red-500/10 text-red-300'
+                  )}
+                >
                   {usd(data?.performance?.last_7d?.total_pnl)} · 7d
                 </div>
               </div>
@@ -903,13 +1110,25 @@ export default function DashboardPage() {
                 <div className="text-slate-500">
                   Profile{' '}
                   <span className="font-semibold text-slate-200">
-                    {data?.status?.trade_profile_label || data?.status?.trading_profile || 'MEDIUM'}
+                    {data?.status?.trade_profile_label ||
+                      data?.status?.trading_profile ||
+                      'MEDIUM'}
                   </span>
                 </div>
                 <div className="text-slate-500">
-                  Open <span className="font-semibold text-violet-300">{data?.positions?.items?.length || 0}</span>
+                  Open{' '}
+                  <span className="font-semibold text-violet-300">
+                    {data?.positions?.items?.length || 0}
+                  </span>
                 </div>
-                <div className={cn('font-medium', (data?.wallet?.unrealized_pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                <div
+                  className={cn(
+                    'font-medium',
+                    (data?.wallet?.unrealized_pnl ?? 0) >= 0
+                      ? 'text-emerald-300'
+                      : 'text-red-300'
+                  )}
+                >
                   {usd(data?.wallet?.unrealized_pnl)} unrealized
                 </div>
               </div>
@@ -917,8 +1136,12 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Deposited</div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">{usd(data?.wallet?.wallet_balance)}</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  Deposited
+                </div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
+                  {usd(data?.wallet?.wallet_balance)}
+                </div>
                 <div className="mt-2 text-xs text-slate-500">
                   {(data?.wallet?.margin_balance ?? 0) > 0
                     ? `${(((data?.wallet?.initial_margin || 0) / Math.max(1, data?.wallet?.margin_balance || 1)) * 100).toFixed(0)}% active`
@@ -930,8 +1153,17 @@ export default function DashboardPage() {
               <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Earnings</div>
-                    <div className={cn('mt-3 text-[2rem] font-semibold tracking-[-0.03em]', (data?.performance?.last_24h?.total_pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300')}>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      Earnings
+                    </div>
+                    <div
+                      className={cn(
+                        'mt-3 text-[2rem] font-semibold tracking-[-0.03em]',
+                        (data?.performance?.last_24h?.total_pnl ?? 0) >= 0
+                          ? 'text-emerald-300'
+                          : 'text-red-300'
+                      )}
+                    >
                       {usd(data?.performance?.last_24h?.total_pnl)}
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
@@ -946,8 +1178,12 @@ export default function DashboardPage() {
               </div>
 
               <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/[0.08] p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Active Trading</div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">{usd(data?.wallet?.margin_balance)}</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  Active Trading
+                </div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
+                  {usd(data?.wallet?.margin_balance)}
+                </div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-emerald-300">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" />
                   Working for you
@@ -955,8 +1191,12 @@ export default function DashboardPage() {
               </div>
 
               <div className="rounded-[20px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Idle Funds</div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-amber-300">{usd(data?.wallet?.available_balance)}</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  Idle Funds
+                </div>
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-amber-300">
+                  {usd(data?.wallet?.available_balance)}
+                </div>
                 <div className="mt-2 text-xs text-amber-200/80">
                   Ready capital
                 </div>
@@ -966,9 +1206,13 @@ export default function DashboardPage() {
         </Card>
 
         {/* Positions */}
-        <PositionTable 
-          positions={data?.positions?.items || []} 
-          marketSignals={data?.market_signals?.items ? Object.values(data.market_signals.items as any) : []}
+        <PositionTable
+          positions={data?.positions?.items || []}
+          marketSignals={
+            data?.market_signals?.items
+              ? Object.values(data.market_signals.items as any)
+              : []
+          }
         />
 
         {/* Closed Trades */}
@@ -977,7 +1221,9 @@ export default function DashboardPage() {
         {/* Architecture Flow */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-1">
-            <CardTitle className="text-base text-slate-200">Architecture Flow</CardTitle>
+            <CardTitle className="text-base text-slate-200">
+              Architecture Flow
+            </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <ServiceFlowDiagram
@@ -987,7 +1233,11 @@ export default function DashboardPage() {
               flowContext={flowContext}
               activeSignalsCount={Object.keys(effectiveMarketSignals).length}
               openPositionsCount={data?.positions?.items?.length || 0}
-              closedTradesCount={(data?.trades?.items || []).filter((trade) => trade.status === 'closed').length}
+              closedTradesCount={
+                (data?.trades?.items || []).filter(
+                  trade => trade.status === 'closed'
+                ).length
+              }
             />
           </CardContent>
         </Card>
