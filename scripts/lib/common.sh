@@ -51,6 +51,186 @@ vt_require_cmd() {
   fi
 }
 
+vt_container_engine() {
+  if [[ -n "${VT_CONTAINER_ENGINE:-}" ]]; then
+    printf '%s\n' "$VT_CONTAINER_ENGINE"
+    return 0
+  fi
+
+  if [[ -n "${CONTAINER_ENGINE:-}" ]]; then
+    printf '%s\n' "$CONTAINER_ENGINE"
+    return 0
+  fi
+
+  if command -v podman >/dev/null 2>&1 && vt_podman_remote_enabled; then
+    printf 'podman\n'
+    return 0
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    printf 'docker\n'
+    return 0
+  fi
+
+  if command -v podman >/dev/null 2>&1; then
+    printf 'podman\n'
+    return 0
+  fi
+
+  vt_fail "container engine not found (install docker or podman)"
+  return 1
+}
+
+vt_container() {
+  local engine
+  engine="$(vt_container_engine)" || return 1
+  if [[ "$engine" == "podman" ]]; then
+    if vt_podman_remote_enabled; then
+      "$engine" --remote "$@"
+      return
+    fi
+
+    local -a podman_args=()
+    read -r -a podman_args <<< "${VT_PODMAN_ARGS:---cgroup-manager=cgroupfs}"
+    "$engine" "${podman_args[@]}" "$@"
+    return
+  fi
+  "$engine" "$@"
+}
+
+vt_podman_remote_enabled() {
+  case "${VT_PODMAN_REMOTE:-auto}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    0|false|FALSE|no|NO)
+      return 1
+      ;;
+  esac
+
+  podman system connection list --format '{{.Default}}' 2>/dev/null | grep -qi '^true$'
+}
+
+vt_container_available() {
+  vt_container_engine >/dev/null
+}
+
+vt_compose_available() {
+  local engine
+  engine="$(vt_container_engine 2>/dev/null || true)"
+
+  if [[ -n "${VT_COMPOSE_COMMAND:-}" ]]; then
+    return 0
+  fi
+
+  if [[ "$engine" == "docker" ]] && command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$engine" != "podman" ]]; then
+    return 1
+  fi
+
+  if command -v podman-compose >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v podman >/dev/null 2>&1; then
+    if vt_podman_remote_enabled && podman --remote compose version >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if podman --cgroup-manager=cgroupfs compose version >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+vt_podman_compose_args() {
+  if vt_podman_remote_enabled; then
+    printf '%s\n' "${VT_PODMAN_REMOTE_ARGS:-}"
+    return
+  fi
+
+  printf '%s\n' "${VT_PODMAN_ARGS:---cgroup-manager=cgroupfs}"
+}
+
+vt_compose_label() {
+  local engine
+  engine="$(vt_container_engine 2>/dev/null || true)"
+
+  if [[ -n "${VT_COMPOSE_COMMAND:-}" ]]; then
+    printf '%s\n' "$VT_COMPOSE_COMMAND"
+  elif [[ "$engine" == "docker" ]] && command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    printf 'docker compose\n'
+  elif [[ "$engine" == "podman" ]] && command -v podman-compose >/dev/null 2>&1; then
+    if vt_podman_remote_enabled; then
+      printf 'podman-compose (podman --remote)\n'
+    else
+      printf 'podman-compose\n'
+    fi
+  elif [[ "$engine" == "podman" ]] && command -v podman >/dev/null 2>&1; then
+    if vt_podman_remote_enabled && podman --remote compose version >/dev/null 2>&1; then
+      printf 'podman --remote compose\n'
+    elif podman --cgroup-manager=cgroupfs compose version >/dev/null 2>&1; then
+      printf 'podman compose\n'
+    else
+      printf 'compose unavailable\n'
+    fi
+  else
+    printf 'compose unavailable\n'
+  fi
+}
+
+vt_compose() {
+  local engine
+  engine="$(vt_container_engine)" || return 1
+
+  if [[ -n "${VT_COMPOSE_COMMAND:-}" ]]; then
+    local -a command_parts=()
+    read -r -a command_parts <<< "$VT_COMPOSE_COMMAND"
+    "${command_parts[@]}" "$@"
+    return 0
+  fi
+
+  if [[ "$engine" == "docker" ]] && command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+
+  if [[ "$engine" != "podman" ]]; then
+    vt_fail "compose runtime not found for container engine: $engine"
+    return 1
+  fi
+
+  if command -v podman-compose >/dev/null 2>&1; then
+    if vt_podman_remote_enabled; then
+      podman-compose --podman-path "$VT_ROOT_DIR/scripts/podman-remote.sh" "$@"
+      return
+    fi
+
+    podman-compose --podman-args="$(vt_podman_compose_args)" "$@"
+    return
+  fi
+
+  if command -v podman >/dev/null 2>&1; then
+    if vt_podman_remote_enabled && podman --remote compose version >/dev/null 2>&1; then
+      podman --remote compose "$@"
+      return
+    fi
+
+    local -a podman_args=()
+    read -r -a podman_args <<< "${VT_PODMAN_ARGS:---cgroup-manager=cgroupfs}"
+    podman "${podman_args[@]}" compose "$@"
+    return
+  fi
+
+  vt_fail "compose runtime not found (docker compose, podman compose, or podman-compose)"
+  return 1
+}
+
 vt_prepare_host_rust_env() {
   # Fedora 43 ships Python 3.14 while PyO3 0.21.x officially supports up to 3.12.
   # Keep host-side validation usable until the PyO3 dependency is upgraded.
@@ -65,7 +245,7 @@ vt_host_rust_ready() {
 
 vt_require_rust_builder_image() {
   local image_name="$1"
-  docker image inspect "$image_name" >/dev/null 2>&1
+  vt_container image inspect "$image_name" >/dev/null 2>&1
 }
 
 vt_run_rust_check() {
@@ -81,8 +261,8 @@ vt_run_rust_check() {
     return 0
   fi
 
-  if ! command -v docker >/dev/null 2>&1; then
-    vt_fail "cargo fmt/clippy are unavailable on the host and docker was not found"
+  if ! vt_container_available; then
+    vt_fail "cargo fmt/clippy are unavailable on the host and no container engine was found"
     return 1
   fi
 
@@ -93,7 +273,7 @@ vt_run_rust_check() {
 
   vt_warn "rustfmt/clippy are unavailable on the host; using $image_name"
   vt_step "$label"
-  docker run --rm \
+  vt_container run --rm \
     --user "$(id -u):$(id -g)" \
     -e CARGO_HOME=/tmp/cargo-home \
     -e CARGO_TARGET_DIR=/tmp/cargo-target \

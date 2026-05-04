@@ -1,4 +1,4 @@
-# Release Checklist (WSL Fedora + Docker Desktop)
+# Release Checklist (WSL Fedora + Container Desktop)
 
 ## Preflight
 
@@ -14,7 +14,7 @@
   - `make compose-up`
   - `make validate-runtime`
 - Confirm subscribers:
-  - `docker exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
+  - `${CONTAINER_ENGINE:-podman} exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
 - Confirm strategy/executor activity:
   - `./scripts/compose.sh logs --tail 80 strategy`
   - `./scripts/compose.sh logs --tail 80 executor`

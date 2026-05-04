@@ -35,9 +35,9 @@ run_tupa() {
     return
   fi
 
-  if command -v docker >/dev/null 2>&1 \
+  if vt_container_available \
     && [[ -f "$TUPALANG_DIR/Cargo.toml" ]] \
-    && docker image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
+    && vt_container image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
     for arg in "$@"; do
       if [[ "$arg" == "$PIPELINE_FILE" ]]; then
         args+=("/workspace/$PIPELINE_FILE")
@@ -46,7 +46,7 @@ run_tupa() {
       fi
     done
 
-    docker run --rm \
+    vt_container run --rm \
       --user "$(id -u):$(id -g)" \
       -e CARGO_HOME=/tmp/cargo-home \
       -e CARGO_TARGET_DIR=/tmp/cargo-target \
@@ -60,18 +60,18 @@ run_tupa() {
     return
   fi
 
-  if ! command -v docker >/dev/null 2>&1; then
-    vt_fail "'$TUPA_BIN' not found and docker is unavailable"
+  if ! vt_container_available; then
+    vt_fail "'$TUPA_BIN' not found and no container engine is available"
     return 1
   fi
 
-  if ! docker image inspect "$TUPA_DOCKER_IMAGE" >/dev/null 2>&1; then
+  if ! vt_container image inspect "$TUPA_DOCKER_IMAGE" >/dev/null 2>&1; then
     vt_fail "'$TUPA_BIN' not found and image $TUPA_DOCKER_IMAGE is unavailable"
     vt_warn "start the stack or build the strategy image before validation"
     return 1
   fi
 
-  docker run --rm \
+  vt_container run --rm \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp \
     -v "$ROOT_DIR:/workspace" \
@@ -98,8 +98,8 @@ main() {
 
   if command -v "$TUPA_BIN" >/dev/null 2>&1; then
     vt_info "Using local Tupa CLI: $(command -v "$TUPA_BIN")"
-  elif [[ -f "$TUPALANG_DIR/Cargo.toml" ]] && command -v docker >/dev/null 2>&1 \
-    && docker image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
+  elif [[ -f "$TUPALANG_DIR/Cargo.toml" ]] && vt_container_available \
+    && vt_container image inspect "$TUPALANG_BUILDER_IMAGE" >/dev/null 2>&1; then
     vt_warn "'$TUPA_BIN' not found on the host; using tupa-cli from $TUPALANG_DIR via $TUPALANG_BUILDER_IMAGE"
   else
     vt_warn "'$TUPA_BIN' not found on the host; using $TUPA_DOCKER_IMAGE"

@@ -9,7 +9,7 @@
 
 <p align="center"><strong>Auditable algorithmic trading with typed strategy policy and live operational telemetry.</strong></p>
 
-<p align="center">Rust microservices, TupaLang-driven strategy policy, Docker runtime parity, and operator-first observability.</p>
+<p align="center">Rust microservices, TupaLang-driven strategy policy, container runtime parity, and operator-first observability.</p>
 
 <p align="center">
   <a href="https://github.com/marciopaiva/vipertrade/actions/workflows/ci.yml">
@@ -20,7 +20,7 @@
   </a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.83-black?logo=rust" />
   <img alt="TupaLang" src="https://img.shields.io/badge/TupaLang-typed%20strategy%20runtime-0ea5e9" />
-  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
+  <img alt="Container Compose" src="https://img.shields.io/badge/Container-Compose-2496ED" />
   <img alt="Modes" src="https://img.shields.io/badge/Modes-paper%20%7C%20testnet%20%7C%20mainnet-0f766e" />
 </p>
 
@@ -108,6 +108,12 @@ make compose-up
 make health
 ```
 
+The local scripts auto-detect Docker or Podman. To force Podman explicitly:
+
+```bash
+CONTAINER_ENGINE=podman VT_COMPOSE_COMMAND="podman compose" make compose-up
+```
+
 Open:
 
 - Web dashboard: `http://localhost:3000`
@@ -167,7 +173,7 @@ This keeps the operational model stable while the execution surface evolves.
 - deterministic service behavior
 - operator-first runtime visibility
 - health checks and kill-switch controls
-- Docker-based runtime parity
+- Docker/Podman-based runtime parity
 - replayable validation and CI discipline
 - audit-friendly decision history
 - staged progression from paper to real execution
@@ -217,14 +223,14 @@ CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh
 After building the base images, you can validate inside the standard builder image:
 
 ```bash
-docker run --rm \
+${CONTAINER_ENGINE:-podman} run --rm \
   -e PYO3_PYTHON=/usr/bin/python3 \
   -v "$PWD":/work \
   -w /work \
   vipertrade-base-rust-builder:1.83 \
   cargo check --locked
 
-docker run --rm \
+${CONTAINER_ENGINE:-podman} run --rm \
   -e PYO3_PYTHON=/usr/bin/python3 \
   -v "$PWD":/work \
   -w /work \
