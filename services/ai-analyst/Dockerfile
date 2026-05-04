@@ -20,7 +20,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates libssl3 libpython3.11 curl netcat-openbsd && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/src/app/target/release/viper-ai-analyst /usr/local/bin/viper-ai-analyst
-COPY --from=builder /usr/src/app/config/analysts /app/config/analysts
+COPY --from=builder /usr/src/app/config /app/config
 COPY scripts/docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
 RUN chmod +x /usr/local/bin/wait-for-deps.sh
 

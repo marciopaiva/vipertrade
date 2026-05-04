@@ -37,6 +37,7 @@ RUN chmod +x /usr/local/bin/tupa && ls -l /usr/local/bin/tupa
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-strategy /usr/local/bin/viper-strategy
+COPY --from=builder /usr/src/app/config /app/config
 COPY scripts/docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
 RUN chmod +x /usr/local/bin/wait-for-deps.sh
 

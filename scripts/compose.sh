@@ -43,16 +43,16 @@ show_help() {
   echo "  $0 down"
   echo ""
   echo "Runtime:"
-  echo "  docker compose"
+  echo "  $(vt_compose_label)"
 }
 
 run_compose() {
-  if ! docker compose version >/dev/null 2>&1; then
-    print_fail "docker compose not found"
+  if ! vt_compose_available; then
+    print_fail "compose runtime not found"
     exit 1
   fi
 
-  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  vt_compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 run_down_tolerant() {
@@ -78,7 +78,7 @@ main() {
 
   cd "$COMPOSE_DIR"
 
-  print_step "Provider: docker compose"
+  print_step "Provider: $(vt_compose_label)"
   print_step "Compose file: $COMPOSE_FILE"
 
   if [[ "$command" == "down" ]]; then

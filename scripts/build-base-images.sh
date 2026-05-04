@@ -41,10 +41,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
   exit 0
 fi
 
-vt_require_cmd docker
+vt_container_available || exit 1
 
 vt_print_header "ViperTrade - Build Base Images"
-vt_info "ENGINE=docker"
+vt_info "ENGINE=$(vt_container_engine)"
 vt_info "RUST_BUILDER_IMAGE=$RUST_BUILDER_IMAGE"
 vt_info "RUST_RUNTIME_IMAGE=$RUST_RUNTIME_IMAGE"
 vt_info "STRATEGY_BUILDER_IMAGE=$STRATEGY_BUILDER_IMAGE"
@@ -52,14 +52,14 @@ vt_info "STRATEGY_RUNTIME_IMAGE=$STRATEGY_RUNTIME_IMAGE"
 vt_info "WEB_BASE_IMAGE=$WEB_BASE_IMAGE"
 
 vt_step "Building rust builder"
-docker build -f "$BASE_DIR/rust-builder.Dockerfile" --build-arg RUST_VERSION="$RUST_VERSION" -t "$RUST_BUILDER_IMAGE" "$ROOT_DIR"
+vt_container build -f "$BASE_DIR/rust-builder.Dockerfile" --build-arg RUST_VERSION="$RUST_VERSION" -t "$RUST_BUILDER_IMAGE" "$ROOT_DIR"
 vt_step "Building rust runtime"
-docker build -f "$BASE_DIR/rust-runtime.Dockerfile" -t "$RUST_RUNTIME_IMAGE" "$ROOT_DIR"
+vt_container build -f "$BASE_DIR/rust-runtime.Dockerfile" -t "$RUST_RUNTIME_IMAGE" "$ROOT_DIR"
 vt_step "Building strategy builder"
-docker build -f "$BASE_DIR/strategy-builder.Dockerfile" --build-arg RUST_VERSION="$RUST_VERSION" -t "$STRATEGY_BUILDER_IMAGE" "$ROOT_DIR"
+vt_container build -f "$BASE_DIR/strategy-builder.Dockerfile" --build-arg RUST_VERSION="$RUST_VERSION" -t "$STRATEGY_BUILDER_IMAGE" "$ROOT_DIR"
 vt_step "Building strategy runtime"
-docker build -f "$BASE_DIR/strategy-runtime.Dockerfile" -t "$STRATEGY_RUNTIME_IMAGE" "$ROOT_DIR"
+vt_container build -f "$BASE_DIR/strategy-runtime.Dockerfile" -t "$STRATEGY_RUNTIME_IMAGE" "$ROOT_DIR"
 vt_step "Building web base image"
-docker build -f "$BASE_DIR/web-node.Dockerfile" --build-arg NODE_VERSION="$NODE_VERSION" -t "$WEB_BASE_IMAGE" "$ROOT_DIR"
+vt_container build -f "$BASE_DIR/web-node.Dockerfile" --build-arg NODE_VERSION="$NODE_VERSION" -t "$WEB_BASE_IMAGE" "$ROOT_DIR"
 
 vt_ok "Base images build complete"

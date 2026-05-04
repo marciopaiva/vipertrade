@@ -264,9 +264,29 @@ struct ExecutionAdviceSnapshot {
     priority_actions: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct AiAnalystExecutionAdviceResponse {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ActivePositionAdviceSnapshot {
+    symbol: String,
+    side: String,
+    action: String,
+    confidence: String,
+    #[serde(default)]
+    maintenance_score: i32,
+    market_state: String,
+    pnl_pct_estimate: f64,
+    duration_minutes: i64,
+    summary: String,
+    #[serde(default)]
+    evidence: Vec<String>,
+    #[serde(default)]
+    risk_flags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct AiAnalystAdviceSnapshot {
     execution_advice: ExecutionAdviceSnapshot,
+    #[serde(default)]
+    active_position_advice: Vec<ActivePositionAdviceSnapshot>,
 }
 
 struct FinalizeDecisionContext<'a> {
@@ -1174,15 +1194,15 @@ async fn fetch_execution_advice(
     http: &reqwest::Client,
     ai_analyst_base_url: &str,
     hours: i64,
-) -> Option<ExecutionAdviceSnapshot> {
+) -> Option<AiAnalystAdviceSnapshot> {
     let url = format!(
         "{}/analyze/recent?hours={}",
         ai_analyst_base_url.trim_end_matches('/'),
         hours
     );
     match http.get(url).send().await {
-        Ok(response) => match response.json::<AiAnalystExecutionAdviceResponse>().await {
-            Ok(body) => Some(body.execution_advice),
+        Ok(response) => match response.json::<AiAnalystAdviceSnapshot>().await {
+            Ok(body) => Some(body),
             Err(_) => None,
         },
         Err(_) => None,
@@ -1365,6 +1385,57 @@ fn sync_execution_advice_guards(
             );
         }
     }
+}
+
+fn active_position_advice_for_symbol<'a>(
+    advice: Option<&'a AiAnalystAdviceSnapshot>,
+    symbol: &str,
+    side: &str,
+) -> Option<&'a ActivePositionAdviceSnapshot> {
+    let intended_side = if side.eq_ignore_ascii_case("Long") {
+        "long"
+    } else {
+        "short"
+    };
+
+    advice.and_then(|snapshot| {
+        snapshot.active_position_advice.iter().find(|item| {
+            item.symbol.eq_ignore_ascii_case(symbol)
+                && item.side.eq_ignore_ascii_case(intended_side)
+        })
+    })
+}
+
+fn apply_active_position_advice_to_trailing(
+    mut trailing: TrailingRuntimeConfig,
+    advice: Option<&ActivePositionAdviceSnapshot>,
+) -> TrailingRuntimeConfig {
+    let Some(advice) = advice else {
+        return trailing;
+    };
+
+    match advice.action.as_str() {
+        "hold_but_tighten" => {
+            trailing.move_to_break_even_at = (trailing.move_to_break_even_at * 0.85).max(0.005);
+            trailing.initial_trail_pct = (trailing.initial_trail_pct * 0.9).max(0.003);
+            for level in &mut trailing.ratchet_levels {
+                level.trail_pct = (level.trail_pct * 0.92).max(0.0025);
+            }
+        }
+        "reduce_risk" => {
+            trailing.activate_after_profit_pct =
+                (trailing.activate_after_profit_pct * 0.6).max(0.0025);
+            trailing.move_to_break_even_at = (trailing.move_to_break_even_at * 0.5).max(0.003);
+            trailing.initial_trail_pct = (trailing.initial_trail_pct * 0.65).max(0.002);
+            for level in &mut trailing.ratchet_levels {
+                level.at_profit_pct = (level.at_profit_pct * 0.8).max(0.003);
+                level.trail_pct = (level.trail_pct * 0.7).max(0.0018);
+            }
+        }
+        _ => {}
+    }
+
+    trailing
 }
 
 async fn fetch_open_trade_for_symbol(
@@ -2840,6 +2911,7 @@ fn evaluate_open_trade_exit(
     current_price: f64,
     open: &OpenTradeSnapshot,
     cfg: &StrategyConfig,
+    active_position_advice: Option<&ActivePositionAdviceSnapshot>,
 ) -> ExitEvaluation {
     if current_price <= 0.0 || open.entry_price <= 0.0 {
         return ExitEvaluation {
@@ -2919,7 +2991,10 @@ fn evaluate_open_trade_exit(
         }
     }
 
-    let trailing_cfg = cfg.trailing_runtime_config(symbol);
+    let trailing_cfg = apply_active_position_advice_to_trailing(
+        cfg.trailing_runtime_config(symbol),
+        active_position_advice,
+    );
     if let Some(eval) = evaluate_trailing(open, current_price, &trailing_cfg) {
         let trailing_hit = if side == "Long" {
             current_price <= eval.trailing_stop_price
@@ -2947,8 +3022,12 @@ fn evaluate_open_trade_exit(
         }
 
         let reason = format!(
-            "trailing_monitoring_score_{}_{}",
-            eval.trailing_score, eval.reason
+            "trailing_monitoring_score_{}_{}_ai_{}",
+            eval.trailing_score,
+            eval.reason,
+            active_position_advice
+                .map(|item| item.action.as_str())
+                .unwrap_or("hold")
         );
         return ExitEvaluation {
             decision: None,
@@ -4342,7 +4421,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(1_000.0);
     let mut cached_account_equity_usdt = fallback_equity_usdt;
     let mut last_wallet_fetch_at = Instant::now() - Duration::from_secs(60);
-    let mut cached_execution_advice: Option<ExecutionAdviceSnapshot> = None;
+    let mut cached_execution_advice: Option<AiAnalystAdviceSnapshot> = None;
     let mut last_execution_advice_fetch_at = Instant::now() - Duration::from_secs(60);
     let execution_advice_refresh = Duration::from_secs(
         std::env::var("AI_EXECUTION_ADVICE_REFRESH_SECONDS")
@@ -4479,7 +4558,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 sync_execution_advice_guards(
                     &mut entry_guards,
-                    cached_execution_advice.as_ref(),
+                    cached_execution_advice
+                        .as_ref()
+                        .map(|snapshot| &snapshot.execution_advice),
                 );
 
                 if let Some(guard) = entry_guards.get_mut(&symbol) {
@@ -4497,7 +4578,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         Ok(Some(open)) => {
                             let current_price = signal_event.signal.current_price;
                             let exit_evaluation =
-                                evaluate_open_trade_exit(&symbol, current_price, &open, cfg.as_ref());
+                                evaluate_open_trade_exit(
+                                    &symbol,
+                                    current_price,
+                                    &open,
+                                    cfg.as_ref(),
+                                    active_position_advice_for_symbol(
+                                        cached_execution_advice.as_ref(),
+                                        &symbol,
+                                        &open.side,
+                                    ),
+                                );
                             let close_decision = exit_evaluation.decision.clone();
                             let trailing_eval = exit_evaluation.trailing.clone();
                             if let Some(eval) = trailing_eval {
@@ -4557,6 +4648,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     runtime_output: &json!({
                                         "open_trade_exit_trigger": exit_evaluation.trigger,
                                         "open_trade_exit_reason": exit_evaluation.reason,
+                                        "active_position_advice": active_position_advice_for_symbol(
+                                            cached_execution_advice.as_ref(),
+                                            &symbol,
+                                            &open.side,
+                                        ),
                                     }),
                                     execution_time_ms: 0,
                                 },
@@ -4698,11 +4794,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 decision,
                                 entry_score,
                                 rank_score,
-                                cached_execution_advice.as_ref(),
+                                cached_execution_advice
+                                    .as_ref()
+                                    .map(|snapshot| &snapshot.execution_advice),
                             );
                             decision = apply_execution_advice_sizing(
                                 decision,
-                                cached_execution_advice.as_ref(),
+                                cached_execution_advice
+                                    .as_ref()
+                                    .map(|snapshot| &snapshot.execution_advice),
                                 entry_score,
                                 rank_score,
                                 cfg.min_position_usdt(),
@@ -4975,7 +5075,7 @@ mod tests {
         let open = sample_open_trade();
         let cfg = sample_cfg();
 
-        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg);
+        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg, None);
 
         assert_eq!(eval.trigger, "take_profit");
         assert!(eval.reason.contains("take_profit_triggered"));

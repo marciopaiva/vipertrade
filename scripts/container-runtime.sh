@@ -5,39 +5,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 COMPOSE_FILE="${COMPOSE_FILE:-$(vt_root_dir)/compose/docker-compose.yml}"
 
-require_docker() {
-  vt_require_cmd docker || exit 1
+require_container() {
+  vt_container_available || exit 1
 }
 
-require_docker_compose() {
-  require_docker
-  if ! docker compose version >/dev/null 2>&1; then
-    vt_fail "docker compose not found"
+require_compose() {
+  if ! vt_compose_available; then
+    vt_fail "compose runtime not found"
     exit 1
   fi
 }
 
 container_exec() {
-  require_docker
-  docker exec "$@"
+  require_container
+  vt_container exec "$@"
 }
 
 container_exec_i() {
-  require_docker
-  docker exec -i "$@"
+  require_container
+  vt_container exec -i "$@"
 }
 
 container_logs() {
-  require_docker
-  docker logs "$@"
+  require_container
+  vt_container logs "$@"
 }
 
 compose_exec() {
-  require_docker_compose
-  docker compose -f "$COMPOSE_FILE" exec "$@"
+  require_compose
+  vt_compose -f "$COMPOSE_FILE" exec "$@"
 }
 
 compose_exec_t() {
-  require_docker_compose
-  docker compose -f "$COMPOSE_FILE" exec -T "$@"
+  require_compose
+  vt_compose -f "$COMPOSE_FILE" exec -T "$@"
 }
