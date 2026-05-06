@@ -3,6 +3,7 @@
 ## Contexto
 
 Após análise de 76 trades (24h pós-ajuste v2.0), identificamos que:
+
 - **SHORTS** estão performando bem: +0,65 USDT, 55% WR
 - **LONGS** estão catastróficos: -1,09 USDT, 20% WR
 - Alguns símbolos têm problemas estruturais em **ambos lados**

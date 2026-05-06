@@ -2,7 +2,8 @@
 
 ## 🐛 Bug Identificado
 
-A função `min_trend_score_for_side` no `services/strategy/src/main.rs` estava verificando a configuração global **ANTES** da configuração por símbolo, ignorando completamente os filtros específicos de cada par.
+A função `min_trend_score_for_side` no `services/strategy/src/main.rs` estava verificando a configuração global **ANTES**
+da configuração por símbolo, ignorando completamente os filtros específicos de cada par.
 
 ### Código Anterior (Bug)
 
