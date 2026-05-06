@@ -285,3 +285,38 @@ vt_run_rust_check() {
     "$@"
   vt_ok "$label"
 }
+
+# WSL detection
+vt_is_wsl() {
+  grep -qi microsoft /proc/version 2>/dev/null
+}
+
+# Suggest registry based on environment (WSL vs native)
+vt_suggest_registry() {
+  local test_registry="${1:-localhost:5001}"
+
+  if vt_is_wsl; then
+    # In WSL, check if localhost:5001 is reachable; if not, try host.docker.internal
+    if curl -s --max-time 2 "http://$test_registry/v2/" >/dev/null 2>&1; then
+      echo "$test_registry"
+      return 0
+    fi
+
+    if curl -s --max-time 2 "http://host.docker.internal:5001/v2/" >/dev/null 2>&1; then
+      echo "host.docker.internal:5001"
+      return 0
+    fi
+
+    # Fallback to the original suggestion
+    echo "$test_registry"
+    return 1
+  fi
+
+  echo "$test_registry"
+}
+
+# Check if local registry is accessible
+vt_registry_available() {
+  local registry="${1:-$(vt_suggest_registry)}"
+  curl -s --max-time 3 "http://$registry/v2/" >/dev/null 2>&1
+}
