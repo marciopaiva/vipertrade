@@ -259,13 +259,13 @@ async function fetchServices(
         `${protocol}//${host}:8080/health`,
       ],
     },
-    { name: 'market-data', urls: [`${protocol}//${host}:8081/health`] },
-    { name: 'strategy', urls: [`${protocol}//${host}:8082/health`] },
-    { name: 'executor', urls: [`${protocol}//${host}:8083/health`] },
-    { name: 'monitor', urls: [`${protocol}//${host}:8084/health`] },
-    { name: 'analytics', urls: [`${protocol}//${host}:8086/health`] },
-    { name: 'backtest', urls: [`${protocol}//${host}:8085/health`] },
-    { name: 'ai-analyst', urls: [`${protocol}//${host}:8087/health`] },
+    { name: 'market-data', urls: [`${protocol}//market-data:8081/health`] },
+    { name: 'strategy', urls: [`${protocol}//strategy:8082/health`] },
+    { name: 'executor', urls: [`${protocol}//executor:8083/health`] },
+    { name: 'monitor', urls: [`${protocol}//monitor:8084/health`] },
+    { name: 'analytics', urls: [`${protocol}//analytics:8086/health`] },
+    { name: 'backtest', urls: [`${protocol}//backtest:8085/health`] },
+    { name: 'ai-analyst', urls: [`${protocol}//ai-analyst:8087/health`] },
     { name: 'bybit', urls: [`${bybitRestUrl}/v5/market/time`] },
     { name: 'binance', urls: [`${binanceRestUrl}/fapi/v1/time`] },
     { name: 'okx', urls: [`${okxRestUrl}/api/v5/public/time`] },
@@ -305,31 +305,19 @@ async function fetchServices(
   return [...checks, bybitPrivateService];
 }
 
-async function fetchMarketSignals(baseUrl: string): Promise<FetchJsonResult> {
-  const parsed = new URL(baseUrl);
-  const host = parsed.hostname;
-  const protocol = parsed.protocol;
-  return fetchJson(`${protocol}//${host}:8081`, '/latest-signals');
+async function fetchMarketSignals(_baseUrl: string): Promise<FetchJsonResult> {
+  return fetchJson('http://market-data:8081', '/latest-signals');
 }
 
-async function fetchAnalyticsScores(baseUrl: string): Promise<FetchJsonResult> {
-  const parsed = new URL(baseUrl);
-  const host = parsed.hostname;
-  const protocol = parsed.protocol;
-  return fetchJson(`${protocol}//${host}:8086`, '/scores');
+async function fetchAnalyticsScores(_baseUrl: string): Promise<FetchJsonResult> {
+  return fetchJson('http://analytics:8086', '/scores');
 }
 
-async function fetchAiAnalyst(baseUrl: string): Promise<FetchJsonResult> {
-  const parsed = new URL(baseUrl);
-  const host = parsed.hostname;
-  const protocol = parsed.protocol;
+async function fetchAiAnalyst(_baseUrl: string): Promise<FetchJsonResult> {
   const hours = Number(process.env.AI_ANALYST_LOOKBACK_HOURS || '24');
   const safeHours =
     Number.isFinite(hours) && hours > 0 ? Math.min(hours, 24 * 14) : 24;
-  return fetchJson(
-    `${protocol}//${host}:8087`,
-    `/analyze/recent?hours=${safeHours}`
-  );
+  return fetchJson('http://ai-analyst:8087', `/analyze/recent?hours=${safeHours}`);
 }
 
 export async function GET() {

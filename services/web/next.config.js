@@ -1,4 +1,7 @@
 /** @type {import('next').NextConfig} */
+const apiRewriteDestination =
+  process.env.NEXT_REWRITE_API_URL || 'http://api:8080/api/:path*';
+
 const nextConfig = {
   // Output standalone for Docker multi-stage
   output: 'standalone',
@@ -8,8 +11,7 @@ const nextConfig = {
 
   // Environment variables
   env: {
-    NEXT_PUBLIC_API_URL:
-      process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',
     NEXT_PUBLIC_WS_URL:
       process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws',
     NEXT_PUBLIC_TRADING_MODE: process.env.NEXT_PUBLIC_TRADING_MODE || 'paper',
@@ -20,7 +22,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://vipertrade-api:8080/api/:path*',
+        destination: apiRewriteDestination,
       },
     ];
   },

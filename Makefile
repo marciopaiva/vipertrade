@@ -14,6 +14,10 @@ VALIDATE_RUNTIME      ?= ./scripts/validate-runtime.sh
 RESET_PAPER_DB        ?= ./scripts/reset-paper-db.sh
 BUILD_BASE_IMAGES     ?= ./scripts/build-base-images.sh
 KILL_SWITCH           ?= ./scripts/kill-switch-control.sh
+KIND_BUILD_IMAGES     ?= ./scripts/kind/build-images.sh
+KIND_DEPLOY           ?= ./scripts/kind/deploy.sh
+KIND_STATUS           ?= ./scripts/kind/status.sh
+KIND_DELETE           ?= ./scripts/kind/delete.sh
 
 CARGO := cargo
 YARN  := yarn
@@ -41,6 +45,7 @@ export HEADER
 	install-git-hooks \
 	build-base-images \
 	compose-up compose-down compose-restart compose-ps compose-logs \
+	kind-build-images kind-deploy kind-status kind-delete kind-prepare kind-health \
 	data-reset-paper-db \
 	control-kill-switch-status control-kill-switch-enable control-kill-switch-disable \
 	version
@@ -82,6 +87,19 @@ compose-restart: ; @$(COMPOSE) down && $(COMPOSE) up -d --build
 compose-ps:      ; @$(COMPOSE) ps
 ## Show logs for the bridge stack
 compose-logs:    ; @$(COMPOSE) logs --tail=100
+
+## Build and push images to the local Kind registry
+kind-build-images: ; @$(KIND_BUILD_IMAGES)
+## Deploy the stack to the Kind dev cluster
+kind-deploy:       ; @$(KIND_DEPLOY)
+## Show Kind pods and services
+kind-status:       ; @$(KIND_STATUS)
+## Delete the Kind stack
+kind-delete:       ; @$(KIND_DELETE)
+## Prepare WSL environment (ensure registry is running on kind network)
+kind-prepare:      ; @./scripts/kind/prepare-wsl.sh
+## Health check for Kind cluster
+kind-health:       ; @./scripts/kind/health-check.sh
 
 ## Reset paper trades and snapshots
 data-reset-paper-db: ; @$(RESET_PAPER_DB) --yes
