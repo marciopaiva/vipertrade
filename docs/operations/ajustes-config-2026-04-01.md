@@ -2,7 +2,9 @@
 
 ## Contexto
 
-Após análise de 198 trades no modo PAPER (dados mainnet), identificamos que **61,1% das operações** estavam fechando por **thesis_invalidated** com perda média de **-0,32%**, enquanto as operações fechadas por **trailing_stop** tinham lucro médio de **+0,47%**.
+Após análise de 198 trades no modo PAPER (dados mainnet), identificamos que
+**61,1% das operações** estavam fechando por **thesis_invalidated** com perda média de **-0,32%**,
+enquanto as operações fechadas por **trailing_stop** tinham lucro médio de **+0,47%**.
 
 **Diagnóstico:** Filtros de entrada muito permissivos + thesis invalidation excessivamente sensível = saídas prematuras.
 
@@ -80,7 +82,7 @@ Após análise de 198 trades no modo PAPER (dados mainnet), identificamos que **
 
 ## Arquivos Modificados
 
-```
+```text
 config/trading/pairs.yaml
 ├── global.mode_profiles.PAPER (otimizado)
 ├── global.mode_profiles.MAINNET (otimizado)
