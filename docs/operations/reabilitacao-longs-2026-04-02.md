@@ -16,16 +16,19 @@ agora funcionam corretamente. Podemos reabilitar LONGs com filtros rigorosos.
 ## Filtros Aplicados
 
 ### DOGEUSDT
+
 - `min_trend_score_long: 0.55` (filtro mais forte)
 - `min_signal_confirmation_ticks_long: 6`
 - Histórico anterior: 0% WR com filtro 0.43 (bug)
 
 ### LINKUSDT
+
 - `min_trend_score_long: 0.50`
 - `min_signal_confirmation_ticks_long: 6`
 - Histórico anterior: 50% WR com filtro 0.32 (bug)
 
 ### NEARUSDT
+
 - `min_trend_score_long: 0.55` (filtro mais forte)
 - `min_signal_confirmation_ticks_long: 8` (máximo rigor)
 - Histórico anterior: 20% WR com filtro 0.38 (bug)
@@ -33,6 +36,7 @@ agora funcionam corretamente. Podemos reabilitar LONGs com filtros rigorosos.
 ## Monitoramento
 
 Verificar após 24h:
+
 - [ ] LONGs entrando apenas com trend_score >= filtro configurado
 - [ ] Win rate LONG > 45%
 - [ ] PnL LONG positivo por símbolo
@@ -40,6 +44,7 @@ Verificar após 24h:
 ## Rollback
 
 Se LONGs continuarem perdendo após o fix:
+
 ```yaml
 # Por símbolo
 allow_long: false
