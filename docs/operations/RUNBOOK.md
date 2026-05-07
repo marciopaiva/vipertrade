@@ -1,6 +1,6 @@
-# Operations Runbook (WSL Fedora + Container Desktop)
+# Operations Runbook (WSL Fedora + Podman + Kind)
 
-## 1) Bootstrap
+## 1) Bootstrap (Compose)
 
 ```bash
 cp compose/.env.example compose/.env
@@ -9,11 +9,28 @@ make build-base-images
 ./scripts/security-check.sh
 ```
 
-## 2) Start Stack
+## 1b) Bootstrap (Kind/Kubernetes)
+
+```bash
+# Prerequisites: setup-k8s-wsl2/setup.sh executed
+./scripts/kind/prepare-wsl.sh
+make kind-build-images
+make kind-deploy
+```
+
+## 2) Start Stack (Compose)
 
 ```bash
 make compose-up
 make health
+```
+
+## 2b) Check Status (Kind)
+
+```bash
+make kind-status
+# or
+./scripts/kind/health-check.sh
 ```
 
 ## 3) Validate Runtime

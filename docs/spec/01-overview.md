@@ -2,33 +2,57 @@
 
 Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 1.1-1.4).
 
-## Objetivo
+## Objective
 
-ViperTrade e um Lead Trader Bot para Bybit Copy Trading Classic.
-Executa estrategia propria e permite copy via Smart Copy Mode.
+ViperTrade is a Lead Trader Bot for Bybit Copy Trading Classic.
+It executes proprietary strategy and enables copy via Smart Copy Mode.
 
-## Diferenciais
+## Differentiators
 
-- Engine Tupa para decisoes deterministicas e auditaveis.
-- Trailing stop dinamico progressivo.
-- Otimizacao para Smart Copy em followers pequenos e medios.
-- Perfis de risco (Conservative, Medium, Aggressive).
-- Risk management em camadas.
+- Tupa engine for deterministic and auditable decisions.
+- Dynamic progressive trailing stop.
+- Optimization for Smart Copy with small and medium followers.
+- Risk profiles (Conservative, Medium, Aggressive).
+- Layered risk management.
 
-## Metas de Performance Publicas
+## Public Performance Targets
 
-- Win Rate alvo: 50-60%
-- Max Drawdown alvo: <15%
-- Profit Factor alvo: >1.5
-- Copy Success Rate alvo: >95%
+- Win Rate target: 50-60%
+- Max Drawdown target: <15%
+- Profit Factor target: >1.5
+- Copy Success Rate target: >95%
 
-## Capital e Sizing
+## Capital and Sizing
 
-- Faixa de validacao: `mainnet_micro` com 100 USDT.
-- Faixa de producao: 500+ USDT.
-- Position sizing alvo por trade: 10-20 USDT.
-- Teto de operacao por trade: 30 USDT.
+- Validation range: `mainnet_micro` with 100 USDT.
+- Production range: 500+ USDT.
+- Position sizing target per trade: 10-20 USDT.
+- Maximum operation per trade: 30 USDT.
 
-## Referencia Original
+## Services
+
+| Service | Purpose |
+|---------|---------|
+| market-data | Exchange signal ingestion |
+| strategy | Tupa-driven decision generation |
+| executor | Paper/testnet/mainnet execution |
+| monitor | Health, reconciliation, drift checks |
+| analytics | Market analysis insights |
+| ai-analyst | Optional LLM-powered analysis |
+| backtest | Historical validation |
+| api | REST endpoints |
+| web | Operator dashboard |
+| postgres | Persistent state |
+| redis | Event transport |
+
+## Runtime Modes
+
+| Mode | Behavior |
+|------|----------|
+| paper | Mainnet prices, simulated wallet/positions in DB |
+| testnet | Bybit testnet with real orders |
+| mainnet | Bybit mainnet with real orders |
+
+## Reference Original
 
 - `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 42-85.

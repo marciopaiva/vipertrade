@@ -16,12 +16,12 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
 
 ## Runbook Commands
 
-- Bootstrap and security: `make build-base-images`, `./scripts/init-secrets.sh`, `./scripts/security-check.sh`
+- Bootstrap (Compose): `make build-base-images`, `./scripts/init-secrets.sh`, `./scripts/security-check.sh`
+- Bootstrap (Kind): `./scripts/kind/prepare-wsl.sh`, `make kind-build-images`
 - Compose runtime: `make compose-up`, `make compose-ps`, `make compose-logs`, `make compose-down`
+- Kind runtime: `make kind-deploy`, `make kind-status`, `make kind-delete`
 - Validation: `make health`, `make validate-runtime`, `make validate-full`, `make validate-ci`
 - Data reset: `make data-reset-paper-db`
-- API operations: system status, positions, trades, leader stats, and kill switch via HTTP endpoints
-- Database: SQL access inside the PostgreSQL container for operational queries
 
 ## API Surface (Current Spec)
 

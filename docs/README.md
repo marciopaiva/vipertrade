@@ -22,7 +22,7 @@ This folder is organized by purpose so the current project state stays easy to n
 - `spec/README.md`
 - `spec/07-configuration.md`
 - `spec/08-strategy-execution-model.md`
-- `operations/RUNBOOK.md`
+- `operations/RUNBOOK.md` - includes both Compose and Kind workflows
 - `releases/RELEASE_CHECKLIST.md`
 - `legacy/README.md`
 
