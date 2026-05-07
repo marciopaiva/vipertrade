@@ -1,16 +1,15 @@
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
-use serde_yaml::Value as YamlValue;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::error::Error;
-use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, RwLock};
+use viper_domain::config::*;
 
 #[derive(Clone, Copy)]
 struct Candle {
@@ -45,71 +44,6 @@ struct ScoresSnapshot {
     by_symbol: Vec<SymbolScore>,
 }
 
-fn configured_pairs_path() -> String {
-    std::env::var("STRATEGY_CONFIG")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "/app/config/pairs.yaml".to_string())
-}
-
-fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
-    let raw = fs::read_to_string(path).ok()?;
-    let yaml: YamlValue = serde_yaml::from_str(&raw).ok()?;
-    let obj = yaml.as_mapping()?;
-
-    let mut pairs = Vec::new();
-    for (key, value) in obj {
-        let Some(symbol) = key.as_str() else {
-            continue;
-        };
-        if symbol.eq_ignore_ascii_case("global") || symbol.eq_ignore_ascii_case("profiles") {
-            continue;
-        }
-
-        let enabled = value
-            .as_mapping()
-            .and_then(|map| map.get(YamlValue::from("enabled")))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if enabled {
-            pairs.push(symbol.to_uppercase());
-        }
-    }
-
-    if pairs.is_empty() {
-        None
-    } else {
-        pairs.sort();
-        Some(pairs)
-    }
-}
-
-fn parse_trading_pairs() -> Vec<String> {
-    if let Ok(raw) = std::env::var("TRADING_PAIRS") {
-        let pairs: Vec<String> = raw
-            .split(',')
-            .map(|s| s.trim().to_uppercase())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !pairs.is_empty() {
-            return pairs;
-        }
-    }
-
-    let config_path = configured_pairs_path();
-    if let Some(pairs) = parse_trading_pairs_from_config(&config_path) {
-        return pairs;
-    }
-    panic!(
-        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
-        config_path
-    );
-}
-
-fn parse_f64(raw: &str) -> Option<f64> {
-    raw.parse::<f64>().ok().filter(|v| v.is_finite())
-}
-
 fn compute_rsi14(candles: &[Candle]) -> Option<f64> {
     if candles.len() < 15 {
         return None;
@@ -137,30 +71,6 @@ fn compute_rsi14(candles: &[Candle]) -> Option<f64> {
 
     let rs = avg_gain / avg_loss;
     Some(100.0 - (100.0 / (1.0 + rs)))
-}
-
-fn bybit_base_url() -> String {
-    if let Ok(override_url) = std::env::var("BYBIT_HTTP_PUBLIC") {
-        if !override_url.trim().is_empty() {
-            return override_url;
-        }
-    }
-
-    let env = match std::env::var("TRADING_MODE")
-        .unwrap_or_else(|_| "paper".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "testnet" => "testnet".to_string(),
-        "mainnet" | "paper" | "live" => "mainnet".to_string(),
-        _ => std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string()),
-    };
-    if env.eq_ignore_ascii_case("mainnet") {
-        "https://api.bybit.com".to_string()
-    } else {
-        "https://api-testnet.bybit.com".to_string()
-    }
 }
 
 async fn fetch_bybit_snapshot(
@@ -499,6 +409,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_analytics=info".into()),
+        )
+        .json()
+        .init();
+
     println!("Starting viper-analytics");
 
     let listener = TcpListener::bind("0.0.0.0:8086").await?;
@@ -521,15 +439,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(5)
         .max(2);
 
-    let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());
-    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
-    let db_name = std::env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
-    let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
-    let db_password = std::env::var("DB_PASSWORD").unwrap_or_default();
-    let database_url = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        db_user, db_password, db_host, db_port, db_name
-    );
+    let database_url = resolve_database_url().expect("DATABASE_URL or DB_* vars must be set");
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -593,7 +503,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let bybit_base = bybit_base_url();
+    let bybit_base = resolve_bybit_base_url();
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
         .user_agent("vipertrade-analytics/0.8")

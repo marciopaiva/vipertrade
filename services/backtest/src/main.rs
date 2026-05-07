@@ -29,6 +29,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_backtest=info".into()),
+        )
+        .json()
+        .init();
+
     println!("Starting viper-backtest");
 
     let listener = TcpListener::bind("0.0.0.0:8085").await?;

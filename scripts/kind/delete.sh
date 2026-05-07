@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../lib/common.sh"
-
-vt_cd_root
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 KIND_CONTEXT="${KIND_CONTEXT:-kind-dev}"
 
 vt_require_cmd kubectl
 
 vt_print_header "Delete ViperTrade from Kind"
-kubectl --context "$KIND_CONTEXT" delete -k k8s/kind
+kubectl --context "$KIND_CONTEXT" delete -k k8s/kind 2>&1 | grep -v "not found" || true
 

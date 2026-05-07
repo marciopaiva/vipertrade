@@ -19,6 +19,7 @@ use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
 use tupa_parser::{parse_program, Item, PipelineDecl, Program};
 use tupa_runtime::Runtime;
 use tupa_typecheck::typecheck_program;
+use viper_domain::config::*;
 use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDecisionEvent};
 
 #[derive(Debug, Clone)]
@@ -1129,27 +1130,6 @@ fn side_from_trend(trend: f64) -> &'static str {
 
 fn is_same_direction(side: &str, trend: f64) -> bool {
     side.eq_ignore_ascii_case(side_from_trend(trend))
-}
-
-fn resolve_database_url() -> Option<String> {
-    if let Ok(v) = std::env::var("DATABASE_URL") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
-    }
-
-    let host = std::env::var("DB_HOST").ok()?;
-    let port = std::env::var("DB_PORT")
-        .ok()
-        .unwrap_or_else(|| "5432".to_string());
-    let db = std::env::var("DB_NAME").ok()?;
-    let user = std::env::var("DB_USER").ok()?;
-    let pass = std::env::var("DB_PASSWORD").ok()?;
-
-    Some(format!(
-        "postgresql://{}:{}@{}:{}/{}",
-        user, pass, host, port, db
-    ))
 }
 
 fn resolve_wallet_api_base_url() -> String {
@@ -4289,6 +4269,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_strategy=info".into()),
+        )
+        .json()
+        .init();
+
     println!("Starting viper-strategy");
 
     let listener = TcpListener::bind("0.0.0.0:8082").await?;

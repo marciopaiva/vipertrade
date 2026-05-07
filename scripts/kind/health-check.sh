@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # ViperTrade - Kind Health Check
-# Checks pod readiness, deployment status, and service availability
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 KIND_CONTEXT="${KIND_CONTEXT:-kind-dev}"
 KIND_NAMESPACE="${KIND_NAMESPACE:-vipertrade}"
@@ -22,13 +20,7 @@ print_fail()  { FAIL_COUNT=$((FAIL_COUNT+1)); vt_fail "$1"; }
 
 check_cluster_accessible() {
   print_step "Cluster accessibility"
-  if kubectl cluster-info --context "$KIND_CONTEXT" >/dev/null 2>&1; then
-    print_ok "Cluster is accessible"
-    return 0
-  else
-    print_fail "Cluster not accessible (context: $KIND_CONTEXT)"
-    return 1
-  fi
+  kubectl cluster-info --context "$KIND_CONTEXT" >/dev/null 2>&1 && print_ok "Cluster accessible" || print_fail "Cluster not accessible ($KIND_CONTEXT)"
 }
 
 check_pods_ready() {
@@ -88,24 +80,12 @@ check_services_exist() {
 
 check_postgres_ready() {
   print_step "PostgreSQL ready"
-  if kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec vipertrade-postgres -- pg_isready -U viper -d vipertrade >/dev/null 2>&1; then
-    print_ok "PostgreSQL accepting connections"
-    return 0
-  else
-    print_fail "PostgreSQL not ready"
-    return 1
-  fi
+  kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec deployment/postgres -- pg_isready -U viper -d vipertrade >/dev/null 2>&1 && print_ok "PostgreSQL accepting connections" || print_fail "PostgreSQL not ready"
 }
 
 check_redis_ready() {
   print_step "Redis ready"
-  if kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec vipertrade-redis -- redis-cli ping >/dev/null 2>&1; then
-    print_ok "Redis responding to PING"
-    return 0
-  else
-    print_fail "Redis not responding"
-    return 1
-  fi
+  kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec deployment/redis -- redis-cli ping >/dev/null 2>&1 && print_ok "Redis responding to PING" || print_fail "Redis not responding"
 }
 
 print_summary() {
@@ -117,23 +97,7 @@ show_help() {
   print_header
   echo ""
   echo "Usage: $0 [all|cluster|pods|deployments|services|db]"
-  echo ""
-  echo "Checks:"
-  echo "  all          - all checks (default)"
-  echo "  cluster     - cluster API accessibility"
-  echo "  pods        - all pods ready (readiness probes)"
-  echo "  deployments - rollout status of all deployments"
-  echo "  services    - all K8s services exist"
-  echo "  db          - PostgreSQL + Redis health"
-  echo ""
-  echo "Environment:"
-  echo "  KIND_CONTEXT     Kubernetes context (default: kind-dev)"
-  echo "  KIND_NAMESPACE   ViperTrade namespace (default: vipertrade)"
-  echo ""
-  echo "Examples:"
-  echo "  $0"
-  echo "  $0 cluster"
-  echo "  $0 pods"
+  echo "  KIND_CONTEXT, KIND_NAMESPACE env vars can override defaults"
 }
 
 main() {

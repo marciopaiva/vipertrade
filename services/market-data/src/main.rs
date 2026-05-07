@@ -1,16 +1,15 @@
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_yaml::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, RwLock};
+use viper_domain::config::*;
 use viper_domain::{MarketSignal, MarketSignalEvent};
 
 #[derive(Debug, Deserialize)]
@@ -151,75 +150,6 @@ struct ConsensusLatchState {
 }
 
 const CONSENSUS_SIDE_CONFIRMATION_CYCLES: u8 = 2;
-
-fn configured_pairs_path() -> String {
-    std::env::var("STRATEGY_CONFIG")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "/app/config/pairs.yaml".to_string())
-}
-
-fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
-    let raw = fs::read_to_string(path).ok()?;
-    let yaml: YamlValue = serde_yaml::from_str(&raw).ok()?;
-    let obj = yaml.as_mapping()?;
-
-    let mut pairs = Vec::new();
-    for (key, value) in obj {
-        let Some(symbol) = key.as_str() else {
-            continue;
-        };
-        if symbol.eq_ignore_ascii_case("global") || symbol.eq_ignore_ascii_case("profiles") {
-            continue;
-        }
-
-        let enabled = value
-            .as_mapping()
-            .and_then(|map| map.get(YamlValue::from("enabled")))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if enabled {
-            pairs.push(symbol.to_uppercase());
-        }
-    }
-
-    if pairs.is_empty() {
-        None
-    } else {
-        pairs.sort();
-        Some(pairs)
-    }
-}
-
-fn parse_trading_pairs() -> Vec<String> {
-    if let Ok(raw) = std::env::var("TRADING_PAIRS") {
-        let pairs: Vec<String> = raw
-            .split(',')
-            .map(|s| s.trim().to_uppercase())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !pairs.is_empty() {
-            return pairs;
-        }
-    }
-
-    let config_path = configured_pairs_path();
-    if let Some(pairs) = parse_trading_pairs_from_config(&config_path) {
-        return pairs;
-    }
-    panic!(
-        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
-        config_path
-    );
-}
-
-fn parse_f64(raw: &str) -> Option<f64> {
-    raw.parse::<f64>().ok().filter(|v| v.is_finite())
-}
-
-fn parse_i64(raw: &str) -> Option<i64> {
-    raw.parse::<i64>().ok()
-}
 
 fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
     let mut candles: Vec<Candle> = rows
@@ -725,34 +655,6 @@ async fn fetch_analytics_weights(
     }
 
     weights
-}
-
-fn bybit_base_url() -> String {
-    if let Ok(override_url) = std::env::var("BYBIT_HTTP_PUBLIC") {
-        if !override_url.trim().is_empty() {
-            return override_url;
-        }
-    }
-
-    let env = resolve_runtime_bybit_env();
-    if env.eq_ignore_ascii_case("mainnet") {
-        "https://api.bybit.com".to_string()
-    } else {
-        "https://api-testnet.bybit.com".to_string()
-    }
-}
-
-fn resolve_runtime_bybit_env() -> String {
-    match std::env::var("TRADING_MODE")
-        .unwrap_or_else(|_| "paper".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "testnet" => "testnet".to_string(),
-        "mainnet" | "paper" | "live" => "mainnet".to_string(),
-        _ => std::env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string()),
-    }
 }
 
 async fn fetch_json<T: for<'de> Deserialize<'de>>(
@@ -1528,6 +1430,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_market_data=info".into()),
+        )
+        .json()
+        .init();
+
     println!("Starting viper-market-data");
 
     let listener = TcpListener::bind("0.0.0.0:8081").await?;
@@ -1607,16 +1517,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_url = resolve_redis_url();
     println!("Connecting to Redis at {}", redis_url);
 
     let client = redis::Client::open(redis_url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
-    let bybit_env = resolve_runtime_bybit_env();
+    let bybit_env = TradingMode::from_env().bybit_env();
     let symbols = parse_trading_pairs();
-    let base_url = bybit_base_url();
+    let base_url = resolve_bybit_base_url();
     let analytics_scores_url = std::env::var("ANALYTICS_SCORES_URL")
         .unwrap_or_else(|_| "http://analytics:8086/scores".to_string());
     let analytics_min_evaluated = std::env::var("ANALYTICS_MIN_EVALUATED")
