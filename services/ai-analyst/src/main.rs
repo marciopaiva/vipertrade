@@ -14,6 +14,7 @@ use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
 use tupa_parser::{parse_program, Item, PipelineDecl, Program};
 use tupa_runtime::Runtime;
 use tupa_typecheck::typecheck_program;
+use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
@@ -379,17 +380,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .init();
 
-    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        let host = env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());
-        let port = env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
-        let name = env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
-        let user = env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
-        let password = env::var("DB_PASSWORD").unwrap_or_default();
-        format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            user, password, host, port, name
-        )
-    });
+    let db_url =
+        resolve_database_url().ok_or("DATABASE_URL or DB_* environment variables missing")?;
 
     let db_pool = PgPoolOptions::new()
         .max_connections(5)

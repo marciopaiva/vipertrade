@@ -19,3 +19,4 @@ tupa-codegen = { workspace = true }
 tupa-runtime = { workspace = true }
 tupa-typecheck = { workspace = true }
 warp = "0.3"
+viper-domain = { workspace = true }

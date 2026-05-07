@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 
-// API base URL - uses relative path which works when accessed through same origin
+// API base URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface UseDashboardOptions {
@@ -22,6 +23,7 @@ export function useDashboard<T = unknown>(
   options: UseDashboardOptions = {}
 ): UseDashboardReturn<T> {
   const { refreshInterval = 5000, enabled = true } = options;
+  const { data: session } = useSession();
 
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,7 +36,19 @@ export function useDashboard<T = unknown>(
       const url = endpoint.startsWith('http')
         ? endpoint
         : `${API_BASE_URL}${endpoint}`;
-      const res = await fetch(url, { cache: 'no-store' });
+
+      const headers: HeadersInit = {};
+      if (session?.user) {
+        const token = (session.user as any).token as string | undefined;
+        if (token) {
+          headers['x-operator-token'] = token;
+        }
+      }
+
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers,
+      });
       const raw = await res.text();
       const body = raw ? JSON.parse(raw) : null;
 
@@ -54,7 +68,7 @@ export function useDashboard<T = unknown>(
     } finally {
       setLoading(false);
     }
-  }, [endpoint, enabled]);
+  }, [endpoint, enabled, session]);
 
   useEffect(() => {
     fetchData();

@@ -19,3 +19,4 @@ redis = { workspace = true }
 hmac = "0.12"
 sha2 = { workspace = true }
 hex = "0.4"
+viper-domain = { workspace = true }
