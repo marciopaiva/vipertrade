@@ -1,17 +1,16 @@
 use hmac::{Hmac, Mac};
 use redis::AsyncCommands;
 use serde_json::{json, Value};
-use serde_yaml::Value as YamlValue;
 use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use viper_domain::config::*;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -31,39 +30,6 @@ struct MonitorConfig {
     bybit_api_secret: String,
     bybit_recv_window: String,
     recon_symbols: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum TradingMode {
-    Paper,
-    Testnet,
-    Mainnet,
-}
-
-impl TradingMode {
-    fn from_env() -> Self {
-        match std::env::var("TRADING_MODE")
-            .unwrap_or_else(|_| "paper".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "testnet" => Self::Testnet,
-            "mainnet" | "live" => Self::Mainnet,
-            _ => Self::Paper,
-        }
-    }
-
-    fn bybit_env(self) -> &'static str {
-        match self {
-            Self::Testnet => "testnet",
-            Self::Paper | Self::Mainnet => "mainnet",
-        }
-    }
-
-    fn uses_simulated_positions(self) -> bool {
-        matches!(self, Self::Paper)
-    }
 }
 
 impl MonitorConfig {
@@ -87,8 +53,7 @@ impl MonitorConfig {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(300);
 
-        let redis_url = std::env::var("REDIS_URL")
-            .unwrap_or_else(|_| "redis://vipertrade-redis:6379".to_string());
+        let redis_url = resolve_redis_url();
 
         let discord_webhook_critical = read_non_empty_env("DISCORD_WEBHOOK_CRITICAL");
         let discord_webhook_warning = read_non_empty_env("DISCORD_WEBHOOK_WARNING");
@@ -143,99 +108,6 @@ struct ReconResult {
     reconciled: bool,
 }
 
-fn read_non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-fn configured_pairs_path() -> String {
-    std::env::var("STRATEGY_CONFIG")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "/app/config/pairs.yaml".to_string())
-}
-
-fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
-    let raw = fs::read_to_string(path).ok()?;
-    let yaml: YamlValue = serde_yaml::from_str(&raw).ok()?;
-    let obj = yaml.as_mapping()?;
-
-    let mut pairs = Vec::new();
-    for (key, value) in obj {
-        let Some(symbol) = key.as_str() else {
-            continue;
-        };
-        if symbol.eq_ignore_ascii_case("global") || symbol.eq_ignore_ascii_case("profiles") {
-            continue;
-        }
-
-        let enabled = value
-            .as_mapping()
-            .and_then(|map| map.get(YamlValue::from("enabled")))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if enabled {
-            pairs.push(symbol.to_uppercase());
-        }
-    }
-
-    if pairs.is_empty() {
-        None
-    } else {
-        pairs.sort();
-        Some(pairs)
-    }
-}
-
-fn parse_trading_pairs() -> Vec<String> {
-    if let Ok(raw) = std::env::var("TRADING_PAIRS") {
-        let pairs: Vec<String> = raw
-            .split(',')
-            .map(|s| s.trim().to_uppercase())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !pairs.is_empty() {
-            return pairs;
-        }
-    }
-
-    let config_path = configured_pairs_path();
-    if let Some(pairs) = parse_trading_pairs_from_config(&config_path) {
-        return pairs;
-    }
-
-    panic!(
-        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
-        config_path
-    );
-}
-
-fn resolve_bybit_credentials() -> (String, String) {
-    let scoped = match TradingMode::from_env() {
-        TradingMode::Testnet => (
-            read_non_empty_env("BYBIT_TESTNET_API_KEY"),
-            read_non_empty_env("BYBIT_TESTNET_API_SECRET"),
-        ),
-        TradingMode::Paper | TradingMode::Mainnet => (
-            read_non_empty_env("BYBIT_MAINNET_API_KEY"),
-            read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
-        ),
-    };
-
-    (
-        scoped
-            .0
-            .or_else(|| read_non_empty_env("BYBIT_API_KEY"))
-            .unwrap_or_default(),
-        scoped
-            .1
-            .or_else(|| read_non_empty_env("BYBIT_API_SECRET"))
-            .unwrap_or_default(),
-    )
-}
-
 fn read_interval_sec(sec_var: &str, min_var: &str, default_sec: u64) -> u64 {
     if let Some(sec) = std::env::var(sec_var)
         .ok()
@@ -273,27 +145,6 @@ fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
     mac.update(payload.as_bytes());
     Ok(hex::encode(mac.finalize().into_bytes()))
-}
-
-fn resolve_database_url() -> Option<String> {
-    if let Ok(v) = std::env::var("DATABASE_URL") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
-    }
-
-    let host = std::env::var("DB_HOST").ok()?;
-    let port = std::env::var("DB_PORT")
-        .ok()
-        .unwrap_or_else(|| "5432".to_string());
-    let db = std::env::var("DB_NAME").ok()?;
-    let user = std::env::var("DB_USER").ok()?;
-    let pass = std::env::var("DB_PASSWORD").ok()?;
-
-    Some(format!(
-        "postgresql://{}:{}@{}:{}/{}",
-        user, pass, host, port, db
-    ))
 }
 
 fn compute_drift(local_notional_usdt: f64, bybit_notional_usdt: f64) -> (f64, f64) {
@@ -706,6 +557,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_monitor=info".into()),
+        )
+        .json()
+        .init();
+
     println!("Starting viper-monitor");
 
     let cfg = MonitorConfig::from_env();

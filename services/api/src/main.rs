@@ -12,6 +12,7 @@ use std::convert::Infallible;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
+use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::reply::Json as WarpJson;
 use warp::{Filter, Rejection, Reply};
@@ -374,62 +375,6 @@ struct BybitPositionFetchResult {
     error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TradingMode {
-    Paper,
-    Testnet,
-    Mainnet,
-}
-
-impl TradingMode {
-    fn from_env() -> Self {
-        match std::env::var("TRADING_MODE")
-            .unwrap_or_else(|_| "paper".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "testnet" => Self::Testnet,
-            "mainnet" | "live" => Self::Mainnet,
-            _ => Self::Paper,
-        }
-    }
-
-    fn as_status_label(self) -> &'static str {
-        match self {
-            Self::Paper => "PAPER",
-            Self::Testnet => "TESTNET",
-            Self::Mainnet => "MAINNET",
-        }
-    }
-
-    fn trade_profile_label(self) -> &'static str {
-        match self {
-            Self::Testnet => "SMOKE",
-            Self::Paper | Self::Mainnet => "STANDARD",
-        }
-    }
-
-    fn bybit_env(self) -> &'static str {
-        match self {
-            Self::Testnet => "testnet",
-            Self::Paper | Self::Mainnet => "mainnet",
-        }
-    }
-
-    fn exchange_env_label(self) -> &'static str {
-        match self {
-            Self::Paper => "paper",
-            Self::Testnet => "testnet",
-            Self::Mainnet => "mainnet",
-        }
-    }
-
-    fn uses_simulated_wallet(self) -> bool {
-        matches!(self, Self::Paper)
-    }
-}
-
 #[derive(Deserialize)]
 struct KillSwitchRequest {
     enabled: bool,
@@ -475,27 +420,6 @@ struct ControlStateResponse {
     kill_switch: KillSwitchStatus,
     executor: ExecutorControlStatus,
     risk_limits: RiskLimitsStatus,
-}
-
-fn resolve_database_url() -> Option<String> {
-    if let Ok(v) = std::env::var("DATABASE_URL") {
-        if !v.trim().is_empty() {
-            return Some(v);
-        }
-    }
-
-    let host = std::env::var("DB_HOST").ok()?;
-    let port = std::env::var("DB_PORT")
-        .ok()
-        .unwrap_or_else(|| "5432".to_string());
-    let db = std::env::var("DB_NAME").ok()?;
-    let user = std::env::var("DB_USER").ok()?;
-    let pass = std::env::var("DB_PASSWORD").ok()?;
-
-    Some(format!(
-        "postgresql://{}:{}@{}:{}/{}",
-        user, pass, host, port, db
-    ))
 }
 
 fn load_position_config(path: &str) -> PositionConfigStore {
@@ -692,50 +616,6 @@ fn resolve_position_triggers(
         fixed_take_profit_price,
         break_even_price,
     )
-}
-
-fn read_non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-fn read_bybit_credential(key_name: &str, secret_name: &str) -> (Option<String>, Option<String>) {
-    let mode = TradingMode::from_env();
-    let scoped = match mode {
-        TradingMode::Testnet => (
-            read_non_empty_env("BYBIT_TESTNET_API_KEY"),
-            read_non_empty_env("BYBIT_TESTNET_API_SECRET"),
-        ),
-        TradingMode::Paper | TradingMode::Mainnet => (
-            read_non_empty_env("BYBIT_MAINNET_API_KEY"),
-            read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
-        ),
-    };
-
-    (
-        scoped.0.or_else(|| read_non_empty_env(key_name)),
-        scoped.1.or_else(|| read_non_empty_env(secret_name)),
-    )
-}
-
-fn read_f64_env(name: &str, default_value: f64) -> f64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(default_value)
-}
-
-fn read_bool_env(name: &str, default_value: bool) -> bool {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        })
-        .unwrap_or(default_value)
 }
 
 fn resolve_bybit_rest_url() -> String {
@@ -1904,9 +1784,8 @@ async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
         bybit_url, account_type
     );
 
-    let (api_key, api_secret) = read_bybit_credential("BYBIT_API_KEY", "BYBIT_API_SECRET");
-
-    let Some(api_key) = api_key else {
+    let (api_key, api_secret) = resolve_bybit_credentials();
+    if api_key.is_empty() {
         return BybitWalletFetchResult {
             checked_at,
             account_type,
@@ -1918,8 +1797,8 @@ async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
             body: json!({}),
             error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
         };
-    };
-    let Some(api_secret) = api_secret else {
+    }
+    if api_secret.is_empty() {
         return BybitWalletFetchResult {
             checked_at,
             account_type,
@@ -1931,7 +1810,7 @@ async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
             body: json!({}),
             error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
         };
-    };
+    }
 
     let timestamp = Utc::now().timestamp_millis().to_string();
     let query_string = format!("accountType={}", account_type);
@@ -2109,9 +1988,8 @@ async fn fetch_bybit_order_history_today(
         bybit_url, category, start_ms, end_ms
     );
 
-    let (api_key, api_secret) = read_bybit_credential("BYBIT_API_KEY", "BYBIT_API_SECRET");
-
-    let Some(api_key) = api_key else {
+    let (api_key, api_secret) = resolve_bybit_credentials();
+    if api_key.is_empty() {
         return BybitOrderHistoryFetchResult {
             checked_at,
             url,
@@ -2121,8 +1999,8 @@ async fn fetch_bybit_order_history_today(
             body: json!({}),
             error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
         };
-    };
-    let Some(api_secret) = api_secret else {
+    }
+    if api_secret.is_empty() {
         return BybitOrderHistoryFetchResult {
             checked_at,
             url,
@@ -2132,7 +2010,7 @@ async fn fetch_bybit_order_history_today(
             body: json!({}),
             error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
         };
-    };
+    }
 
     let timestamp = Utc::now().timestamp_millis().to_string();
     let query_string = format!(
@@ -2262,8 +2140,8 @@ async fn fetch_bybit_closed_pnl_page(
     }
     let url = format!("{}/v5/position/closed-pnl?{}", bybit_url, query_string);
 
-    let (api_key, api_secret) = read_bybit_credential("BYBIT_API_KEY", "BYBIT_API_SECRET");
-    let Some(api_key) = api_key else {
+    let (api_key, api_secret) = resolve_bybit_credentials();
+    if api_key.is_empty() {
         return BybitClosedPnlFetchResult {
             status: 0,
             ret_code: None,
@@ -2271,8 +2149,8 @@ async fn fetch_bybit_closed_pnl_page(
             body: json!({}),
             error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
         };
-    };
-    let Some(api_secret) = api_secret else {
+    }
+    if api_secret.is_empty() {
         return BybitClosedPnlFetchResult {
             status: 0,
             ret_code: None,
@@ -2280,7 +2158,7 @@ async fn fetch_bybit_closed_pnl_page(
             body: json!({}),
             error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
         };
-    };
+    }
 
     let timestamp = Utc::now().timestamp_millis().to_string();
     let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
@@ -2412,8 +2290,8 @@ async fn fetch_bybit_position_page(
     }
     let url = format!("{}/v5/position/list?{}", bybit_url, query_string);
 
-    let (api_key, api_secret) = read_bybit_credential("BYBIT_API_KEY", "BYBIT_API_SECRET");
-    let Some(api_key) = api_key else {
+    let (api_key, api_secret) = resolve_bybit_credentials();
+    if api_key.is_empty() {
         return BybitPositionFetchResult {
             status: 0,
             ret_code: None,
@@ -2421,8 +2299,8 @@ async fn fetch_bybit_position_page(
             body: json!({}),
             error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
         };
-    };
-    let Some(api_secret) = api_secret else {
+    }
+    if api_secret.is_empty() {
         return BybitPositionFetchResult {
             status: 0,
             ret_code: None,
@@ -2430,7 +2308,7 @@ async fn fetch_bybit_position_page(
             body: json!({}),
             error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
         };
-    };
+    }
 
     let timestamp = Utc::now().timestamp_millis().to_string();
     let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
@@ -3002,6 +2880,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_api=info".into()),
+        )
+        .json()
+        .init();
+
     let db_pool = if let Some(database_url) = resolve_database_url() {
         match PgPoolOptions::new()
             .max_connections(5)
