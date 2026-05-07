@@ -1,38 +1,50 @@
-# ViperTrade no Kind
+# ViperTrade on Kind
 
-Este overlay adapta o stack local do Compose/Podman para o cluster Kind criado por
+This overlay adapts the local Compose/Podman stack for the Kind cluster provisioned by
 `/home/paiva/setup-k8s-wsl2/setup.sh`.
 
-## Pré-requisitos
+## Deployment Options
 
-- script `setup-k8s-wsl2/setup.sh` executado (provisiona Podman, Kind, registry local)
-- cluster Kind `dev` ativo
-- registry local `localhost:5001` acessível
-- namespace `vipertrade` criado
+ViperTrade can run via:
 
-## Uso
+1. **Docker/Podman Compose** (recommended for local development)
+   - See main README.md for compose workflow
+   - Services communicate via compose network
+
+2. **Kind Kubernetes** (alternative for K8s development)
+   - See below for Kind-specific instructions
+   - Services communicate via K8s DNS
+
+## Kind Prerequisites
+
+- script `setup-k8s-wsl2/setup.sh` executed (provisions Podman, Kind, local registry)
+- Kind cluster `dev` active
+- local registry `localhost:5001` accessible
+- namespace `vipertrade` created
+
+## Usage
 
 ```bash
-# 1. Preparar o registry WSL (garante que está rodando na rede 'kind')
+# 1. Prepare WSL registry (ensures it's running on 'kind' network)
 ./scripts/kind/prepare-wsl.sh
 
-# 2. Construir e enviar imagens para o registry local
+# 2. Build and push images to local registry
 make kind-build-images
 
-# 3. Deploy no cluster
+# 3. Deploy to cluster
 make kind-deploy
 
-# 4. Verificar status
+# 4. Check status
 make kind-status
 
-# Health check detalhado
+# Detailed health check
 ./scripts/kind/health-check.sh
 
-# Validação de runtime (modo kind)
+# Runtime validation (kind mode)
 ./scripts/validate-runtime.sh kind all
 ```
 
-Para remover os recursos:
+To remove resources:
 
 ```bash
 make kind-delete
@@ -40,61 +52,65 @@ make kind-delete
 
 ## WSL2 + Podman
 
-Este ambiente foi otimizado para WSL2 com Podman rootless:
+This environment is optimized for WSL2 with rootless Podman:
 
-- **Registry local**: roda como container Podman na rede `kind`, acessível em `localhost:5001`
-- **KIND_EXPERIMENTAL_PROVIDER=podman**: configurado no `~/.bashrc` pelo setup
-- **Imagens**: construídas com Podman, enviadas para o registry local, puxadas pelo Kind
-- **Network**: o registry compartilha a rede `kind` com o cluster, permitindo pulls diretos
+- **Local registry**: runs as Podman container on `kind` network, accessible at `localhost:5001`
+- **KIND_EXPERIMENTAL_PROVIDER=podman**: configured in `~/.bashrc` by the setup script
+- **Images**: built with Podman, pushed to local registry, pulled by Kind
+- **Network**: registry shares the `kind` network with the cluster for direct pulls
 
-Se o registry não estiver acessível a partir do WSL (ex.: Docker Desktop rodando no Windows),
+If the registry is not accessible from WSL (e.g., Docker Desktop running on Windows),
 use `KIND_REGISTRY=host.docker.internal:5001`:
 
 ```bash
 KIND_REGISTRY=host.docker.internal:5001 make kind-build-images
 ```
 
-## Portas de acesso
+## Service Ports
 
-| Serviço | Porta | URL |
-|---------|-------|-----|
+| Service | Port | URL |
+|---------|------|-----|
 | API (REST) | 8080 (NodePort) | http://localhost:8080 |
 | Web Dashboard | 30080 (NodePort) | http://localhost:30080 |
-| Grafana/Prometheus (se adicionado) | 30000+ | - |
+| Grafana/Prometheus (if added) | 30000+ | - |
 
 ## Troubleshooting
 
-### Registry não responde
+### Registry not responding
+
 ```bash
-# Verificar se o container do registry está rodando
+# Check if registry container is running
 podman ps | grep kind-registry
 
-# Reiniciar o registry
+# Restart registry
 podman restart kind-registry
 
-# Verificar logs
+# Check logs
 podman logs kind-registry
 ```
 
-### Pods em CrashLoopBackOff
+### Pods in CrashLoopBackOff
+
 ```bash
-# Logs do pod problemático
+# Logs from problematic pod
 kubectl logs -n vipertrade -f deployment/strategy
 
-# Eventos do pod
+# Pod events
 kubectl get events -n vipertrade --sort-by=.metadata.creationTimestamp | tail -20
 ```
 
-### Imagens não encontradas no registry
+### Images not found in registry
+
 ```bash
-# Listar tags disponíveis
+# List available tags
 curl http://localhost:5001/v2/vipertrade-strategy/tags/list
 
-# Rebuild com tag correta
+# Rebuild with correct tag
 KIND_REGISTRY=localhost:5001 IMAGE_TAG=dev make kind-build-images
 ```
 
-### Reset completo
+### Full reset
+
 ```bash
 make kind-delete
 podman rm -f kind-registry 2>/dev/null || true
@@ -103,16 +119,16 @@ make kind-build-images
 make kind-deploy
 ```
 
-## Notas sobre credenciais
+## Credentials Note
 
-As credenciais em `k8s/kind/secret.yaml` são placeholders locais. Para testnet/mainnet,
-edite o Secret antes do deploy:
+Credentials in `k8s/kind/secret.yaml` are local placeholders. For testnet/mainnet,
+edit the Secret before deploying:
 
 ```bash
 kubectl -n vipertrade edit secret vipertrade-secrets
 ```
 
-Ou crie a partir de `compose/.env`:
+Or create from `compose/.env`:
 
 ```bash
 kubectl -n vipertrade create secret generic vipertrade-secrets \

@@ -49,26 +49,26 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
 
 ## Trading Operations and Validation Modes
 
-- Operacao como Lead Trader no Copy Trading Classic.
-- Otimizacao Smart Copy com sizing previsivel, controle de slippage e limites de alavancagem por perfil.
-- Protecao contra auto-unfollow com reducao de failed copies e menor variacao abrupta de sizing.
-- Modos de validacao antes de producao: backtest de estresse e paper trading com dados reais e execucao simulada.
+- Operate as Lead Trader in Bybit Copy Trading Classic.
+- Smart Copy optimization with predictable sizing, slippage control, and profile-based leverage limits.
+- Self-unfollow protection via reduced failed copies and smaller sizing variance.
+- Validation modes before production: stress backtest and paper trading with real data and simulated execution.
 
 ## Dynamic Trailing Stop
 
-- Ativacao por lucro minimo e ajuste progressivo (ratcheting).
-- Trail nunca afrouxa; apenas mantem ou aperta.
-- Parametros por perfil de risco para equilibrar protecao e captura de tendencia.
-- Integracao com o fluxo de decisao e runtime state do strategy service.
+- Activation by minimum profit and progressive adjustment (ratcheting).
+- Trail never loosens; only maintains or tightens.
+- Parameters by risk profile to balance protection and trend capture.
+- Integration with decision flow and strategy service runtime state.
 
 ## Development Blocks
 
-- Blocos 1-15 estruturam entrega incremental.
-- Base de projeto e compose.
-- Servicos core (market-data, strategy, executor, monitor).
-- Tratamento de erro e testes.
-- Documentacao, deploy micro e otimizacoes Smart Copy e trailing.
+- Blocks 1-15 structure incremental delivery.
+- Base project and compose.
+- Core services (market-data, strategy, executor, monitor, analytics, ai-analyst, backtest).
+- Error handling and tests.
+- Documentation, micro deploy and Smart Copy/trailing optimizations.
 
-## Referencia Original
+## Reference Original
 
 - `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 491-1767.

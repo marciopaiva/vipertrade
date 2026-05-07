@@ -6,8 +6,8 @@ This folder contains the modularized technical specification.
 
 - Legacy source reference: `docs/legacy/VIPERTRADE_SPEC.md`
 - Modular docs completed:
-  - `01-overview.md`
-  - `02-architecture.md`
+  - `01-overview.md` - updated for v0.8.1 with services table
+  - `02-architecture.md` - updated with Kind/K8s section
   - `03-risk-and-profiles.md`
   - `04-bybit-integration.md`
   - `05-runtime-and-operations.md`

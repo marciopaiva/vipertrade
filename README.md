@@ -68,6 +68,12 @@ Core services:
   - translates decisions into paper, testnet, or mainnet actions
 - `monitor`
   - checks drift, reconciliation, and service health
+- `analytics`
+  - market analysis and strategy performance insights
+- `ai-analyst`
+  - optional LLM-powered market analysis
+- `backtest`
+  - historical strategy validation
 - `api`
   - exposes status, trades, positions, controls, and diagnostics
 - `web`
@@ -94,13 +100,13 @@ That gives us a cleaner split:
 - Rust runtime
   - live market state, exchange execution, persistence, telemetry, controls
 
-## Quickstart
+## Quickstart (Podman Compose)
 
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
-sudo dnf install -y openssl-devel
 cp compose/.env.example compose/.env
+# Edit compose/.env with your Bybit API credentials (TESTNET recommended for first run)
 make build-base-images
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
@@ -108,18 +114,26 @@ make compose-up
 make health
 ```
 
-The local scripts auto-detect Docker or Podman. To force Podman explicitly:
+## Quickstart (Kind/K8s)
 
 ```bash
-CONTAINER_ENGINE=podman VT_COMPOSE_COMMAND="podman compose" make compose-up
+git clone https://github.com/marciopaiva/vipertrade.git
+cd vipertrade
+# Prerequisites: setup-k8s-wsl2/setup.sh executed
+./scripts/kind/prepare-wsl.sh
+make kind-build-images
+make kind-deploy
+make kind-status
 ```
+
+Both workflows are supported - use Podman Compose for local development, Kind for K8s testing.
 
 Open:
 
 - Web dashboard: `http://localhost:3000`
 - API: `http://localhost:8080`
 
-## Daily Workflow
+## Daily Workflow (Podman Compose)
 
 Start the stack:
 
@@ -133,28 +147,30 @@ Check service health:
 make health
 ```
 
-Run runtime validation:
-
-```bash
-make validate-runtime
-```
-
-Run local CI parity before commit or push:
-
-```bash
-make validate-ci
-```
-
-Reset the local paper database:
-
-```bash
-make data-reset-paper-db
-```
-
 Stop the stack:
 
 ```bash
 make compose-down
+```
+
+## Daily Workflow (Kind/K8s)
+
+Deploy to cluster:
+
+```bash
+make kind-deploy
+```
+
+Check cluster status:
+
+```bash
+make kind-status
+```
+
+Delete from cluster:
+
+```bash
+make kind-delete
 ```
 
 ## Runtime Modes
@@ -173,7 +189,7 @@ This keeps the operational model stable while the execution surface evolves.
 - deterministic service behavior
 - operator-first runtime visibility
 - health checks and kill-switch controls
-- Docker/Podman-based runtime parity
+- Podman-based runtime parity (WSL2 + Kind)
 - replayable validation and CI discipline
 - audit-friendly decision history
 - staged progression from paper to real execution
@@ -269,11 +285,9 @@ Useful commands:
 - `make validate-ci`
 - `make validate-runtime`
 - `make build-base-images`
-- `make compose-up`
-- `make compose-down`
-- `make compose-restart`
-- `make compose-ps`
-- `make compose-logs`
+- `make compose-up` / `make compose-down`
+- `make kind-deploy` / `make kind-delete`
+- `make kind-status`
 - `make data-reset-paper-db`
 - `make control-kill-switch-status`
 - `make control-kill-switch-enable`
@@ -284,6 +298,8 @@ Useful commands:
 ViperTrade is being developed as an applied trading runtime with TupaLang as
 its strategy-policy layer. Paper mode, diagnostics, audit trails, and local
 operator tooling are active parts of the current workflow.
+
+The stack runs on **Podman + WSL + Kind** for container and K8s workloads.
 
 ## License
 

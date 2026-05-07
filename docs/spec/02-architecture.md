@@ -9,11 +9,21 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 - `strategy`
   - Tupa-driven strategy evaluation and decision generation
 - `executor`
-  - exchange-side execution path
+  - exchange-side execution path (paper/testnet/mainnet modes)
 - `monitor`
   - health checks, alerting, and reconciliation
+- `analytics`
+  - market analysis and strategy performance insights
+- `ai-analyst`
+  - optional LLM-powered market analysis
+- `backtest`
+  - historical strategy validation
+- `api`
+  - REST endpoints for status, trades, positions, controls
+- `web`
+  - operator dashboard with live runtime context
 - `postgres`
-  - durable runtime state
+  - durable runtime state (trades, positions, events)
 - `redis`
   - pub/sub transport and transient state
 
@@ -31,16 +41,26 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 1. market data enters `market-data`
 2. normalized events are published through `redis`
 3. `strategy` parses, typechecks, and loads the Tupa-backed plan in-process, then combines that plan with runtime state to publish a decision
-4. `executor` validates and executes the exchange-side action
+4. `executor` validates and executes the exchange-side action based on `TRADING_MODE` (paper/testnet/mainnet)
 5. execution results are persisted and exposed to observability surfaces
 6. `monitor` runs periodic reconciliation and drift checks
 
 ## Local runtime
 
-- Docker Desktop or Podman Desktop + WSL is the standard local environment
-- bridge networking is the standard compose mode
+- Podman rootless + WSL2 is the standard local environment
+- bridge networking via `podman compose`
+- `./scripts/compose.sh` is the wrapper for compose operations
+- `make compose-up`, `make compose-down` for service lifecycle
+- Kind cluster with `KIND_EXPERIMENTAL_PROVIDER=podman` for K8s development
 - `compose/docker-compose.yml` is the only supported compose entrypoint
 - service health checks are part of the default operational flow
+
+## Kubernetes runtime
+
+- Kind cluster with Podman experimental provider for development
+- WSL2 + Podman rootless configuration
+- Local registry at `localhost:5001` accessible via `kind` network
+- See `k8s/kind/README.md` for deployment instructions
 
 ## Original reference
 

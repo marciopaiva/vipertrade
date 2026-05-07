@@ -2,32 +2,39 @@
 
 Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 4).
 
-## Perfis
+## Profiles
 
-- Conservative
-- Medium
-- Aggressive
+| Profile | Risk/Trade | Max Leverage | Max Daily Loss |
+|---------|------------|--------------|----------------|
+| Conservative | 0.75% | 2x | 2% |
+| Medium | 1.25% | 2x | 3% |
+| Aggressive | 2.00% | 3x | 5% |
 
-## Parametros Principais
+Profiles are configured in `config/trading/pairs.yaml` under `profiles:`.
 
-- Risk por trade
-- Stop loss / take profit
-- Max leverage
-- Max daily loss
-- Max open positions
-- Max total exposure
+## Main Parameters
+
+- Risk per trade (percentage of capital)
+- Stop loss / take profit percentages
+- Max leverage (1-3x depending on profile)
+- Max daily loss (circuit breaker)
+- Max open positions (4 default for PAPER mode)
+- Max position USDT (5-30 via Smart Copy)
+- Max total exposure cap
 
 ## Circuit Breakers
 
-- Limite de perdas consecutivas.
-- Limite de perda diaria.
-- Bloqueio de novas entradas em condicao de risco elevado.
+- Consecutive loss limit triggers cooldown.
+- Daily loss limit pauses new entries until reset.
+- Kill switch blocks all new entries immediately.
+- High drift alerts pause entries via `allow_long`/`allow_short` per symbol.
 
-## Regras Operacionais
+## Operational Rules
 
-- Preservacao de capital vem antes de crescimento.
-- Ajuste de perfil deve ser auditavel e versionado.
+- Capital preservation takes priority over growth.
+- Profile adjustments must be auditable and version-controlled.
+- Changes to risk parameters should be validated in paper mode first.
 
-## Referencia Original
+## Reference Original
 
 - `docs/legacy/VIPERTRADE_SPEC.md`, section 4.

@@ -44,6 +44,7 @@ export HEADER
 	install-git-hooks \
 	build-base-images \
 	kind-build-images kind-deploy kind-status kind-delete kind-prepare kind-health \
+	compose-up compose-down compose-restart compose-ps compose-logs \
 	data-reset-paper-db \
 	control-kill-switch-status control-kill-switch-enable control-kill-switch-disable \
 	version
@@ -60,6 +61,21 @@ help:
 
 ## Check the health of all services
 health:              ; @$(HEALTH) all
+
+## Start the compose stack
+compose-up:          ; @./scripts/compose.sh up -d
+
+## Stop the compose stack
+compose-down:        ; @./scripts/compose.sh down
+
+## Restart the compose stack
+compose-restart:     ; @./scripts/compose.sh down && ./scripts/compose.sh up -d
+
+## Show running compose services
+compose-ps:          ; @./scripts/compose.sh ps
+
+## Show compose logs
+compose-logs:        ; @./scripts/compose.sh logs -f
 
 ## Run full workspace validation and supporting checks
 validate-full:            ; @$(VALIDATE_WORKSPACE) all

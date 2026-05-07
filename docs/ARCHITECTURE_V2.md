@@ -1,4 +1,4 @@
-# ViperTrade Architecture v2 (WSL Fedora + Container Desktop)
+# ViperTrade Architecture v2 (WSL Fedora + Podman + Kind)
 
 ## Goals
 
@@ -62,8 +62,9 @@ Operational trade-profile labels:
 ## Container Runtime Standards
 
 - Use `./scripts/compose.sh` as default compose entrypoint (bridge mode).
-- Use Docker Desktop or Podman Desktop + WSL as the standard local runtime.
-- Set `CONTAINER_ENGINE=podman` and `VT_COMPOSE_COMMAND="podman compose"` when the runtime must be pinned to Podman.
+- Use Podman Desktop + WSL2 as the standard local runtime.
+- Use Kind cluster with Podman experimental provider (`KIND_EXPERIMENTAL_PROVIDER=podman`) for K8s development.
+- Set `CONTAINER_ENGINE=podman` and `VT_COMPOSE_COMMAND="podman compose"` when the runtime must be pinned.
 - Prefer bridge network over `network_mode: host` for service isolation.
 - Keep volumes explicit for: postgres, redis, audit logs, plan cache.
 - Healthchecks must verify dependencies (DB/Redis/Bybit reachability).

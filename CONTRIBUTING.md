@@ -32,8 +32,8 @@ Recommended sequence before commit/push:
 
 Prefer `make` targets over calling lower-level scripts directly unless you are working on an advanced or diagnostic flow.
 
-The supported local runtime path is the bridge-based container workflow exposed through `make compose-*`.
-The wrapper auto-detects Docker or Podman; use `CONTAINER_ENGINE=podman VT_COMPOSE_COMMAND="podman compose"` to force Podman.
+The supported local runtime path is the bridge-based container workflow via Podman on WSL2, exposed through `make compose-*`.
+The wrapper auto-detects Podman; use `CONTAINER_ENGINE=podman VT_COMPOSE_COMMAND="podman compose"` if needed.
 
 ## Commit Message Convention
 
