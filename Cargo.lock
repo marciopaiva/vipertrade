@@ -3212,6 +3212,7 @@ dependencies = [
  "tupa-parser",
  "tupa-runtime",
  "tupa-typecheck",
+ "viper-domain",
  "warp",
 ]
 
@@ -3226,6 +3227,9 @@ dependencies = [
  "serde_yaml",
  "sqlx",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "viper-domain",
 ]
 
 [[package]]
@@ -3249,6 +3253,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "viper-domain",
  "warp",
 ]
 
@@ -3273,6 +3278,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -3332,6 +3338,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "viper-domain",
 ]
 
 [[package]]

@@ -27,24 +27,31 @@ spec:
         - name: postgres
           image: localhost:5001/vipertrade-postgres:dev
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 5432
           env:
-            - name: POSTGRES_DB
-              valueFrom:
-                configMapKeyRef:
-                  name: vipertrade-config
-                  key: POSTGRES_DB
             - name: POSTGRES_USER
               valueFrom:
-                configMapKeyRef:
-                  name: vipertrade-config
+                secretKeyRef:
+                  name: vipertrade-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: vipertrade-secrets
                   key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: vipertrade-secrets
+                  key: POSTGRES_DB
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "1000m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "viper", "-d", "vipertrade", "-h", "127.0.0.1"]
@@ -62,4 +69,3 @@ spec:
         - name: postgres-data
           persistentVolumeClaim:
             claimName: postgres-data
-

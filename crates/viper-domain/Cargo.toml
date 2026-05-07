@@ -7,5 +7,6 @@ description = "Shared domain contracts for ViperTrade event streams"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }

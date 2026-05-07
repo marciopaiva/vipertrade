@@ -7,7 +7,6 @@ BLUE   := \033[0;34m
 CYAN   := \033[0;36m
 NC     := \033[0m
 
-COMPOSE               ?= ./scripts/compose.sh
 HEALTH                ?= ./scripts/health-check.sh
 VALIDATE_WORKSPACE    ?= ./scripts/validate-workspace.sh
 VALIDATE_RUNTIME      ?= ./scripts/validate-runtime.sh
@@ -44,7 +43,6 @@ export HEADER
 	validate validate-full validate-workspace-quick validate-ci validate-runtime \
 	install-git-hooks \
 	build-base-images \
-	compose-up compose-down compose-restart compose-ps compose-logs \
 	kind-build-images kind-deploy kind-status kind-delete kind-prepare kind-health \
 	data-reset-paper-db \
 	control-kill-switch-status control-kill-switch-enable control-kill-switch-disable \
@@ -77,17 +75,6 @@ validate-runtime:         ; @$(VALIDATE_RUNTIME) bridge all
 ## Build the project's base images
 build-base-images: ; @$(BUILD_BASE_IMAGES)
 
-## Start the bridge stack with build
-compose-up:      ; @$(COMPOSE) up -d --build
-## Stop the bridge stack
-compose-down:    ; @$(COMPOSE) down
-## Restart the bridge stack
-compose-restart: ; @$(COMPOSE) down && $(COMPOSE) up -d --build
-## List containers in the bridge stack
-compose-ps:      ; @$(COMPOSE) ps
-## Show logs for the bridge stack
-compose-logs:    ; @$(COMPOSE) logs --tail=100
-
 ## Build and push images to the local Kind registry
 kind-build-images: ; @$(KIND_BUILD_IMAGES)
 ## Deploy the stack to the Kind dev cluster
@@ -116,5 +103,4 @@ version:
 	@printf "$(YELLOW)→$(NC) Versions:\n"
 	@printf "  $(CYAN)Rust:$(NC) $$($(CARGO) --version 2>/dev/null || echo 'not installed')\n"
 	@printf "  $(CYAN)Yarn:$(NC) $$($(YARN) --version 2>/dev/null || echo 'not installed')\n"
-	@printf "  $(CYAN)Container Engine:$(NC) $$($(CONTAINER_ENGINE) --version 2>/dev/null || { command -v $(CONTAINER_ENGINE) >/dev/null 2>&1 && echo '$(CONTAINER_ENGINE) detected'; } || echo 'not installed')\n"
-	@printf "  $(CYAN)Compose Runtime:$(NC) $$(./scripts/compose.sh --help 2>/dev/null | sed -n '/Runtime:/{n;s/^  //;p;q;}' || echo 'not installed')\n"
+	@printf "  $(CYAN)Container Engine:$(NC) $$($(CONTAINER_ENGINE) --version 2>/dev/null || echo 'not installed')\n"

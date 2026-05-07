@@ -2,6 +2,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod config;
+
 pub const SCHEMA_VERSION: &str = "1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

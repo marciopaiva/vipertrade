@@ -31,6 +31,13 @@ spec:
           args: ["--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
           ports:
             - containerPort: 6379
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
           readinessProbe:
             exec:
               command: ["redis-cli", "ping"]
@@ -48,4 +55,3 @@ spec:
         - name: redis-data
           persistentVolumeClaim:
             claimName: redis-data
-

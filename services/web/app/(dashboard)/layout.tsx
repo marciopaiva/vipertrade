@@ -1,10 +1,17 @@
 import Link from 'next/link';
+import { auth } from '@/app/api/auth/[...nextauth]/route';
+import { redirect } from 'next/navigation';
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await auth();
+  if (!session) {
+    redirect('/login');
+  }
+
   return (
     <div className="min-h-screen bg-viper-navy">
       {/* Header */}
@@ -13,34 +20,19 @@ export default function DashboardLayout({
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-viper-cyan">ViperTrade</h1>
             <nav className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="text-sm text-slate-400 hover:text-viper-cyan"
-              >
+              <Link href="/" className="text-sm text-slate-400 hover:text-viper-cyan">
                 Dashboard
               </Link>
-              <Link
-                href="/analysis"
-                className="text-sm text-slate-400 hover:text-viper-cyan"
-              >
+              <Link href="/analysis" className="text-sm text-slate-400 hover:text-viper-cyan">
                 Analysis
               </Link>
-              <Link
-                href="/trades"
-                className="text-sm text-slate-400 hover:text-viper-cyan"
-              >
+              <Link href="/trades" className="text-sm text-slate-400 hover:text-viper-cyan">
                 Trades
               </Link>
-              <Link
-                href="/positions"
-                className="text-sm text-slate-400 hover:text-viper-cyan"
-              >
+              <Link href="/positions" className="text-sm text-slate-400 hover:text-viper-cyan">
                 Positions
               </Link>
-              <Link
-                href="/settings"
-                className="text-sm text-slate-400 hover:text-viper-cyan"
-              >
+              <Link href="/settings" className="text-sm text-slate-400 hover:text-viper-cyan">
                 Settings
               </Link>
             </nav>

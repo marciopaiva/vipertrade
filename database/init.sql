@@ -101,19 +101,14 @@ ORDER BY ps.divergence_pct DESC, ps.snapshot_at DESC;
 -- ═══════════════════════════════════════════════════════════
 
 -- Criar role para aplicação (se não existir)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'viper_app') THEN
-        CREATE ROLE viper_app WITH LOGIN PASSWORD 'change_me_in_production';
-    END IF;
-END
-$$;
+-- Note: The 'viper' user is created by docker-entrypoint with POSTGRES_USER/POSTGRES_PASSWORD
 
--- Grant permissions
-GRANT CONNECT ON DATABASE vipertrade TO viper_app;
-GRANT USAGE ON SCHEMA public TO viper_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO viper_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO viper_app;
+-- Grant permissions to viper user
+GRANT CONNECT ON DATABASE vipertrade TO viper;
+GRANT CONNECT ON DATABASE vipertrade TO viper;
+GRANT USAGE ON SCHEMA public TO viper;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO viper;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO viper;
 
 -- ═══════════════════════════════════════════════════════════
 -- ANÁLISE INICIAL PARA PERFORMANCE

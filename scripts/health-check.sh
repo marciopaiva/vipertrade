@@ -5,152 +5,41 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
 
 SERVICE="${1:-all}"
-
-# Database config
 DB_USER="${POSTGRES_USER:-viper}"
 DB_NAME="${POSTGRES_DB:-vipertrade}"
 
-require_container() {
-  vt_container_available
+require_container() { vt_container_available; }
+
+print_header() { vt_print_header "ViperTrade - Health Check"; }
+print_service() { vt_step "Health: $1..."; }
+print_ok() { vt_ok "$1 OK"; }
+print_fail() { vt_fail "$1 unavailable"; }
+
+check_container() {
+  local name="$1"
+  shift
+  print_service "$name"
+  require_container || { print_fail "Container engine"; return 1; }
+  vt_container exec "$name" "$@" >/dev/null 2>&1 && print_ok "$name" || { print_fail "$name"; return 1; }
 }
 
-# Helper functions
-print_header() {
-  vt_print_header "ViperTrade - Health Check"
+check_http() {
+  local name="$1" url="$2"
+  print_service "$name"
+  curl -sf "$url" >/dev/null 2>&1 && print_ok "$name" || { print_fail "$name"; return 1; }
 }
 
-print_service() {
-  vt_step "Health: $1..."
-}
+check_postgres() { check_container vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME"; }
+check_redis() { check_container vipertrade-redis redis-cli ping; }
 
-print_ok() {
-  vt_ok "$1 OK"
-}
-
-print_fail() {
-  vt_fail "$1 unavailable"
-}
-
-# Health check functions
-check_postgres() {
-  print_service "PostgreSQL"
-  if ! require_container; then
-    print_fail "Container engine"
-    return 1
-  fi
-
-  if vt_container exec vipertrade-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
-    print_ok "PostgreSQL"
-    return 0
-  else
-    print_fail "PostgreSQL"
-    return 1
-  fi
-}
-
-check_redis() {
-  print_service "Redis"
-  if ! require_container; then
-    print_fail "Container engine"
-    return 1
-  fi
-
-  if vt_container exec vipertrade-redis redis-cli ping >/dev/null 2>&1; then
-    print_ok "Redis"
-    return 0
-  else
-    print_fail "Redis"
-    return 1
-  fi
-}
-
-check_market_data() {
-  print_service "Market Data"
-  if curl -sf http://localhost:8081/health >/dev/null 2>&1; then
-    print_ok "Market Data"
-    return 0
-  else
-    print_fail "Market Data"
-    return 1
-  fi
-}
-
-check_analytics() {
-  print_service "Analytics"
-  if curl -sf http://localhost:8086/health >/dev/null 2>&1; then
-    print_ok "Analytics"
-    return 0
-  else
-    print_fail "Analytics"
-    return 1
-  fi
-}
-
-check_strategy() {
-  print_service "Strategy"
-  if curl -sf http://localhost:8082/health >/dev/null 2>&1; then
-    print_ok "Strategy"
-    return 0
-  else
-    print_fail "Strategy"
-    return 1
-  fi
-}
-
-check_executor() {
-  print_service "Executor"
-  if curl -sf http://localhost:8083/health >/dev/null 2>&1; then
-    print_ok "Executor"
-    return 0
-  else
-    print_fail "Executor"
-    return 1
-  fi
-}
-
-check_monitor() {
-  print_service "Monitor"
-  if curl -sf http://localhost:8084/health >/dev/null 2>&1; then
-    print_ok "Monitor"
-    return 0
-  else
-    print_fail "Monitor"
-    return 1
-  fi
-}
-
-check_backtest() {
-  print_service "Backtest"
-  if curl -sf http://localhost:8085/health >/dev/null 2>&1; then
-    print_ok "Backtest"
-    return 0
-  else
-    print_fail "Backtest"
-    return 1
-  fi
-}
-
-check_api() {
-  print_service "API"
-  if curl -sf http://localhost:8080/health >/dev/null 2>&1; then
-    print_ok "API"
-    return 0
-  else
-    print_fail "API"
-    return 1
-  fi
-}
-
-check_web() {
-  print_service "Web"
-  if curl -sf http://localhost:3000 >/dev/null 2>&1; then
-    print_ok "Web"
-    return 0
-  else
-    print_fail "Web"
-    return 1
-  fi
-}
+check_market_data() { check_http "Market Data" "http://localhost:8081/health"; }
+check_analytics()  { check_http "Analytics" "http://localhost:8086/health"; }
+check_strategy()   { check_http "Strategy" "http://localhost:8082/health"; }
+check_executor()   { check_http "Executor" "http://localhost:8083/health"; }
+check_monitor()    { check_http "Monitor" "http://localhost:8084/health"; }
+check_backtest()   { check_http "Backtest" "http://localhost:8085/health"; }
+check_api()        { check_http "API" "http://localhost:8080/health"; }
+check_web()        { check_http "Web" "http://localhost:3000"; }
 
 check_all() {
   local failed=0
@@ -174,24 +63,20 @@ show_help() {
   echo ""
   echo "Usage: $0 [service]"
   echo ""
-  echo "Services available in the script:"
+  echo "Services:"
   echo "  all         - all services (default)"
-  echo "  postgres   - PostgreSQL"
-  echo "  redis      - Redis"
-  echo "  market-data - Market Data service (8081)"
-  echo "  analytics  - Analytics service (8086)"
-  echo "  strategy   - Strategy service (8082)"
-  echo "  executor   - Executor service (8083)"
-  echo "  monitor    - Monitor service (8084)"
-  echo "  backtest   - Backtest service (8085)"
-  echo "  api        - API service (8080)"
-  echo "  web        - Web dashboard (3000)"
+  echo "  postgres    - PostgreSQL"
+  echo "  redis       - Redis"
+  echo "  market-data - Market Data (8081)"
+  echo "  analytics   - Analytics (8086)"
+  echo "  strategy    - Strategy (8082)"
+  echo "  executor    - Executor (8083)"
+  echo "  monitor     - Monitor (8084)"
+  echo "  backtest    - Backtest (8085)"
+  echo "  api         - API (8080)"
+  echo "  web         - Web dashboard (3000)"
   echo ""
-  echo "Examples:"
-  echo "  $0"
-  echo "  $0 redis"
-  echo "  $0 api"
-  echo "  $0 strategy"
+  echo "Examples: $0, $0 redis, $0 api"
 }
 
 # Main
