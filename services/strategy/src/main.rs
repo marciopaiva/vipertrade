@@ -22,6 +22,8 @@ use tupa_typecheck::typecheck_program;
 use viper_domain::config::*;
 use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDecisionEvent};
 
+mod tupa_extensions;
+
 #[derive(Debug, Clone)]
 struct StrategyConfig {
     profile: String,
@@ -4354,6 +4356,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let execution_plan = load_execution_plan(&pipeline_path)?;
 
     let runtime = Runtime::new();
+    
+    // Register ViperTrade extensions
+    runtime.register_extension(tupa_extensions::get_extension());
+    
     register_strategy_steps(&runtime, &execution_plan, Arc::clone(&cfg));
     println!(
         "Loaded in-process plan '{}' with {} step(s) and profile {}/{}",

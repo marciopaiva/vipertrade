@@ -882,7 +882,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tokio",
  "tower-service",
  "tracing",
@@ -1642,7 +1642,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.37",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1679,7 +1679,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -2982,9 +2982,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-codegen"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0922a1d2198733459d23087e1661fb47ca0da910011c8248dcbef135d1a31383"
+checksum = "8d68c8cfa357ac85ffd82dedc0ddf01d90cfda1c048be8421f6a39dd835e4470"
 dependencies = [
  "serde",
  "serde_json",
@@ -2995,15 +2995,15 @@ dependencies = [
 
 [[package]]
 name = "tupa-effects"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efaa397cd1f76458ebef301daa2d616daebb5461fe4e1b70b1849bb62066cbcb"
+checksum = "5b949e1b79196c1cf6a07faabe4802ca79ce5b4c6c8300f16356c5e580d0d12d"
 
 [[package]]
 name = "tupa-lexer"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5271e30b4eb7489fcfb9ac9e1bf24ceaaed5d3a83ac3303ec1da6b66a43a035"
+checksum = "b985177991a9694270217897312420af6d9565604391c907ab415ae6b5610994"
 dependencies = [
  "nom",
  "serde",
@@ -3013,9 +3013,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-parser"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47a763b6b69b8964cbb52be83f80588f5aab38764cd8465adc7b1c348d261ddf"
+checksum = "b91e1de28e8061517dfaf0f4823d255bcfa49138ed6c34bf59781eb82f52464d"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -3024,9 +3024,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-pyffi"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f1845dd077d62944cfde14bab0e7fe6ec8edf166197273c4980a6ad2b471793"
+checksum = "6653ecb3ed5190308768f57f62c7bd90a371be05c3765207506b562e883eed8f"
 dependencies = [
  "once_cell",
  "pyo3",
@@ -3039,9 +3039,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-runtime"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18399d3600efb6c9ea6bffa67eababfce920bf42c74cbe6a2d75db89c55cdf2b"
+checksum = "73324fd1d8870d24b246abb6d742672355e52f77225454d08e4f53dc7c8949bc"
 dependencies = [
  "async-trait",
  "futures",
@@ -3058,9 +3058,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-typecheck"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6ab42445a38fead75049e2a0650b421fb49347a9bb9103ea34516a85c25498a"
+checksum = "1e210e14c499b158a96ebf81edd11bee9a26ab21486c5aab14d708a93812fb50"
 dependencies = [
  "thiserror 1.0.69",
  "tupa-effects",
@@ -3343,7 +3343,7 @@ dependencies = [
 
 [[package]]
 name = "viper-strategy"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "futures-util",

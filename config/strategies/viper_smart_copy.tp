@@ -7,28 +7,28 @@ fn step_check_consecutive_losses(input: { symbol: string }): bool {
 }
 
 fn step_validate_entry(
-  input: { symbol: string }
+   input: { symbol: string }
 ): {
-  passed: bool,
-  severity: string,
-  reason: string,
-  side: string,
-  entry_score: f64,
-  entry_breakdown: {
-    raw_score: i64,
-    clamped_score: i64,
-    components: [{
-      reason: string,
-      score: f64,
-      weight: f64,
-      contribution: i64
-    }; 3]
-  }
-} {
-  let outcome: { passed: bool, severity: string, reason: string } = warn("entry_pending_runtime");
-  let consensus_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "consensus_regime");
-  let bybit_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "bybit_regime");
-  let exchange_consensus: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "exchange_consensus");
+   passed: bool,
+   severity: string,
+   reason: string,
+   side: string,
+   entry_score: f64,
+   entry_breakdown: {
+     raw_score: i64,
+     clamped_score: i64,
+     components: [{
+       reason: string,
+       score: f64,
+       weight: f64,
+       contribution: i64
+     }; 3]
+   }
+ } {
+   let outcome: { passed: bool, severity: string, reason: string } = warn("entry_pending_runtime");
+   let consensus_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "consensus_regime");
+   let bybit_regime: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "bybit_regime");
+   let exchange_consensus: { score: f64, weight: f64, reason: string } = weighted(1.0, 20.0, "exchange_consensus");
   let raw_score: i64 = 60;
   return {
     passed: outcome.passed,
@@ -121,9 +121,9 @@ fn step_calc_smart_size(input: { symbol: string }): {
     }; 3]
   }
 } {
-  let volatility_discount: { score: f64, weight: f64, reason: string } = weighted(1.0, 40.0, "volatility_discount");
-  let risk_budget: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "risk_budget");
-  let position_cap_fit: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "position_cap_fit");
+let volatility_discount: { score: f64, weight: f64, reason: string } = weighted(1.0, 40.0, "volatility_discount");
+   let risk_budget: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "risk_budget");
+   let position_cap_fit: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "position_cap_fit");
   let raw_score: i64 = 100;
   return {
     quantity: 0.0,
@@ -176,8 +176,8 @@ fn step_validate_size(input: { symbol: string }): {
     }; 2]
   }
 } {
-  let min_position: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "min_position");
-  let max_position_cap: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "max_position_cap");
+let min_position: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "min_position");
+   let max_position_cap: { score: f64, weight: f64, reason: string } = weighted(1.0, 50.0, "max_position_cap");
   let raw_score: i64 = 100;
   return {
     passed: true,
@@ -252,12 +252,12 @@ fn step_signal_confirmation(input: {
   remaining_hits: i64,
   reason: string
 } {
-  return confirm(
-    input.temporal.signal_confirmation.observed,
-    input.temporal.signal_confirmation.consecutive_hits,
-    input.temporal.signal_confirmation.required_hits,
-    "signal_confirmation"
-  );
+return confirm(
+     input.temporal.signal_confirmation.observed,
+     input.temporal.signal_confirmation.consecutive_hits,
+     input.temporal.signal_confirmation.required_hits,
+     "signal_confirmation"
+   );
 }
 
 fn step_cooldown_guard(input: {
@@ -283,11 +283,11 @@ fn step_cooldown_guard(input: {
   remaining_ticks: i64,
   reason: string
 } {
-  return cooldown(
-    input.temporal.cooldown_guard.active,
-    input.temporal.cooldown_guard.remaining_seconds,
-    "cooldown_guard"
-  );
+return cooldown(
+     input.temporal.cooldown_guard.active,
+     input.temporal.cooldown_guard.remaining_seconds,
+     "cooldown_guard"
+   );
 }
 
 fn step_thesis_confirmation(input: {
@@ -314,12 +314,12 @@ fn step_thesis_confirmation(input: {
   remaining_hits: i64,
   reason: string
 } {
-  return confirm(
-    input.temporal.thesis_confirmation.observed,
-    input.temporal.thesis_confirmation.consecutive_hits,
-    input.temporal.thesis_confirmation.required_hits,
-    "thesis_confirmation"
-  );
+return confirm(
+     input.temporal.thesis_confirmation.observed,
+     input.temporal.thesis_confirmation.consecutive_hits,
+     input.temporal.thesis_confirmation.required_hits,
+     "thesis_confirmation"
+   );
 }
 
 fn step_decision(
@@ -364,26 +364,26 @@ fn step_decision(
     }; 8]
   }
 } {
-  let entry_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "entry_policy");
-  let funding_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "funding_policy");
-  let size_proposal: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_proposal");
-  let size_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_policy");
-  let trailing_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "trailing_policy");
-  let signal_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.signal_confirmation.consecutive_hits >= input.temporal.signal_confirmation.required_hits {
-    weighted(1.0, 5.0, "signal_confirmation_ready")
-  } else {
-    weighted(0.0, 5.0, "signal_confirmation_pending")
-  };
-  let cooldown_policy: { score: f64, weight: f64, reason: string } = if input.temporal.cooldown_guard.active {
-    weighted(0.0, 5.0, "cooldown_active")
-  } else {
-    weighted(1.0, 5.0, "cooldown_clear")
-  };
-  let thesis_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.thesis_confirmation.observed {
-    weighted(0.0, 5.0, "thesis_confirmation_pending")
-  } else {
-    weighted(1.0, 5.0, "thesis_confirmation_clear")
-  };
+let entry_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 30.0, "entry_policy");
+   let funding_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "funding_policy");
+   let size_proposal: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_proposal");
+   let size_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 15.0, "size_policy");
+   let trailing_policy: { score: f64, weight: f64, reason: string } = weighted(1.0, 10.0, "trailing_policy");
+   let signal_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.signal_confirmation.consecutive_hits >= input.temporal.signal_confirmation.required_hits {
+     weighted(1.0, 5.0, "signal_confirmation_ready")
+   } else {
+     weighted(0.0, 5.0, "signal_confirmation_pending")
+   };
+   let cooldown_policy: { score: f64, weight: f64, reason: string } = if input.temporal.cooldown_guard.active {
+     weighted(0.0, 5.0, "cooldown_active")
+   } else {
+     weighted(1.0, 5.0, "cooldown_clear")
+   };
+   let thesis_confirmation_policy: { score: f64, weight: f64, reason: string } = if input.temporal.thesis_confirmation.observed {
+     weighted(0.0, 5.0, "thesis_confirmation_pending")
+   } else {
+     weighted(1.0, 5.0, "thesis_confirmation_clear")
+   };
   let raw_score: i64 = 100;
   return {
     action: "HOLD",
