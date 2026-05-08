@@ -3,6 +3,31 @@
 
 ---
 
+## **⚠️ Analysis Update: v0.8.2 Migration Completed (2026-05-08)**
+
+**Scope of Changes:**
+- ✅ Bumped workspace and all service versions from 0.8.1 → 0.8.2
+- ✅ Updated TupaLang dependencies from `path = "../tupalang/crates/..."` to crates.io `"0.8.2"`
+- ✅ Added custom ViperTrade Tupa extensions: `viper::trailing_status`, `viper::position_sizing` (in `services/strategy/src/tupa_extensions.rs`)
+- ✅ Fixed `viper_smart_copy.tp` syntax: removed invalid `tupa::` namespace prefix from builtins (`warn`, `weighted`, `cooldown`)
+- ✅ All services compile and tests pass with TupaLang v0.8.2
+
+**Git History (vipertrade):**
+```
+42cc913 chore: bump all service versions to 0.8.2
+5998cc0 feat: update ViperTrade to TupaLang v0.8.2
+```
+
+**Impact on Analysis:**
+- Dependencies: TupaLang 0.8.1 → 0.8.2 (stable crates.io release)
+- Language version: unchanged (still TupaLang 0.8.x syntax)
+- All **P0-P3 recommendations from the deep-dive remain applicable** — no production-readiness items were addressed in this migration
+- Score remains **5.75/10** — still requires P0/P1 work before mainnet
+
+**Remaining Gap**: No changes to security, observability, K8s config, testing coverage, or backup/DR.
+
+---
+
 ## **18. Security Deep Dive (Continued)**
 
 ### **18.1 Authentication & Authorization Gaps**
@@ -926,4 +951,85 @@ Based on patterns found, here's what PR reviewers should check:
 
 ---
 
-*Relatório gerado em 2026-05-06 por análise automática do repositório ViperTrade (commit fa2f05f).*
+## **26. Post-Analysis Changes Log (v0.8.2 Migration)**
+
+**Date**: 2026-05-08  
+**Commit range**: `fa2f05f` → `42cc913` (vipertrade/main)
+
+### Changes Applied
+
+| # | File | Change | Type | Validation |
+|---|------|--------|------|------------|
+| 1 | `Cargo.toml` (workspace) | version: 0.8.1 → 0.8.2; Tupa deps: `path` → `"0.8.2"` (crates.io) | chore | `cargo build --workspace` ✅ |
+| 2 | All service `Cargo.toml` (8 files) | version: 0.8.1 → 0.8.2 | chore | `cargo build --workspace` ✅ |
+| 3 | `services/strategy/src/main.rs` | Added `mod tupa_extensions;` + `runtime.register_extension(...)` | feat | Compiles ✅ |
+| 4 | `services/strategy/src/tupa_extensions.rs` | New file — ViperTrade custom Tupa extensions (`viper::trailing_status`, `viper::position_sizing`) | feat | Tests pass (4 unit tests) ✅ |
+| 5 | `config/strategies/viper_smart_copy.tp` | Removed `tupa::` prefix from builtins (`warn`, `weighted`, `cooldown`) — invalid syntax | fix | `tupa check` ✅ |
+| 6 | `Cargo.lock` | Regenerated from crates.io resolves | chore | `cargo test --workspace` ✅ |
+
+**Validation Results:**
+```bash
+$ cargo build --workspace          # ✅ success (all 8 services + domain)
+$ cargo test --workspace           # ✅ success (5 domain tests)
+$ cargo run -p tupa-cli -- check config/strategies/viper_smart_copy.tp  # ✅ OK
+```
+
+### What Was NOT Changed (Critical Gaps Remain)
+
+| Category | P0 Items | Status |
+|----------|----------|--------|
+| **Security** | Web dashboard auth, operator RBAC, Redis AUTH | ❌ Not addressed |
+| **Observability** | Tracing init in all services, Prometheus metrics, structured logging | ❌ Not addressed |
+| **Infrastructure** | K8s resource limits, PDBs, NetworkPolicies, backup automation | ❌ Not addressed |
+| **Testing** | Unit test coverage (<10%), integration tests, e2e suite | ❌ Not addressed |
+| **Reliability** | `expect()` removal in strategy hotpath, DB transaction boundaries, config validation | ❌ Not addressed |
+
+**Conclusion**: v0.8.2 migration is **functionally complete** but **operationally unchanged**. All P0-P1 recommendations from the deep-dive remain outstanding.
+
+---
+
+## **27. Recommended Next Steps (Post-Migration)**
+
+### Immediate (P0 — Week 1-2)
+1. **Add K8s resource limits** matching Docker Compose values (strategy: 512Mi/1cpu, etc.)
+2. **Initialize `tracing`** in all 7 services (copy pattern from `viper-ai-analyst`)
+3. **Remove `.expect()`** calls in `services/strategy/src/main.rs` hotpath (lines ~5000+)
+4. **Wrap executor DB writes** in `sqlx::transaction()` for atomicity
+5. **Add `StrategyConfig::validate()`** to fail fast on malformed YAML
+
+### Short-term (P1 — Week 3-4)
+6. **Increase test coverage** to 70%+ (target: strategy, market-data, executor)
+7. **Add Prometheus metrics** (`prometheus` crate + `/metrics` endpoint)
+8. **Automated Postgres backups** via K8s CronJob → S3
+9. **Operator RBAC** with per-operator JWTs + audit logging
+10. **Web dashboard auth** with NextAuth.js
+
+### Medium-term (P2 — Month 2)
+11. **Redis HA** (Sentinel) + Postgres HA (Patroni)
+12. **PodDisruptionBudgets** for all stateful services
+13. **Typed config structs** replace `serde_json::Value`
+14. **OpenAPI spec** for API endpoints
+15. **Distributed tracing** (OpenTelemetry + Jaeger)
+
+---
+
+## **Summary Table: Repository Health (Post-Migration)**
+
+| Category | Score | Status | Notes |
+|----------|-------|--------|-------|
+| **Architecture** | 9/10 | ✅ Excellent | Tupa separation, audit trails, event sourcing |
+| **Code Quality** | 6/10 | ⚠️ Good | Clean but lacks tests, typed errors, no change |
+| **Security** | 4/10 | 🔴 Poor | Dashboard open, single operator token, no auth audit — unchanged |
+| **Testing** | 3/10 | 🔴 Critical | <10% coverage, no e2e tests — unchanged |
+| **Observability** | 2/10 | 🔴 Critical | No metrics, minimal logging, no tracing — unchanged |
+| **Deployment** | 5/10 | ⚠️ Needs Work | K8s resource limits missing, no HA, no backups — unchanged |
+| **Documentation** | 8/10 | ✅ Good | Extensive runbooks, ADRs, + Config DSL + plugin docs |
+| **DevEx** | 9/10 | ✅ Excellent | Make targets, local parity, validation scripts |
+
+**Overall**: **5.75/10** → **Still Needs Improvement for Production**
+
+**Ready for Mainnet?** ❌ **No** — P0 and P1 items must be completed first (estimated 3-4 weeks engineering effort).
+
+---
+
+*Análise original gerada em 2026-05-06 (commit fa2f05f). Atualizada para refletir migração v0.8.2 (commit 42cc913).*
