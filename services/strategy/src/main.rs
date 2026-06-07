@@ -97,58 +97,58 @@ fn build_base_state(input: &StrategyInput) -> Value {
 }
 
 /// Run a single legacy step, returning its result (or a HOLD/false-ish marker
-/// on error).
-fn real_step(step_name: &str, input: &StrategyInput, cfg: &StrategyConfig) -> Value {
-    execute_strategy_step(step_name, build_base_state(input), cfg).unwrap_or_else(
-        |e| json!({ "passed": false, "severity": "error", "reason": format!("step_error_{}", e) }),
-    )
-}
+/// Canonical step order. Later steps read earlier results from `state`
+/// (e.g. `validate_size` reads `calc_smart_size.quantity`, `decision` reads all),
+/// so a step must be run with its predecessors already accumulated.
+const STEP_ORDER: &[&str] = &[
+    "check_daily_loss",
+    "check_consecutive_losses",
+    "validate_entry",
+    "check_funding",
+    "calc_smart_size",
+    "validate_size",
+    "get_trailing_config",
+    "decision",
+];
 
-/// Run the prerequisite steps in order (accumulating their results into state),
-/// then run the `decision` branch over the assembled state.
-fn real_decision(input: &StrategyInput, cfg: &StrategyConfig) -> Value {
+/// Run the canonical sequence accumulating each result into `state`, and return
+/// the result of `target` — with all of its prerequisites already in `state`.
+/// This is what lets independent `pipeline!` steps reproduce the legacy logic's
+/// sequential-state behavior.
+fn run_steps_through(input: &StrategyInput, cfg: &StrategyConfig, target: &str) -> Value {
     let mut state = build_base_state(input);
-    for step in [
-        "check_daily_loss",
-        "check_consecutive_losses",
-        "validate_entry",
-        "check_funding",
-        "calc_smart_size",
-        "validate_size",
-        "get_trailing_config",
-    ] {
-        match execute_strategy_step(step, state.clone(), cfg) {
-            Ok(res) => {
-                if let Some(obj) = state.as_object_mut() {
-                    obj.insert(step.to_string(), res);
-                }
-            }
-            Err(e) => {
-                error!(step = step, err = %e, "real decision prerequisite step failed");
-            }
+    for &step in STEP_ORDER {
+        let res = execute_strategy_step(step, state.clone(), cfg).unwrap_or_else(|e| {
+            error!(step = step, err = %e, "real strategy step failed");
+            json!({ "passed": false, "severity": "error", "reason": format!("step_error_{}", e) })
+        });
+        if step == target {
+            return res;
+        }
+        if let Some(obj) = state.as_object_mut() {
+            obj.insert(step.to_string(), res);
         }
     }
-    execute_strategy_step("decision", state, cfg)
-        .unwrap_or_else(|e| json!({ "action": "HOLD", "reason": format!("decision_error_{}", e) }))
+    json!({ "passed": false, "reason": format!("unknown_step_{}", target) })
 }
 
 fn step_check_daily_loss(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("check_daily_loss", input, &cfg);
+        return run_steps_through(input, &cfg, "check_daily_loss");
     }
     json!({ "passed": true, "severity": "info", "reason": "daily_loss_valid", "symbol": input.symbol })
 }
 
 fn step_check_consecutive_losses(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("check_consecutive_losses", input, &cfg);
+        return run_steps_through(input, &cfg, "check_consecutive_losses");
     }
     json!({ "passed": true, "severity": "info", "reason": "consecutive_losses_valid", "symbol": input.symbol })
 }
 
 fn step_validate_entry(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("validate_entry", input, &cfg);
+        return run_steps_through(input, &cfg, "validate_entry");
     }
     json!({
         "passed": true,
@@ -167,7 +167,7 @@ fn step_validate_entry(input: &StrategyInput) -> Value {
 
 fn step_check_funding(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("check_funding", input, &cfg);
+        return run_steps_through(input, &cfg, "check_funding");
     }
     json!({
         "passed": true,
@@ -185,7 +185,7 @@ fn step_check_funding(input: &StrategyInput) -> Value {
 
 fn step_calc_smart_size(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("calc_smart_size", input, &cfg);
+        return run_steps_through(input, &cfg, "calc_smart_size");
     }
     json!({
         "quantity": 0.0,
@@ -204,7 +204,7 @@ fn step_calc_smart_size(input: &StrategyInput) -> Value {
 
 fn step_validate_size(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("validate_size", input, &cfg);
+        return run_steps_through(input, &cfg, "validate_size");
     }
     json!({
         "passed": true,
@@ -222,7 +222,7 @@ fn step_validate_size(input: &StrategyInput) -> Value {
 
 fn step_get_trailing_config(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_step("get_trailing_config", input, &cfg);
+        return run_steps_through(input, &cfg, "get_trailing_config");
     }
     json!({
         "enabled": false,
@@ -250,7 +250,7 @@ fn step_thesis_confirmation(_input: &StrategyInput) -> Value {
 
 fn step_decision(input: &StrategyInput) -> Value {
     if let Some(cfg) = real_cfg() {
-        return real_decision(input, &cfg);
+        return run_steps_through(input, &cfg, "decision");
     }
     json!({
         "action": "HOLD",
@@ -5531,7 +5531,7 @@ mod tests {
     fn real_decision_runs_end_to_end_and_returns_valid_action() {
         let input = strategy_input_with_signal(1000.0);
         let cfg = sample_cfg();
-        let decision = real_decision(&input, &cfg);
+        let decision = run_steps_through(&input, &cfg, "decision");
         let action = get_string(&decision, "action", "");
         assert!(
             matches!(action.as_str(), "ENTER_LONG" | "ENTER_SHORT" | "HOLD"),
