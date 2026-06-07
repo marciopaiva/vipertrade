@@ -20,6 +20,12 @@ const nextConfig = {
   // Rewrites for API backend
   async rewrites() {
     return [
+      // Keep NextAuth routes local (do not proxy to backend API)
+      {
+        source: '/api/auth/:path*',
+        destination: '/api/auth/:path*',
+      },
+      // All other /api routes go to backend
       {
         source: '/api/:path*',
         destination: apiRewriteDestination,

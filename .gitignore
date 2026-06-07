@@ -26,9 +26,22 @@ web/.next/
 web/out/
 web/.env.local
 web/.env.production
+# Stray root-level node tooling (web app lives under services/web)
+/node_modules/
+/yarn.lock
 # IDE / OS
 .vscode/
 .idea/
+# AI agent working directories (local scratch, not versioned)
+.kilo/
+.claude/
+.cursor/
+.aider*
+.windsurf/
+.continue/
+.codeium/
+.gemini/
+.roo/
 *.swp
 *.swo
 *~

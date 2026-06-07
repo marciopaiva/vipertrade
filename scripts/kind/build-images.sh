@@ -30,7 +30,7 @@ rust_args=(--build-arg RUST_VERSION=1.83 --build-arg RUST_BUILDER_IMAGE="${RUST_
 build_image postgres . database/Dockerfile
 build_image market-data . services/market-data/Dockerfile "${rust_args[@]}"
 build_image analytics . services/analytics/Dockerfile "${rust_args[@]}"
-build_image strategy . services/strategy/Dockerfile --build-arg TUPA_VERSION="${TUPA_VERSION:-v0.8.1}" --build-arg TUPA_BACKEND="${TUPA_BACKEND:-hybrid}" --build-arg RUST_VERSION=1.83 --build-arg STRATEGY_BUILDER_IMAGE="${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}" --build-arg STRATEGY_RUNTIME_IMAGE="${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}" "${rust_args[@]}"
+build_image strategy . services/strategy/Dockerfile --build-arg TUPA_VERSION="${TUPA_VERSION:-v0.9.5}" --build-arg TUPA_BACKEND="${TUPA_BACKEND:-hybrid}" --build-arg RUST_VERSION=1.83 --build-arg STRATEGY_BUILDER_IMAGE="${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}" --build-arg STRATEGY_RUNTIME_IMAGE="${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}" "${rust_args[@]}"
 build_image executor . services/executor/Dockerfile "${rust_args[@]}"
 build_image monitor . services/monitor/Dockerfile "${rust_args[@]}"
 build_image backtest . services/backtest/Dockerfile "${rust_args[@]}"

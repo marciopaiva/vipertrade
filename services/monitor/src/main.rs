@@ -302,10 +302,7 @@ async fn resolve_bybit_notional_usdt(
         match fetch_live_bybit_notional_usdt(http, cfg, symbol).await {
             Ok(v) => return Ok(v),
             Err(err) => {
-                eprintln!(
-                    "reconciliation: bybit live query failed for {}: {} (fallback snapshot)",
-                    symbol, err
-                );
+                tracing::warn!(symbol = %symbol, error = %err, "Bybit live query failed, using fallback snapshot");
             }
         }
     }
@@ -381,15 +378,12 @@ async fn publish_recon_event(redis_url: &str, result: &ReconResult) {
     });
 
     let Ok(client) = redis::Client::open(redis_url) else {
-        eprintln!("reconciliation: invalid REDIS_URL {}", redis_url);
+        tracing::warn!(redis_url = %redis_url, "Invalid REDIS_URL");
         return;
     };
 
     let Ok(mut conn) = client.get_multiplexed_async_connection().await else {
-        eprintln!(
-            "reconciliation: failed to connect to Redis at {}",
-            redis_url
-        );
+        tracing::warn!(redis_url = %redis_url, "Failed to connect to Redis");
         return;
     };
 
@@ -398,7 +392,7 @@ async fn publish_recon_event(redis_url: &str, result: &ReconResult) {
         .await;
 
     if let Err(err) = publish_result {
-        eprintln!("reconciliation: failed to publish Redis event: {}", err);
+        tracing::warn!(error = %err, "Failed to publish Redis event");
     }
 }
 
@@ -438,9 +432,11 @@ async fn maybe_publish_discord_alert(
     let key = format!("{}:{}", result.symbol, result.severity);
     let last = alert_last_sent.get(&key).copied();
     if !should_emit_alert(last, now, cfg.alert_cooldown_sec) {
-        println!(
-            "reconciliation: alert suppressed by cooldown symbol={} severity={} cooldown_sec={}",
-            result.symbol, result.severity, cfg.alert_cooldown_sec
+        tracing::debug!(
+            symbol = %result.symbol,
+            severity = %result.severity,
+            cooldown_sec = cfg.alert_cooldown_sec,
+            "Alert suppressed by cooldown"
         );
         return;
     }
@@ -463,10 +459,7 @@ async fn maybe_publish_discord_alert(
             alert_last_sent.insert(key, now);
         }
         Err(err) => {
-            eprintln!(
-                "reconciliation: failed to publish Discord alert for {}: {}",
-                result.symbol, err
-            );
+            tracing::warn!(symbol = %result.symbol, error = %err, "Failed to publish Discord alert");
         }
     }
 }
@@ -481,7 +474,7 @@ async fn run_reconciliation_cycle(
         let local_notional_usdt = match fetch_local_notional_usdt(pool, symbol).await {
             Ok(v) => v,
             Err(err) => {
-                eprintln!("reconciliation: local query failed for {}: {}", symbol, err);
+                tracing::warn!(symbol = %symbol, error = %err, "Local query failed");
                 continue;
             }
         };
@@ -489,10 +482,7 @@ async fn run_reconciliation_cycle(
         let bybit_notional_usdt = match resolve_bybit_notional_usdt(http, pool, cfg, symbol).await {
             Ok(v) => v,
             Err(err) => {
-                eprintln!(
-                    "reconciliation: failed to resolve bybit notional for {}: {}",
-                    symbol, err
-                );
+                tracing::warn!(symbol = %symbol, error = %err, "Failed to resolve Bybit notional");
                 continue;
             }
         };
@@ -513,20 +503,20 @@ async fn run_reconciliation_cycle(
         };
 
         if let Err(err) = persist_recon_result(pool, &result).await {
-            eprintln!("reconciliation: persist failed for {}: {}", symbol, err);
+            tracing::warn!(symbol = %symbol, error = %err, "Persist failed");
             continue;
         }
 
         publish_recon_event(&cfg.redis_url, &result).await;
         maybe_publish_discord_alert(cfg, &result, alert_last_sent).await;
 
-        println!(
-            "reconciliation: symbol={} local={} bybit={} drift={} severity={}",
-            result.symbol,
-            result.local_notional_usdt,
-            result.bybit_notional_usdt,
-            result.drift_notional_usdt,
-            result.severity
+        tracing::info!(
+            symbol = %result.symbol,
+            local = result.local_notional_usdt,
+            bybit = result.bybit_notional_usdt,
+            drift = result.drift_notional_usdt,
+            severity = %result.severity,
+            "Reconciliation result"
         );
     }
 }
@@ -565,17 +555,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .json()
         .init();
 
-    println!("Starting viper-monitor");
+    tracing::info!("Starting viper-monitor");
 
     let cfg = MonitorConfig::from_env();
-    println!(
-        "Monitor config: health_interval={}s reconciliation_interval={}s max_drift={} USDT cooldown={}s bybit_env={} symbols={}",
-        cfg.health_check_interval_sec,
-        cfg.reconciliation_interval_sec,
-        cfg.max_position_drift_notional_usdt,
-        cfg.alert_cooldown_sec,
-        cfg.bybit_env,
-        cfg.recon_symbols.join(",")
+    tracing::info!(
+        health_interval_sec = cfg.health_check_interval_sec,
+        reconciliation_interval_sec = cfg.reconciliation_interval_sec,
+        max_drift_usdt = cfg.max_position_drift_notional_usdt,
+        cooldown_sec = cfg.alert_cooldown_sec,
+        bybit_env = %cfg.bybit_env,
+        symbols = %cfg.recon_symbols.join(","),
+        "Monitor config"
     );
 
     let pool = if let Some(database_url) = resolve_database_url() {
@@ -585,21 +575,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .await
         {
             Ok(pool) => {
-                println!("Connected to PostgreSQL for reconciliation");
+                tracing::info!("Connected to PostgreSQL for reconciliation");
                 Some(pool)
             }
             Err(err) => {
-                eprintln!("monitor: failed to connect PostgreSQL: {}", err);
+                tracing::error!(error = %err, "Failed to connect PostgreSQL");
                 None
             }
         }
     } else {
-        eprintln!("monitor: database env not configured; reconciliation loop disabled");
+        tracing::warn!("Database env not configured; reconciliation loop disabled");
         None
     };
 
     let listener = TcpListener::bind("0.0.0.0:8084").await?;
-    println!("Health check server running on :8084");
+    tracing::info!("Health check server running on :8084");
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
@@ -618,7 +608,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     break;
                 }
                 _ = ticker.tick() => {
-                    println!("monitor heartbeat: health checks scheduled");
+                    tracing::debug!("monitor heartbeat: health checks scheduled");
                 }
             }
         }
@@ -648,7 +638,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                println!("Received shutdown signal, stopping viper-monitor");
+                tracing::info!("Received shutdown signal, stopping viper-monitor");
                 break;
             }
             accept_result = listener.accept() => {
@@ -656,7 +646,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tokio::spawn(async move {
                     let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+                        tracing::warn!(error = ?e, "Failed to write to socket");
                     }
                 });
             }

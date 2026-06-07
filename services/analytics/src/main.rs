@@ -6,10 +6,10 @@ use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{watch, RwLock, Semaphore};
+use tracing::{error, info, warn};
 use viper_domain::config::*;
+use warp::Filter;
 
 #[derive(Clone, Copy)]
 struct Candle {
@@ -44,33 +44,70 @@ struct ScoresSnapshot {
     by_symbol: Vec<SymbolScore>,
 }
 
-fn compute_rsi14(candles: &[Candle]) -> Option<f64> {
-    if candles.len() < 15 {
+const RSI_PERIOD: usize = 14;
+
+fn compute_rsi_wilder(candles: &[Candle]) -> Option<f64> {
+    if candles.len() < RSI_PERIOD + 1 {
         return None;
     }
 
-    let start = candles.len() - 15;
-    let mut gains = 0.0;
-    let mut losses = 0.0;
+    let mut avg_gain = 0.0;
+    let mut avg_loss = 0.0;
 
-    for idx in (start + 1)..candles.len() {
-        let delta = candles[idx].close - candles[idx - 1].close;
+    for i in 1..=RSI_PERIOD {
+        let delta = candles[candles.len() - RSI_PERIOD - 1 + i].close - candles[candles.len() - RSI_PERIOD + i - 1].close;
         if delta >= 0.0 {
-            gains += delta;
+            avg_gain += delta;
         } else {
-            losses += -delta;
+            avg_loss -= delta;
         }
     }
 
-    let avg_gain = gains / 14.0;
-    let avg_loss = losses / 14.0;
+    avg_gain /= RSI_PERIOD as f64;
+    avg_loss /= RSI_PERIOD as f64;
 
-    if avg_loss == 0.0 {
+    for i in (candles.len() - RSI_PERIOD)..candles.len() {
+        let delta = candles[i].close - candles[i - 1].close;
+        let gain = if delta > 0.0 { delta } else { 0.0 };
+        let loss = if delta < 0.0 { -delta } else { 0.0 };
+
+        avg_gain = (avg_gain * (RSI_PERIOD - 1) as f64 + gain) / RSI_PERIOD as f64;
+        avg_loss = (avg_loss * (RSI_PERIOD - 1) as f64 + loss) / RSI_PERIOD as f64;
+    }
+
+    if avg_loss < f64::EPSILON {
         return Some(100.0);
     }
 
     let rs = avg_gain / avg_loss;
     Some(100.0 - (100.0 / (1.0 + rs)))
+}
+
+struct ExchangeClients {
+    bybit: reqwest::Client,
+    binance: reqwest::Client,
+    okx: reqwest::Client,
+}
+
+impl ExchangeClients {
+    fn new() -> Result<Self, reqwest::Error> {
+        let bybit = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .user_agent("vipertrade-analytics/0.9")
+            .build()?;
+
+        let binance = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .user_agent("vipertrade-analytics/0.9")
+            .build()?;
+
+        let okx = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("vipertrade-analytics/0.9")
+            .build()?;
+
+        Ok(Self { bybit, binance, okx })
+    }
 }
 
 async fn fetch_bybit_snapshot(
@@ -88,6 +125,7 @@ async fn fetch_bybit_snapshot(
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
+
     if !body.status().is_success() {
         return Err(format!("http {}", body.status()));
     }
@@ -113,7 +151,7 @@ async fn fetch_bybit_snapshot(
     candles.reverse();
 
     let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi14(&candles).unwrap_or(50.0);
+    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
     let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
     Ok((price, trend_score))
 }
@@ -132,6 +170,7 @@ async fn fetch_binance_snapshot(
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
+
     if !body.status().is_success() {
         return Err(format!("http {}", body.status()));
     }
@@ -150,7 +189,7 @@ async fn fetch_binance_snapshot(
         .collect();
 
     let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi14(&candles).unwrap_or(50.0);
+    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
     let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
     Ok((price, trend_score))
 }
@@ -172,6 +211,7 @@ async fn fetch_okx_snapshot(http: &reqwest::Client, symbol: &str) -> Result<(f64
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
+
     if !body.status().is_success() {
         return Err(format!("http {}", body.status()));
     }
@@ -196,7 +236,7 @@ async fn fetch_okx_snapshot(http: &reqwest::Client, symbol: &str) -> Result<(f64
     candles.reverse();
 
     let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi14(&candles).unwrap_or(50.0);
+    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
     let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
     Ok((price, trend_score))
 }
@@ -417,10 +457,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .json()
         .init();
 
-    println!("Starting viper-analytics");
-
-    let listener = TcpListener::bind("0.0.0.0:8086").await?;
-    println!("Health/metrics server running on :8086");
+    info!("Starting viper-analytics");
 
     let symbols = parse_trading_pairs();
     let horizon_minutes = std::env::var("ANALYTICS_HORIZON_MINUTES")
@@ -439,21 +476,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(5)
         .max(2);
 
+    let max_concurrent_requests: usize = std::env::var("ANALYTICS_MAX_CONCURRENT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+
     let database_url = resolve_database_url().expect("DATABASE_URL or DB_* vars must be set");
 
-    let pool = PgPoolOptions::new()
+    let pool = Arc::new(PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
-        .await?;
+        .await?);
     ensure_schema(&pool).await?;
 
-    let score_cache = Arc::new(RwLock::new(ScoresSnapshot {
+    let score_cache: Arc<RwLock<ScoresSnapshot>> = Arc::new(RwLock::new(ScoresSnapshot {
         updated_at: Utc::now().to_rfc3339(),
         horizon_minutes,
         lookback_hours,
         exchanges: vec![],
         by_symbol: vec![],
     }));
+
+    let clients = Arc::new(ExchangeClients::new()?);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent_requests));
+    let bybit_base = Arc::new(resolve_bybit_base_url());
+
+    let health_route = warp::path("health")
+        .and(warp::get())
+        .and(with_state(Arc::clone(&pool)))
+        .and_then(handle_health);
+
+    let scores_route = warp::path("scores")
+        .and(warp::get())
+        .and(with_cache(Arc::clone(&score_cache)))
+        .and_then(handle_scores);
+
+    let api_routes = health_route.or(scores_route);
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
@@ -462,98 +520,73 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let _ = shutdown_signal_tx.send(true);
     });
 
-    let mut health_shutdown_rx = shutdown_rx.clone();
-    let score_cache_for_health = Arc::clone(&score_cache);
+    let score_cache_api = Arc::clone(&score_cache);
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = health_shutdown_rx.changed() => {
-                    break;
-                }
-                accept_result = listener.accept() => {
-                    if let Ok((mut socket, _)) = accept_result {
-                        let score_cache_for_conn = Arc::clone(&score_cache_for_health);
-                        tokio::spawn(async move {
-                            let mut request_buf = [0_u8; 2048];
-                            let bytes_read = socket.read(&mut request_buf).await.unwrap_or(0);
-                            let request = String::from_utf8_lossy(&request_buf[..bytes_read]);
-
-                            let response = if request.starts_with("GET /scores") {
-                                let payload = score_cache_for_conn.read().await.clone();
-                                let body = serde_json::to_string(&payload)
-                                    .unwrap_or_else(|_| "{\"error\":\"encode_failed\"}".to_string());
-                                format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
-                                    body.len(),
-                                    body
-                                )
-                            } else if request.starts_with("GET /health") {
-                                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK".to_string()
-                            } else {
-                                "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found".to_string()
-                            };
-
-                            if let Err(e) = socket.write_all(response.as_bytes()).await {
-                                eprintln!("failed to write to socket; err = {:?}", e);
-                            }
-                        });
-                    }
-                }
-            }
-        }
+        warp::serve(api_routes).run(([0, 0, 0, 0], 8086)).await;
+        let _ = score_cache_api;
     });
 
-    let bybit_base = resolve_bybit_base_url();
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .user_agent("vipertrade-analytics/0.8")
-        .build()?;
-
-    println!(
-        "Analytics enabled with horizon={}m lookback={}h sample={}s symbols={}",
-        horizon_minutes,
-        lookback_hours,
-        sample_interval_seconds,
-        symbols.join(",")
+    info!(
+        horizon = horizon_minutes,
+        lookback = lookback_hours,
+        interval = sample_interval_seconds,
+        max_concurrent = max_concurrent_requests,
+        symbols = symbols.join(","),
+        "Analytics configured"
     );
 
     loop {
         if *shutdown_rx.borrow() {
-            println!("Received shutdown signal, stopping viper-analytics");
+            info!("Received shutdown signal, stopping viper-analytics");
             break;
         }
 
+        let mut tasks = vec![];
+
         for symbol in &symbols {
-            match fetch_bybit_snapshot(&http, &bybit_base, symbol).await {
-                Ok((price, trend_score)) => {
-                    if let Err(e) =
-                        insert_snapshot(&pool, "bybit", symbol, price, trend_score).await
-                    {
-                        eprintln!("insert bybit snapshot failed {}: {}", symbol, e);
-                    }
-                }
-                Err(e) => eprintln!("fetch bybit failed {}: {}", symbol, e),
-            }
+            let http_bybit = clients.bybit.clone();
+            let http_binance = clients.binance.clone();
+            let http_okx = clients.okx.clone();
+            let pool_clone = pool.clone();
+            let sem_clone = semaphore.clone();
+            let bybit_base_clone = bybit_base.clone();
+            let symbol_owned = symbol.clone();
 
-            match fetch_binance_snapshot(&http, symbol).await {
-                Ok((price, trend_score)) => {
-                    if let Err(e) =
-                        insert_snapshot(&pool, "binance", symbol, price, trend_score).await
-                    {
-                        eprintln!("insert binance snapshot failed {}: {}", symbol, e);
-                    }
-                }
-                Err(e) => eprintln!("fetch binance failed {}: {}", symbol, e),
-            }
+            tasks.push(tokio::spawn(async move {
+                let _permit = sem_clone.acquire().await.unwrap();
 
-            match fetch_okx_snapshot(&http, symbol).await {
-                Ok((price, trend_score)) => {
-                    if let Err(e) = insert_snapshot(&pool, "okx", symbol, price, trend_score).await
-                    {
-                        eprintln!("insert okx snapshot failed {}: {}", symbol, e);
+                match fetch_bybit_snapshot(&http_bybit, &bybit_base_clone, &symbol_owned).await {
+                    Ok((price, trend_score)) => {
+                        if let Err(e) = insert_snapshot(&pool_clone, "bybit", &symbol_owned, price, trend_score).await {
+                            warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "insert failed");
+                        }
                     }
+                    Err(e) => warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "fetch failed"),
                 }
-                Err(e) => eprintln!("fetch okx failed {}: {}", symbol, e),
+
+                match fetch_binance_snapshot(&http_binance, &symbol_owned).await {
+                    Ok((price, trend_score)) => {
+                        if let Err(e) = insert_snapshot(&pool_clone, "binance", &symbol_owned, price, trend_score).await {
+                            warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "insert failed");
+                        }
+                    }
+                    Err(e) => warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "fetch failed"),
+                }
+
+                match fetch_okx_snapshot(&http_okx, &symbol_owned).await {
+                    Ok((price, trend_score)) => {
+                        if let Err(e) = insert_snapshot(&pool_clone, "okx", &symbol_owned, price, trend_score).await {
+                            warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "insert failed");
+                        }
+                    }
+                    Err(e) => warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "fetch failed"),
+                }
+            }));
+        }
+
+        for task in tasks {
+            if let Err(e) = task.await {
+                error!(error = %e, "fetch task failed");
             }
         }
 
@@ -561,12 +594,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(scores) => {
                 *score_cache.write().await = scores;
             }
-            Err(e) => eprintln!("compute scores failed: {}", e),
+            Err(e) => error!(error = %e, "compute scores failed"),
         }
 
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                println!("Received shutdown signal, stopping viper-analytics");
+                info!("Received shutdown signal, stopping viper-analytics");
                 break;
             }
             _ = tokio::time::sleep(Duration::from_secs(sample_interval_seconds)) => {}
@@ -574,5 +607,84 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let _ = shutdown_tx.send(true);
+    info!("viper-analytics stopped");
     Ok(())
+}
+
+fn with_state(pool: Arc<PgPool>) -> impl Filter<Extract = (Arc<PgPool>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || pool.clone())
+}
+
+fn with_cache(cache: Arc<RwLock<ScoresSnapshot>>) -> impl Filter<Extract = (Arc<RwLock<ScoresSnapshot>>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || cache.clone())
+}
+
+async fn handle_health(pool: Arc<PgPool>) -> Result<impl warp::Reply, warp::Rejection> {
+    let db_connected = sqlx::query_scalar::<_, i64>("select 1")
+        .fetch_one(&*pool)
+        .await
+        .is_ok();
+
+    Ok(warp::reply::json(&serde_json::json!({
+        "status": "ok",
+        "db_connected": db_connected
+    })))
+}
+
+async fn handle_scores(cache: Arc<RwLock<ScoresSnapshot>>) -> Result<impl warp::Reply, warp::Rejection> {
+    let payload = cache.read().await.clone();
+    Ok(warp::reply::json(&payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_candles(prices: &[f64]) -> Vec<Candle> {
+        prices.iter().map(|p| Candle { close: *p }).collect()
+    }
+
+    #[test]
+    fn test_rsi_wilder_neutral() {
+        let candles = make_candles(&[100.0; 20]);
+        let rsi = compute_rsi_wilder(&candles);
+        assert_eq!(rsi, Some(100.0));
+    }
+
+    #[test]
+    fn test_rsi_wilder_insufficient_data() {
+        let candles = make_candles(&[100.0, 101.0]);
+        let rsi = compute_rsi_wilder(&candles);
+        assert_eq!(rsi, None);
+    }
+
+    #[test]
+    fn test_rsi_wilder_strong_uptrend() {
+        let candles = make_candles(&[
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+            112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0, 122.0, 123.0,
+        ]);
+        let rsi = compute_rsi_wilder(&candles);
+        assert!(rsi.unwrap() > 80.0);
+    }
+
+    #[test]
+    fn test_rsi_wilder_strong_downtrend() {
+        let candles = make_candles(&[
+            123.0, 122.0, 121.0, 120.0, 119.0, 118.0, 117.0, 116.0, 115.0, 114.0, 113.0, 112.0,
+            111.0, 110.0, 109.0, 108.0, 107.0, 106.0, 105.0, 104.0, 103.0, 102.0, 101.0, 100.0,
+        ]);
+        let rsi = compute_rsi_wilder(&candles);
+        assert!(rsi.unwrap() < 20.0);
+    }
+
+    #[test]
+    fn test_rsi_wilder_mixed() {
+        let candles = make_candles(&[
+            100.0, 102.0, 98.0, 103.0, 97.0, 104.0, 96.0, 105.0, 95.0, 106.0, 94.0, 107.0, 93.0,
+            108.0, 92.0, 109.0, 91.0, 110.0, 90.0, 111.0, 89.0, 112.0, 88.0,
+        ]);
+        let rsi = compute_rsi_wilder(&candles);
+        assert!(rsi.unwrap() > 40.0 && rsi.unwrap() < 70.0);
+    }
 }
