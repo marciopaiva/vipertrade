@@ -301,7 +301,6 @@ export default function ServiceFlowDiagram({
     const api = getService(services, 'api');
     const monitor = getService(services, 'monitor');
     const analytics = getService(services, 'analytics');
-    const backtest = getService(services, 'backtest');
     const aiAnalyst = getService(services, 'ai-analyst');
 
     return {
@@ -322,7 +321,6 @@ export default function ServiceFlowDiagram({
       api,
       monitor,
       analytics,
-      backtest,
       aiAnalyst,
     };
   }, [executorState, services]);
@@ -539,11 +537,6 @@ export default function ServiceFlowDiagram({
             label="AI ANALYST"
             latency={serviceState.aiAnalyst?.latency_ms}
             ok={serviceState.aiAnalyst?.ok}
-          />
-          <SidecarPill
-            label="BACKTEST"
-            latency={serviceState.backtest?.latency_ms}
-            ok={serviceState.backtest?.ok}
           />
         </div>
       </div>
