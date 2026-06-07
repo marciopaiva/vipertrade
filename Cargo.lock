@@ -2873,9 +2873,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-core"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68301dfb5fa00534b75e72931c77b1e0c7a2c8e031cce0650464442204052f2"
+checksum = "74b9f424cd169e68da4593266c90ce584cbbb489013ff30eed83f409e2cba7ae"
 dependencies = [
  "serde_json",
  "tupa-core-macros",
@@ -2883,9 +2883,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-core-macros"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f35f4f9795e899924fd19d35aa50ec8b1bb423ef5f5bd6084103bb299773d94"
+checksum = "d3a6ed979b3826a18d0d01452072edab4a91aea12281c7ec51e55ec2ee881b38"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2895,9 +2895,9 @@ dependencies = [
 
 [[package]]
 name = "tupa-engine"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42d7e9c1909f92ed455db0df47fa4dafc7f7c19d823473ff5a5042a061845d90"
+checksum = "7d686135ec09a8f8582e567e6679a740342853ce0751d105c514887082a74e3e"
 dependencies = [
  "serde",
  "serde_json",
