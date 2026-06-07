@@ -55,7 +55,8 @@ fn compute_rsi_wilder(candles: &[Candle]) -> Option<f64> {
     let mut avg_loss = 0.0;
 
     for i in 1..=RSI_PERIOD {
-        let delta = candles[candles.len() - RSI_PERIOD - 1 + i].close - candles[candles.len() - RSI_PERIOD + i - 1].close;
+        let delta = candles[candles.len() - RSI_PERIOD - 1 + i].close
+            - candles[candles.len() - RSI_PERIOD + i - 1].close;
         if delta >= 0.0 {
             avg_gain += delta;
         } else {
@@ -106,7 +107,11 @@ impl ExchangeClients {
             .user_agent("vipertrade-analytics/0.9")
             .build()?;
 
-        Ok(Self { bybit, binance, okx })
+        Ok(Self {
+            bybit,
+            binance,
+            okx,
+        })
     }
 }
 
@@ -483,10 +488,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let database_url = resolve_database_url().expect("DATABASE_URL or DB_* vars must be set");
 
-    let pool = Arc::new(PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?);
+    let pool = Arc::new(
+        PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&database_url)
+            .await?,
+    );
     ensure_schema(&pool).await?;
 
     let score_cache: Arc<RwLock<ScoresSnapshot>> = Arc::new(RwLock::new(ScoresSnapshot {
@@ -611,11 +618,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn with_state(pool: Arc<PgPool>) -> impl Filter<Extract = (Arc<PgPool>,), Error = std::convert::Infallible> + Clone {
+fn with_state(
+    pool: Arc<PgPool>,
+) -> impl Filter<Extract = (Arc<PgPool>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || pool.clone())
 }
 
-fn with_cache(cache: Arc<RwLock<ScoresSnapshot>>) -> impl Filter<Extract = (Arc<RwLock<ScoresSnapshot>>,), Error = std::convert::Infallible> + Clone {
+fn with_cache(
+    cache: Arc<RwLock<ScoresSnapshot>>,
+) -> impl Filter<Extract = (Arc<RwLock<ScoresSnapshot>>,), Error = std::convert::Infallible> + Clone
+{
     warp::any().map(move || cache.clone())
 }
 
@@ -631,7 +643,9 @@ async fn handle_health(pool: Arc<PgPool>) -> Result<impl warp::Reply, warp::Reje
     })))
 }
 
-async fn handle_scores(cache: Arc<RwLock<ScoresSnapshot>>) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_scores(
+    cache: Arc<RwLock<ScoresSnapshot>>,
+) -> Result<impl warp::Reply, warp::Rejection> {
     let payload = cache.read().await.clone();
     Ok(warp::reply::json(&payload))
 }

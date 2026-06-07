@@ -15,9 +15,9 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::{watch, RwLock};
+use tracing::{error, info, warn};
 use tupa_core::pipeline;
 use tupa_engine::Executor;
-use tracing::{error, info, warn};
 use viper_domain::config::*;
 use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDecisionEvent};
 
@@ -4419,40 +4419,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                _ = health_shutdown_rx.changed() => {
-                    break;
-                }
-                accept_result = listener.accept() => {
-                    if let Ok((mut socket, _)) = accept_result {
-                        let invalid_signal_count_for_conn =
-                            Arc::clone(&invalid_signal_count_for_health);
-                        let last_invalid_signal_for_conn =
-                            Arc::clone(&last_invalid_signal_for_health);
-                        tokio::spawn(async move {
-                            let last_invalid = last_invalid_signal_for_conn.read().await.clone();
-                            let body = serde_json::json!({
-                                "status": "ok",
-                                "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
-                                "last_invalid_market_signal_drop": last_invalid.as_ref().map(|drop| json!({
-                                    "symbol": drop.symbol,
-                                    "stage": drop.stage,
-                                    "reason": drop.reason,
-                                    "timestamp": drop.timestamp,
-                                })),
-                            })
-                            .to_string();
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
-                                body.len(),
-                                body
-                            );
-if let Err(e) = socket.write_all(response.as_bytes()).await {
-                                    error!(err = ?e, "failed to write to socket");
+                            _ = health_shutdown_rx.changed() => {
+                                break;
+                            }
+                            accept_result = listener.accept() => {
+                                if let Ok((mut socket, _)) = accept_result {
+                                    let invalid_signal_count_for_conn =
+                                        Arc::clone(&invalid_signal_count_for_health);
+                                    let last_invalid_signal_for_conn =
+                                        Arc::clone(&last_invalid_signal_for_health);
+                                    tokio::spawn(async move {
+                                        let last_invalid = last_invalid_signal_for_conn.read().await.clone();
+                                        let body = serde_json::json!({
+                                            "status": "ok",
+                                            "invalid_market_signals_dropped": invalid_signal_count_for_conn.load(Ordering::Relaxed),
+                                            "last_invalid_market_signal_drop": last_invalid.as_ref().map(|drop| json!({
+                                                "symbol": drop.symbol,
+                                                "stage": drop.stage,
+                                                "reason": drop.reason,
+                                                "timestamp": drop.timestamp,
+                                            })),
+                                        })
+                                        .to_string();
+                                        let response = format!(
+                                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
+                                            body.len(),
+                                            body
+                                        );
+            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                                                error!(err = ?e, "failed to write to socket");
+                                            }
+                                    });
                                 }
-                        });
-                    }
-                }
-            }
+                            }
+                        }
         }
     });
 
@@ -4563,457 +4563,457 @@ if let Err(e) = socket.write_all(response.as_bytes()).await {
 
     loop {
         tokio::select! {
-            _ = shutdown_rx.changed() => {
-                if let Err(err) = flush_pending_entry_candidates(
-                    &mut publish_conn,
-                    db_pool.as_ref(),
-                    &mut pending_candidates,
-                    paper_max_open_positions,
-                ).await {
-                    error!(err = %err, "Failed to flush pending entry candidates during shutdown");
-                }
-                info!("Received shutdown signal, stopping viper-strategy");
-                break;
-            }
-            _ = selection_tick.tick() => {
-                let should_flush = pending_candidates
-                    .values()
-                    .map(|candidate| candidate.created_at.elapsed() >= selection_window)
-                    .any(|ready| ready);
-                if should_flush {
-                    if let Err(err) = flush_pending_entry_candidates(
-                        &mut publish_conn,
-                        db_pool.as_ref(),
-                        &mut pending_candidates,
-                        paper_max_open_positions,
-                    ).await {
-                        error!(err = %err, "Failed to flush pending entry candidates");
+                    _ = shutdown_rx.changed() => {
+                        if let Err(err) = flush_pending_entry_candidates(
+                            &mut publish_conn,
+                            db_pool.as_ref(),
+                            &mut pending_candidates,
+                            paper_max_open_positions,
+                        ).await {
+                            error!(err = %err, "Failed to flush pending entry candidates during shutdown");
+                        }
+                        info!("Received shutdown signal, stopping viper-strategy");
+                        break;
                     }
-                }
-            }
-            maybe_msg = messages.next() => {
-                let Some(msg) = maybe_msg else {
-                    error!("Market data stream ended unexpectedly; exiting so container can restart");
-                    return Err("market data stream ended unexpectedly".into());
-                };
-
-                let payload: String = msg.get_payload()?;
-
-                let signal_event: MarketSignalEvent = match serde_json::from_str(&payload) {
-                    Ok(evt) => evt,
-                    Err(_) => {
-                        let legacy_signal: MarketSignal = match serde_json::from_str(&payload) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                error!(err = %e, "Failed to parse market signal event");
-                                continue;
-                            }
-                        };
-                        MarketSignalEvent::new(legacy_signal)
-                    }
-                };
-
-                if let Err(err) = signal_event.validate() {
-                    invalid_signal_count.fetch_add(1, Ordering::Relaxed);
-                    let drop = InvalidSignalDrop {
-                        symbol: signal_event.signal.symbol.clone(),
-                        stage: "pre_decision".to_string(),
-                        reason: err.clone(),
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                    };
-                    *last_invalid_signal.write().await = Some(drop.clone());
-                    warn!(
-                        symbol = %drop.symbol,
-                        stage = %drop.stage,
-                        reason = %drop.reason,
-                        "Invalid market signal dropped"
-                    );
-                    continue;
-                }
-
-                let symbol = signal_event.signal.symbol.to_uppercase();
-                let trend = signal_event.signal.trend_score;
-
-                if cached_execution_advice.is_none()
-                    || last_execution_advice_fetch_at.elapsed() >= execution_advice_refresh
-                {
-                    if let Some(advice) = fetch_execution_advice(
-                        &ai_analyst_http,
-                        &ai_analyst_base_url,
-                        execution_advice_lookback_hours,
-                    )
-                    .await
-                    {
-                        cached_execution_advice = Some(advice);
-                    }
-                    last_execution_advice_fetch_at = Instant::now();
-                }
-
-                sync_execution_advice_guards(
-                    &mut entry_guards,
-                    cached_execution_advice
-                        .as_ref()
-                        .map(|snapshot| &snapshot.execution_advice),
-                );
-
-                if let Some(guard) = entry_guards.get_mut(&symbol) {
-                    if Instant::now() >= guard.cooldown_until {
-                        // Cooldown expiration alone is not enough; same-direction reentry stays blocked
-                        // until the market bias flips once.
-                    }
-                    if guard.awaiting_flip && !is_same_direction(&guard.blocked_side, trend) {
-                        guard.awaiting_flip = false;
-                    }
-                }
-
-                if let Some(pool) = &db_pool {
-                    match fetch_open_trade_for_symbol(pool, &symbol).await {
-                        Ok(Some(open)) => {
-                            let current_price = signal_event.signal.current_price;
-                            let exit_evaluation =
-                                evaluate_open_trade_exit(
-                                    &symbol,
-                                    current_price,
-                                    &open,
-                                    cfg.as_ref(),
-                                    active_position_advice_for_symbol(
-                                        cached_execution_advice.as_ref(),
-                                        &symbol,
-                                        &open.side,
-                                    ),
-                                );
-                            let close_decision = exit_evaluation.decision.clone();
-                            let trailing_eval = exit_evaluation.trailing.clone();
-                            if let Some(eval) = trailing_eval {
-                                let trailing_cfg = cfg.trailing_runtime_config(&symbol);
-                                if should_persist_trailing_update(
-                                    &open,
-                                    &eval,
-                                    trailing_cfg.min_move_threshold_pct,
-                                ) {
-                                    if let Err(err) = update_trade_trailing_state(
-                                        pool,
-                                        &open.trade_id,
-                                        eval.activated,
-                                        eval.peak_price,
-                                        eval.trail_pct,
-                                    )
-                                    .await
-                                    {
-                                        warn!(trade_id = %open.trade_id, err = %err, "Failed to persist trailing state");
-                                    }
-                                }
-                            }
-                            let decision = if let Some(decision) = close_decision {
-                                thesis_invalidations.remove(&symbol);
-                                decision
-                            } else if let Some(decision) = enforce_open_position_thesis_guard(
-                                &symbol,
-                                &signal_event.signal,
-                                &open,
-                                cfg.as_ref(),
-                                &mut thesis_invalidations,
-                            ) {
-                                if decision.action != "HOLD" {
-                                    thesis_invalidations.remove(&symbol);
-                                }
-                                decision
-                            } else {
-                                create_hold_decision(
-                                    &symbol,
-                                    &format!(
-                                        "exit_{}_{}",
-                                        exit_evaluation.trigger, exit_evaluation.reason
-                                    ),
-                                )
-                            };
-
-                            if let Err(err) = finalize_strategy_decision(
+                    _ = selection_tick.tick() => {
+                        let should_flush = pending_candidates
+                            .values()
+                            .map(|candidate| candidate.created_at.elapsed() >= selection_window)
+                            .any(|ready| ready);
+                        if should_flush {
+                            if let Err(err) = flush_pending_entry_candidates(
                                 &mut publish_conn,
                                 db_pool.as_ref(),
-                                FinalizeDecisionContext {
-                                    signal_event: &signal_event,
-                                    pipeline_input: &json!(&signal_event.signal),
-                                    runtime_output: &json!({
-                                        "open_trade_exit_trigger": exit_evaluation.trigger,
-                                        "open_trade_exit_reason": exit_evaluation.reason,
-                                        "active_position_advice": active_position_advice_for_symbol(
-                                            cached_execution_advice.as_ref(),
-                                            &symbol,
-                                            &open.side,
-                                        ),
-                                    }),
-                                    execution_time_ms: 0,
-                                },
-                                decision,
+                                &mut pending_candidates,
+                                paper_max_open_positions,
+                            ).await {
+                                error!(err = %err, "Failed to flush pending entry candidates");
+                            }
+                        }
+                    }
+                    maybe_msg = messages.next() => {
+                        let Some(msg) = maybe_msg else {
+                            error!("Market data stream ended unexpectedly; exiting so container can restart");
+                            return Err("market data stream ended unexpectedly".into());
+                        };
+
+                        let payload: String = msg.get_payload()?;
+
+                        let signal_event: MarketSignalEvent = match serde_json::from_str(&payload) {
+                            Ok(evt) => evt,
+                            Err(_) => {
+                                let legacy_signal: MarketSignal = match serde_json::from_str(&payload) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        error!(err = %e, "Failed to parse market signal event");
+                                        continue;
+                                    }
+                                };
+                                MarketSignalEvent::new(legacy_signal)
+                            }
+                        };
+
+                        if let Err(err) = signal_event.validate() {
+                            invalid_signal_count.fetch_add(1, Ordering::Relaxed);
+                            let drop = InvalidSignalDrop {
+                                symbol: signal_event.signal.symbol.clone(),
+                                stage: "pre_decision".to_string(),
+                                reason: err.clone(),
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                            };
+                            *last_invalid_signal.write().await = Some(drop.clone());
+                            warn!(
+                                symbol = %drop.symbol,
+                                stage = %drop.stage,
+                                reason = %drop.reason,
+                                "Invalid market signal dropped"
+                            );
+                            continue;
+                        }
+
+                        let symbol = signal_event.signal.symbol.to_uppercase();
+                        let trend = signal_event.signal.trend_score;
+
+                        if cached_execution_advice.is_none()
+                            || last_execution_advice_fetch_at.elapsed() >= execution_advice_refresh
+                        {
+                            if let Some(advice) = fetch_execution_advice(
+                                &ai_analyst_http,
+                                &ai_analyst_base_url,
+                                execution_advice_lookback_hours,
                             )
                             .await
                             {
-                                error!(err = %err, "Failed to publish open-position decision");
+                                cached_execution_advice = Some(advice);
                             }
-                            continue;
+                            last_execution_advice_fetch_at = Instant::now();
                         }
-                        Ok(None) => {
-                            thesis_invalidations.remove(&symbol);
+
+                        sync_execution_advice_guards(
+                            &mut entry_guards,
+                            cached_execution_advice
+                                .as_ref()
+                                .map(|snapshot| &snapshot.execution_advice),
+                        );
+
+                        if let Some(guard) = entry_guards.get_mut(&symbol) {
+                            if Instant::now() >= guard.cooldown_until {
+                                // Cooldown expiration alone is not enough; same-direction reentry stays blocked
+                                // until the market bias flips once.
+                            }
+                            if guard.awaiting_flip && !is_same_direction(&guard.blocked_side, trend) {
+                                guard.awaiting_flip = false;
+                            }
                         }
-                        Err(err) => {
-                            error!(symbol = %symbol, err = %err, "Failed to query open trade");
+
+                        if let Some(pool) = &db_pool {
+                            match fetch_open_trade_for_symbol(pool, &symbol).await {
+                                Ok(Some(open)) => {
+                                    let current_price = signal_event.signal.current_price;
+                                    let exit_evaluation =
+                                        evaluate_open_trade_exit(
+                                            &symbol,
+                                            current_price,
+                                            &open,
+                                            cfg.as_ref(),
+                                            active_position_advice_for_symbol(
+                                                cached_execution_advice.as_ref(),
+                                                &symbol,
+                                                &open.side,
+                                            ),
+                                        );
+                                    let close_decision = exit_evaluation.decision.clone();
+                                    let trailing_eval = exit_evaluation.trailing.clone();
+                                    if let Some(eval) = trailing_eval {
+                                        let trailing_cfg = cfg.trailing_runtime_config(&symbol);
+                                        if should_persist_trailing_update(
+                                            &open,
+                                            &eval,
+                                            trailing_cfg.min_move_threshold_pct,
+                                        ) {
+                                            if let Err(err) = update_trade_trailing_state(
+                                                pool,
+                                                &open.trade_id,
+                                                eval.activated,
+                                                eval.peak_price,
+                                                eval.trail_pct,
+                                            )
+                                            .await
+                                            {
+                                                warn!(trade_id = %open.trade_id, err = %err, "Failed to persist trailing state");
+                                            }
+                                        }
+                                    }
+                                    let decision = if let Some(decision) = close_decision {
+                                        thesis_invalidations.remove(&symbol);
+                                        decision
+                                    } else if let Some(decision) = enforce_open_position_thesis_guard(
+                                        &symbol,
+                                        &signal_event.signal,
+                                        &open,
+                                        cfg.as_ref(),
+                                        &mut thesis_invalidations,
+                                    ) {
+                                        if decision.action != "HOLD" {
+                                            thesis_invalidations.remove(&symbol);
+                                        }
+                                        decision
+                                    } else {
+                                        create_hold_decision(
+                                            &symbol,
+                                            &format!(
+                                                "exit_{}_{}",
+                                                exit_evaluation.trigger, exit_evaluation.reason
+                                            ),
+                                        )
+                                    };
+
+                                    if let Err(err) = finalize_strategy_decision(
+                                        &mut publish_conn,
+                                        db_pool.as_ref(),
+                                        FinalizeDecisionContext {
+                                            signal_event: &signal_event,
+                                            pipeline_input: &json!(&signal_event.signal),
+                                            runtime_output: &json!({
+                                                "open_trade_exit_trigger": exit_evaluation.trigger,
+                                                "open_trade_exit_reason": exit_evaluation.reason,
+                                                "active_position_advice": active_position_advice_for_symbol(
+                                                    cached_execution_advice.as_ref(),
+                                                    &symbol,
+                                                    &open.side,
+                                                ),
+                                            }),
+                                            execution_time_ms: 0,
+                                        },
+                                        decision,
+                                    )
+                                    .await
+                                    {
+                                        error!(err = %err, "Failed to publish open-position decision");
+                                    }
+                                    continue;
+                                }
+                                Ok(None) => {
+                                    thesis_invalidations.remove(&symbol);
+                                }
+                                Err(err) => {
+                                    error!(symbol = %symbol, err = %err, "Failed to query open trade");
+                                }
+                            }
                         }
-                    }
-                }
 
-                if last_wallet_fetch_at.elapsed() >= Duration::from_secs(15) {
-                    cached_account_equity_usdt = fetch_account_equity_usdt(
-                        &wallet_http,
-                        &wallet_api_base_url,
-                        fallback_equity_usdt,
-                    )
-                    .await;
-                    last_wallet_fetch_at = Instant::now();
-                }
-
-                let input_value = serde_json::to_value(&StrategyInput {
-                    symbol: signal_event.signal.symbol.clone(),
-                    temporal: build_temporal_pipeline_state(
-                        &symbol,
-                        trend,
-                        cfg.as_ref(),
-                        &entry_guards,
-                        &signal_confirmations,
-                        &thesis_invalidations,
-                    ),
-                    account_equity_usdt: cached_account_equity_usdt,
-                    config: json!({
-                        "bollinger": {
-                            "std_dev_multiplier": cfg.bollinger_std_dev_multiplier,
-                            "invalidation_threshold": cfg.bollinger_invalidation_threshold
+                        if last_wallet_fetch_at.elapsed() >= Duration::from_secs(15) {
+                            cached_account_equity_usdt = fetch_account_equity_usdt(
+                                &wallet_http,
+                                &wallet_api_base_url,
+                                fallback_equity_usdt,
+                            )
+                            .await;
+                            last_wallet_fetch_at = Instant::now();
                         }
-                    }),
-                })?;
-                let pipeline_input = input_value.clone();
-                let strategy_input: StrategyInput = serde_json::from_value(input_value.clone())?;
-                let pipeline_started_at = Instant::now();
-                let mut runtime_output = match executor.run_parallel(&pipeline, &strategy_input).await {
-                    Ok(result) => {
-                        let mut values = result.values;
-                        values.insert("execution_advice".to_string(), json!({}));
-                        json!(values)
-                    }
-                    Err(e) => {
-                        error!(err = %e, "Pipeline execution failed");
-                        continue;
-                    }
-                };
 
-                if let Some(obj) = runtime_output.as_object_mut() {
-                    obj.insert(
-                        "execution_advice".to_string(),
-                        serde_json::to_value(cached_execution_advice.clone())
-                            .unwrap_or_else(|_| json!({})),
-                    );
-                }
-
-                let decision_value = runtime_output.get("decision").cloned();
-                let Some(decision_value) = decision_value else {
-                    error!(symbol = %symbol, "Pipeline output missing 'decision' step result");
-                    continue;
-                };
-
-                match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
-                    Ok(decision) => {
-                        let intended_side = if decision.action == "ENTER_SHORT" {
-                            "short"
-                        } else {
-                            "long"
+                        let input_value = serde_json::to_value(&StrategyInput {
+                            symbol: signal_event.signal.symbol.clone(),
+                            temporal: build_temporal_pipeline_state(
+                                &symbol,
+                                trend,
+                                cfg.as_ref(),
+                                &entry_guards,
+                                &signal_confirmations,
+                                &thesis_invalidations,
+                            ),
+                            account_equity_usdt: cached_account_equity_usdt,
+                            config: json!({
+                                "bollinger": {
+                                    "std_dev_multiplier": cfg.bollinger_std_dev_multiplier,
+                                    "invalidation_threshold": cfg.bollinger_invalidation_threshold
+                                }
+                            }),
+                        })?;
+                        let pipeline_input = input_value.clone();
+                        let strategy_input: StrategyInput = serde_json::from_value(input_value.clone())?;
+                        let pipeline_started_at = Instant::now();
+                        let mut runtime_output = match executor.run_parallel(&pipeline, &strategy_input).await {
+                            Ok(result) => {
+                                let mut values = result.values;
+                                values.insert("execution_advice".to_string(), json!({}));
+                                json!(values)
+                            }
+                            Err(e) => {
+                                error!(err = %e, "Pipeline execution failed");
+                                continue;
+                            }
                         };
-                        let min_confirmation_ticks =
-                            cfg.min_signal_confirmation_ticks_for_side(&symbol, intended_side);
-                        let stop_loss_cooldown_minutes = cfg
-                            .stop_loss_cooldown_minutes_for_side(&symbol, intended_side)
-                            .max(default_stop_loss_cooldown_minutes);
-                        let recent_stop_loss_same_symbol = if let Some(pool) = &db_pool {
-                            if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
-                                match has_recent_stop_loss_for_symbol(
-                                    pool,
+
+                        if let Some(obj) = runtime_output.as_object_mut() {
+                            obj.insert(
+                                "execution_advice".to_string(),
+                                serde_json::to_value(cached_execution_advice.clone())
+                                    .unwrap_or_else(|_| json!({})),
+                            );
+                        }
+
+                        let decision_value = runtime_output.get("decision").cloned();
+                        let Some(decision_value) = decision_value else {
+                            error!(symbol = %symbol, "Pipeline output missing 'decision' step result");
+                            continue;
+                        };
+
+                        match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
+                            Ok(decision) => {
+                                let intended_side = if decision.action == "ENTER_SHORT" {
+                                    "short"
+                                } else {
+                                    "long"
+                                };
+                                let min_confirmation_ticks =
+                                    cfg.min_signal_confirmation_ticks_for_side(&symbol, intended_side);
+                                let stop_loss_cooldown_minutes = cfg
+                                    .stop_loss_cooldown_minutes_for_side(&symbol, intended_side)
+                                    .max(default_stop_loss_cooldown_minutes);
+                                let recent_stop_loss_same_symbol = if let Some(pool) = &db_pool {
+                                    if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                                        match has_recent_stop_loss_for_symbol(
+                                            pool,
+                                            &symbol,
+                                            stop_loss_cooldown_minutes,
+                                        )
+                                        .await
+                                        {
+                                            Ok(v) => v,
+        Err(err) => {
+                                                    warn!(symbol = %symbol, err = %err, "Failed to check stop-loss cooldown");
+                                                    false
+                                                }
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
+                                let decision = enforce_entry_guards(
                                     &symbol,
+                                    trend,
+                                    decision,
+                                    &mut entry_guards,
                                     stop_loss_cooldown_minutes,
+                                    recent_stop_loss_same_symbol,
+                                    &mut signal_confirmations,
+                                    min_confirmation_ticks,
+                                );
+
+                                let mut decision = decision;
+                                if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                                    let rank_score = decision_rank_score(&runtime_output);
+                                    let entry_score = decision_entry_score(&runtime_output);
+                                    decision = apply_execution_advice_veto(
+                                        &symbol,
+                                        decision,
+                                        entry_score,
+                                        rank_score,
+                                        cached_execution_advice
+                                            .as_ref()
+                                            .map(|snapshot| &snapshot.execution_advice),
+                                    );
+                                    decision = apply_execution_advice_sizing(
+                                        decision,
+                                        cached_execution_advice
+                                            .as_ref()
+                                            .map(|snapshot| &snapshot.execution_advice),
+                                        entry_score,
+                                        rank_score,
+                                        cfg.min_position_usdt(),
+                                    );
+                                }
+                                if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
+                                {
+                                    decision.reason = structured_hold_reason_from_state(&runtime_output);
+                                } else if decision.action == "HOLD"
+                                    && (decision.reason.starts_with("awaiting_signal_confirmation_")
+                                        || decision.reason.starts_with("cooldown_stop_loss_")
+                                        || decision.reason.starts_with("cooldown_thesis_invalidated_")
+                                        || decision.reason.starts_with("blocked_until_trend_flip_"))
+                                {
+                                    if let Some(temporal_reason) =
+                                        structured_temporal_reason_from_state(&runtime_output)
+                                    {
+                                        decision.reason =
+                                            format!("{}_{}", decision.reason, temporal_reason);
+                                    }
+                                }
+
+                                if decision.reason == "stop_loss_triggered" {
+                                    let blocked_side = if decision.action == "CLOSE_LONG" {
+                                        "Long"
+                                    } else if decision.action == "CLOSE_SHORT" {
+                                        "Short"
+                                    } else {
+                                        ""
+                                    };
+                                    if !blocked_side.is_empty() {
+                                        let cooldown_minutes = cfg
+                                            .stop_loss_cooldown_minutes_for_side(
+                                                &symbol,
+                                                &blocked_side.to_lowercase(),
+                                            )
+                                            .max(default_stop_loss_cooldown_minutes);
+                                        entry_guards.insert(
+                                            symbol.clone(),
+                                            EntryGuardState {
+                                                blocked_side: blocked_side.to_string(),
+                                                cooldown_until: Instant::now()
+                                                    + Duration::from_secs(
+                                                        (cooldown_minutes * 60) as u64,
+                                                    ),
+                                                cooldown_minutes,
+                                                cooldown_reason: "stop_loss".to_string(),
+                                                awaiting_flip: true,
+                                            },
+                                        );
+                                        signal_confirmations.remove(&symbol);
+                                    }
+                                } else if decision.reason.starts_with("thesis_invalidated") {
+                                    let blocked_side = if decision.action == "CLOSE_LONG" {
+                                        "Long"
+                                    } else if decision.action == "CLOSE_SHORT" {
+                                        "Short"
+                                    } else {
+                                        ""
+                                    };
+                                    if !blocked_side.is_empty() {
+                                        let cooldown_minutes = cfg
+                                            .thesis_invalidation_cooldown_minutes_for_side(
+                                                &symbol,
+                                                &blocked_side.to_lowercase(),
+                                            );
+                                        if cooldown_minutes > 0 {
+                                            entry_guards.insert(
+                                                symbol.clone(),
+                                                EntryGuardState {
+                                                    blocked_side: blocked_side.to_string(),
+                                                    cooldown_until: Instant::now()
+                                                        + Duration::from_secs(
+                                                            (cooldown_minutes * 60) as u64,
+                                                        ),
+                                                    cooldown_minutes,
+                                                    cooldown_reason: "thesis_invalidated".to_string(),
+                                                    awaiting_flip: true,
+                                                },
+                                            );
+                                            signal_confirmations.remove(&symbol);
+                                        }
+                                    }
+                                }
+
+                                let execution_time_ms =
+                                    pipeline_started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+
+                                if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
+                                    let rank_score = decision_rank_score(&runtime_output);
+                                    let entry_score = decision_entry_score(&runtime_output);
+                                    let candidate = PendingEntryCandidate {
+                                        signal_event: signal_event.clone(),
+                                        decision,
+                                        pipeline_input,
+                                        runtime_output,
+                                        execution_time_ms,
+                                        rank_score,
+                                        entry_score,
+                                        created_at: Instant::now(),
+                                    };
+                                    match pending_candidates.get(&symbol) {
+                                        Some(existing)
+                                            if existing.rank_score > candidate.rank_score
+                                                || (existing.rank_score == candidate.rank_score
+                                                    && existing.entry_score >= candidate.entry_score) => {}
+                                        _ => {
+                                            pending_candidates.insert(symbol.clone(), candidate);
+                                        }
+                                    }
+                                } else if let Err(err) = finalize_strategy_decision(
+                                    &mut publish_conn,
+                                    db_pool.as_ref(),
+                                    FinalizeDecisionContext {
+                                        signal_event: &signal_event,
+                                        pipeline_input: &pipeline_input,
+                                        runtime_output: &runtime_output,
+                                        execution_time_ms,
+                                    },
+                                    decision,
                                 )
                                 .await
                                 {
-                                    Ok(v) => v,
-Err(err) => {
-                                            warn!(symbol = %symbol, err = %err, "Failed to check stop-loss cooldown");
-                                            false
-                                        }
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-
-                        let decision = enforce_entry_guards(
-                            &symbol,
-                            trend,
-                            decision,
-                            &mut entry_guards,
-                            stop_loss_cooldown_minutes,
-                            recent_stop_loss_same_symbol,
-                            &mut signal_confirmations,
-                            min_confirmation_ticks,
-                        );
-
-                        let mut decision = decision;
-                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
-                            let rank_score = decision_rank_score(&runtime_output);
-                            let entry_score = decision_entry_score(&runtime_output);
-                            decision = apply_execution_advice_veto(
-                                &symbol,
-                                decision,
-                                entry_score,
-                                rank_score,
-                                cached_execution_advice
-                                    .as_ref()
-                                    .map(|snapshot| &snapshot.execution_advice),
-                            );
-                            decision = apply_execution_advice_sizing(
-                                decision,
-                                cached_execution_advice
-                                    .as_ref()
-                                    .map(|snapshot| &snapshot.execution_advice),
-                                entry_score,
-                                rank_score,
-                                cfg.min_position_usdt(),
-                            );
-                        }
-                        if decision.action == "HOLD" && decision.reason == "risk_constraints_not_met"
-                        {
-                            decision.reason = structured_hold_reason_from_state(&runtime_output);
-                        } else if decision.action == "HOLD"
-                            && (decision.reason.starts_with("awaiting_signal_confirmation_")
-                                || decision.reason.starts_with("cooldown_stop_loss_")
-                                || decision.reason.starts_with("cooldown_thesis_invalidated_")
-                                || decision.reason.starts_with("blocked_until_trend_flip_"))
-                        {
-                            if let Some(temporal_reason) =
-                                structured_temporal_reason_from_state(&runtime_output)
-                            {
-                                decision.reason =
-                                    format!("{}_{}", decision.reason, temporal_reason);
-                            }
-                        }
-
-                        if decision.reason == "stop_loss_triggered" {
-                            let blocked_side = if decision.action == "CLOSE_LONG" {
-                                "Long"
-                            } else if decision.action == "CLOSE_SHORT" {
-                                "Short"
-                            } else {
-                                ""
-                            };
-                            if !blocked_side.is_empty() {
-                                let cooldown_minutes = cfg
-                                    .stop_loss_cooldown_minutes_for_side(
-                                        &symbol,
-                                        &blocked_side.to_lowercase(),
-                                    )
-                                    .max(default_stop_loss_cooldown_minutes);
-                                entry_guards.insert(
-                                    symbol.clone(),
-                                    EntryGuardState {
-                                        blocked_side: blocked_side.to_string(),
-                                        cooldown_until: Instant::now()
-                                            + Duration::from_secs(
-                                                (cooldown_minutes * 60) as u64,
-                                            ),
-                                        cooldown_minutes,
-                                        cooldown_reason: "stop_loss".to_string(),
-                                        awaiting_flip: true,
-                                    },
-                                );
-                                signal_confirmations.remove(&symbol);
-                            }
-                        } else if decision.reason.starts_with("thesis_invalidated") {
-                            let blocked_side = if decision.action == "CLOSE_LONG" {
-                                "Long"
-                            } else if decision.action == "CLOSE_SHORT" {
-                                "Short"
-                            } else {
-                                ""
-                            };
-                            if !blocked_side.is_empty() {
-                                let cooldown_minutes = cfg
-                                    .thesis_invalidation_cooldown_minutes_for_side(
-                                        &symbol,
-                                        &blocked_side.to_lowercase(),
-                                    );
-                                if cooldown_minutes > 0 {
-                                    entry_guards.insert(
-                                        symbol.clone(),
-                                        EntryGuardState {
-                                            blocked_side: blocked_side.to_string(),
-                                            cooldown_until: Instant::now()
-                                                + Duration::from_secs(
-                                                    (cooldown_minutes * 60) as u64,
-                                                ),
-                                            cooldown_minutes,
-                                            cooldown_reason: "thesis_invalidated".to_string(),
-                                            awaiting_flip: true,
-                                        },
-                                    );
-                                    signal_confirmations.remove(&symbol);
+                                    error!(symbol = %signal_event.signal.symbol, err = %err, "Invalid strategy decision event contract");
                                 }
                             }
-                        }
-
-                        let execution_time_ms =
-                            pipeline_started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
-
-                        if matches!(decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
-                            let rank_score = decision_rank_score(&runtime_output);
-                            let entry_score = decision_entry_score(&runtime_output);
-                            let candidate = PendingEntryCandidate {
-                                signal_event: signal_event.clone(),
-                                decision,
-                                pipeline_input,
-                                runtime_output,
-                                execution_time_ms,
-                                rank_score,
-                                entry_score,
-                                created_at: Instant::now(),
-                            };
-                            match pending_candidates.get(&symbol) {
-                                Some(existing)
-                                    if existing.rank_score > candidate.rank_score
-                                        || (existing.rank_score == candidate.rank_score
-                                            && existing.entry_score >= candidate.entry_score) => {}
-                                _ => {
-                                    pending_candidates.insert(symbol.clone(), candidate);
-                                }
+                            Err(e) => {
+                                error!(symbol = %signal_event.signal.symbol, err = %e, "Failed to parse strategy decision");
                             }
-                        } else if let Err(err) = finalize_strategy_decision(
-                            &mut publish_conn,
-                            db_pool.as_ref(),
-                            FinalizeDecisionContext {
-                                signal_event: &signal_event,
-                                pipeline_input: &pipeline_input,
-                                runtime_output: &runtime_output,
-                                execution_time_ms,
-                            },
-                            decision,
-                        )
-                        .await
-                        {
-                            error!(symbol = %signal_event.signal.symbol, err = %err, "Invalid strategy decision event contract");
                         }
-                    }
-                    Err(e) => {
-                        error!(symbol = %signal_event.signal.symbol, err = %e, "Failed to parse strategy decision");
                     }
                 }
-            }
-        }
     }
 
     let _ = shutdown_tx.send(true);
@@ -5396,7 +5396,14 @@ mod tests {
             .run_parallel(&pipeline, &strategy_input_with_equity(1000.0))
             .await
             .expect("pipeline should run");
-        assert!(res.passed, "non-negative equity must satisfy the constraint");
-        assert!(res.failures.is_empty(), "unexpected failures: {:?}", res.failures);
+        assert!(
+            res.passed,
+            "non-negative equity must satisfy the constraint"
+        );
+        assert!(
+            res.failures.is_empty(),
+            "unexpected failures: {:?}",
+            res.failures
+        );
     }
 }

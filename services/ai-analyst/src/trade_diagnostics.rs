@@ -109,7 +109,8 @@ pub fn evaluate_exit_pressure(input: &AnalystSnapshot) -> ExitPressureResult {
     };
     let elevated_threshold = if closed_trades < 20.0 { 55.0 } else { 65.0 };
 
-    let (severity, reason, dynamic_threshold) = if input.exits.thesis_invalidated_pct >= high_threshold
+    let (severity, reason, dynamic_threshold) = if input.exits.thesis_invalidated_pct
+        >= high_threshold
         && input.exits.trailing_stop_pct <= 12.0
     {
         ("fail", "exit_pressure_high", high_threshold)

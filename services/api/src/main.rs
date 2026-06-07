@@ -16,15 +16,15 @@ use warp::http::StatusCode;
 use warp::reply::Json as WarpJson;
 use warp::{Filter, Rejection, Reply};
 
-use state::{
-    ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult, BybitPositionFetchResult,
-    BybitWalletFetchResult, ControlStateResponse, EventItem, EventsQuery, EventsResponse, ExecutorControlRequest,
-    ExecutorControlResponse, HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus,
-    PerformanceResponse, PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest,
-    RiskLimitsResponse, RiskLimitsStatus, StatusResponse, TradesQuery, TradesResponse, TradeItem,
-    ExecutorControlStatus,
-};
 use position_config::{default_trailing_profile, load_position_config};
+use state::{
+    ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
+    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, EventItem, EventsQuery,
+    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
+    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
+    RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
+};
 
 #[derive(Serialize)]
 struct RiskKpisResponse {
@@ -83,8 +83,6 @@ struct DailyTradesSummaryResponse {
     ret_code: Option<i64>,
     ret_msg: Option<String>,
 }
-
-
 
 fn resolve_position_triggers(
     state: &AppState,
@@ -1324,7 +1322,10 @@ async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
     let client = bybit_client::BybitClient::from_env();
     let url_base = client.base_url.clone();
     let result = client.wallet_balance(&account_type).await;
-    let url = format!("{}/v5/account/wallet-balance?accountType={}", url_base, account_type);
+    let url = format!(
+        "{}/v5/account/wallet-balance?accountType={}",
+        url_base, account_type
+    );
 
     if let Some(ref err) = result.error {
         if result.status != 0 && !err.contains("missing BYBIT_API") {
@@ -1431,7 +1432,9 @@ async fn fetch_bybit_order_history_today(
 
     let client = bybit_client::BybitClient::from_env();
     let url_base = client.base_url.clone();
-    let result = client.order_history("linear", "USDT", start_ms, end_ms, 50).await;
+    let result = client
+        .order_history("linear", "USDT", start_ms, end_ms, 50)
+        .await;
     let url = format!(
         "{}/v5/order/history?category=linear&settleCoin=USDT&startTime={}&endTime={}&limit=50",
         url_base, start_ms, end_ms
@@ -1483,7 +1486,9 @@ async fn fetch_bybit_closed_pnl_page(
     let end_ms = window_end_utc.timestamp_millis();
 
     let client = bybit_client::BybitClient::from_env();
-    let result = client.closed_pnl("linear", "USDT", start_ms, end_ms, limit, cursor).await;
+    let result = client
+        .closed_pnl("linear", "USDT", start_ms, end_ms, limit, cursor)
+        .await;
 
     BybitClosedPnlFetchResult {
         status: result.status,
@@ -1549,7 +1554,9 @@ async fn fetch_bybit_position_page(
     cursor: Option<&str>,
 ) -> BybitPositionFetchResult {
     let client = bybit_client::BybitClient::from_env();
-    let result = client.position_list("linear", settle_coin, 200, cursor).await;
+    let result = client
+        .position_list("linear", settle_coin, 200, cursor)
+        .await;
 
     BybitPositionFetchResult {
         status: result.status,

@@ -1345,7 +1345,11 @@ async fn fetch_market_signal(
         .map(|s| s.source)
         .collect::<Vec<_>>()
         .join(",");
-    let failures = if errors.is_empty() { "none" } else { &errors.join(" | ") };
+    let failures = if errors.is_empty() {
+        "none"
+    } else {
+        &errors.join(" | ")
+    };
     tracing::info!(
         symbol = %symbol,
         sources = %used_sources,
@@ -1628,12 +1632,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     *last_invalid_signal.write().await = Some(drop.clone());
-tracing::warn!(
-                            symbol = %drop.symbol,
-                            stage = %drop.stage,
-                            reason = %drop.reason,
-                            "Invalid market signal dropped"
-                        );
+                    tracing::warn!(
+                        symbol = %drop.symbol,
+                        stage = %drop.stage,
+                        reason = %drop.reason,
+                        "Invalid market signal dropped"
+                    );
                     continue;
                 }
                 let json = serde_json::to_string(&event)?;
