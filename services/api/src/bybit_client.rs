@@ -40,7 +40,10 @@ impl BybitClient {
     }
 
     fn compute_signature(&self, timestamp: &str, query_string: &str) -> Result<String, String> {
-        let payload = format!("{}{}{}{}", timestamp, self.api_key, self.recv_window, query_string);
+        let payload = format!(
+            "{}{}{}{}",
+            timestamp, self.api_key, self.recv_window, query_string
+        );
         let mut mac = Hmac::<Sha256>::new_from_slice(self.api_secret.as_bytes())
             .map_err(|e| format!("failed to initialize signature: {}", e))?;
         mac.update(payload.as_bytes());
@@ -75,7 +78,10 @@ impl BybitClient {
         };
 
         let url = format!("{}{}?{}", self.base_url, endpoint, query_string);
-        let client = match Client::builder().timeout(std::time::Duration::from_secs(5)).build() {
+        let client = match Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
             Ok(c) => c,
             Err(e) => {
                 return BybitResponse {
@@ -102,12 +108,18 @@ impl BybitClient {
         {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let parsed = resp.json::<Value>().await.unwrap_or_else(|_| Value::Object(Default::default()));
+                let parsed = resp
+                    .json::<Value>()
+                    .await
+                    .unwrap_or_else(|_| Value::Object(Default::default()));
                 BybitResponse {
                     status,
                     latency_ms: started.elapsed().as_millis() as i64,
                     ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
-                    ret_msg: parsed.get("retMsg").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    ret_msg: parsed
+                        .get("retMsg")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     body: parsed,
                     error: None,
                 }
@@ -125,7 +137,8 @@ impl BybitClient {
 
     pub async fn wallet_balance(&self, account_type: &str) -> BybitResponse {
         let query = format!("accountType={}", account_type);
-        self.get_with_auth("/v5/account/wallet-balance", &query).await
+        self.get_with_auth("/v5/account/wallet-balance", &query)
+            .await
     }
 
     pub async fn order_history(
@@ -138,7 +151,11 @@ impl BybitClient {
     ) -> BybitResponse {
         let query = format!(
             "category={}&settleCoin={}&startTime={}&endTime={}&limit={}",
-            category, settle_coin, start_time, end_time, limit.clamp(1, 50)
+            category,
+            settle_coin,
+            start_time,
+            end_time,
+            limit.clamp(1, 50)
         );
         self.get_with_auth("/v5/order/history", &query).await
     }
@@ -154,7 +171,11 @@ impl BybitClient {
     ) -> BybitResponse {
         let mut query = format!(
             "category={}&settleCoin={}&startTime={}&endTime={}&limit={}",
-            category, settle_coin, start_time, end_time, limit.clamp(1, 100)
+            category,
+            settle_coin,
+            start_time,
+            end_time,
+            limit.clamp(1, 100)
         );
         if let Some(c) = cursor.filter(|v| !v.is_empty()) {
             query.push_str("&cursor=");
@@ -170,7 +191,12 @@ impl BybitClient {
         limit: usize,
         cursor: Option<&str>,
     ) -> BybitResponse {
-        let mut query = format!("category={}&settleCoin={}&limit={}", category, settle_coin, limit.clamp(1, 200));
+        let mut query = format!(
+            "category={}&settleCoin={}&limit={}",
+            category,
+            settle_coin,
+            limit.clamp(1, 200)
+        );
         if let Some(c) = cursor.filter(|v| !v.is_empty()) {
             query.push_str("&cursor=");
             query.push_str(c);

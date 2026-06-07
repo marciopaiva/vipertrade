@@ -573,8 +573,8 @@ async fn run_tupa_diagnostics(
         .engine
         .run(&pipeline, snapshot)
         .map_err(|err| AnalystError::Runtime(err.to_string()))?;
-    
-    Ok(serde_json::to_value(&result.values).unwrap_or(json!({})) )
+
+    Ok(serde_json::to_value(&result.values).unwrap_or(json!({})))
 }
 
 async fn fetch_summary(
@@ -2105,7 +2105,7 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> trade_diagnostics::Analy
         .map(|item| item.total)
         .sum();
 
-trade_diagnostics::AnalystSnapshot {
+    trade_diagnostics::AnalystSnapshot {
         lookback_hours: ctx.hours,
         summary: trade_diagnostics::SnapshotSummary {
             closed_trades: ctx.summary.closed_trades,
@@ -2140,9 +2140,13 @@ trade_diagnostics::AnalystSnapshot {
             dynamic_threshold: {
                 let long_avg = long_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0);
                 let short_avg = short_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0);
-                if long_avg.abs() > 0.3 || short_avg.abs() > 0.3 { 70.0 }
-                else if ctx.summary.closed_trades < 20 { 55.0 }
-                else { 80.0 }
+                if long_avg.abs() > 0.3 || short_avg.abs() > 0.3 {
+                    70.0
+                } else if ctx.summary.closed_trades < 20 {
+                    55.0
+                } else {
+                    80.0
+                }
             },
         },
         sides: trade_diagnostics::SnapshotSideMetrics {
@@ -2166,7 +2170,8 @@ trade_diagnostics::AnalystSnapshot {
             volume_blocks,
             macd_blocks,
             blocker_density: if ctx.summary.closed_trades as f64 > 0.0 {
-                (consensus_blocks + volume_blocks + macd_blocks) as f64 / ctx.summary.closed_trades as f64
+                (consensus_blocks + volume_blocks + macd_blocks) as f64
+                    / ctx.summary.closed_trades as f64
             } else {
                 0.0
             },

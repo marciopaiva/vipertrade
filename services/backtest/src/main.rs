@@ -50,21 +50,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     loop {
-tokio::select! {
-             _ = shutdown_rx.changed() => {
-                 tracing::info!("Received shutdown signal, stopping viper-backtest");
-                 break;
-             }
-             accept_result = listener.accept() => {
-                 let (mut socket, _) = accept_result?;
-                 tokio::spawn(async move {
-                     let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                     if let Err(e) = socket.write_all(response.as_bytes()).await {
-                         tracing::warn!(error = ?e, "Failed to write to socket");
-                     }
-                 });
-             }
-         }
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                tracing::info!("Received shutdown signal, stopping viper-backtest");
+                break;
+            }
+            accept_result = listener.accept() => {
+                let (mut socket, _) = accept_result?;
+                tokio::spawn(async move {
+                    let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+                    if let Err(e) = socket.write_all(response.as_bytes()).await {
+                        tracing::warn!(error = ?e, "Failed to write to socket");
+                    }
+                });
+            }
+        }
     }
 
     Ok(())
