@@ -186,14 +186,11 @@ async fn connect_executor_db(cfg: &ExecutorConfig) -> Result<Option<PgPool>, Box
             .await
         {
             Ok(pool) => {
-                println!("Executor database connection: enabled");
+                tracing::info!("Executor database connection: enabled");
                 return Ok(Some(pool));
             }
             Err(err) => {
-                eprintln!(
-                    "Executor database connection attempt {}/{} failed: {}",
-                    attempt, attempts, err
-                );
+                tracing::warn!(attempt = attempt, attempts = attempts, error = %err, "Executor database connection failed");
                 last_err = Some(err);
                 if attempt < attempts {
                     tokio::time::sleep(retry_delay).await;
@@ -214,10 +211,7 @@ async fn connect_executor_db(cfg: &ExecutorConfig) -> Result<Option<PgPool>, Box
     }
 
     if let Some(err) = last_err {
-        eprintln!(
-            "Executor database connection unavailable (running with in-memory idempotency only): {}",
-            err
-        );
+        tracing::warn!(error = %err, "Executor database connection unavailable");
     }
 
     Ok(None)
@@ -820,10 +814,10 @@ async fn run_bybit_sanity_checks(
         ));
     }
 
-    println!("Bybit sanity check: market/time OK");
+    tracing::info!("Bybit sanity check: market/time OK");
 
     if matches!(cfg.trading_mode, TradingMode::Paper) {
-        println!("Bybit sanity check: wallet skipped (paper mode uses database simulation)");
+        tracing::info!("Bybit sanity check: wallet skipped (paper mode uses database simulation)");
         return Ok(());
     }
 
@@ -831,7 +825,7 @@ async fn run_bybit_sanity_checks(
         if cfg.live_orders_enabled {
             return Err("live orders enabled but BYBIT_API_KEY/SECRET missing".to_string());
         }
-        println!("Bybit sanity check: wallet skipped (no API credentials)");
+        tracing::info!("Bybit sanity check: wallet skipped (no API credentials)");
         return Ok(());
     }
 
@@ -873,15 +867,9 @@ async fn run_bybit_sanity_checks(
 
     if let Some(ok_account_type) = wallet_ok_account_type {
         if ok_account_type != cfg.bybit_account_type.to_uppercase() {
-            eprintln!(
-                "Bybit sanity check: wallet-balance OK with fallback accountType={} (configured={})",
-                ok_account_type, cfg.bybit_account_type
-            );
+            tracing::warn!(ok_account_type = %ok_account_type, configured = %cfg.bybit_account_type, "Bybit sanity check: wallet-balance OK with fallback");
         } else {
-            println!(
-                "Bybit sanity check: wallet-balance OK (accountType={})",
-                cfg.bybit_account_type
-            );
+            tracing::info!(account_type = %cfg.bybit_account_type, "Bybit sanity check: wallet-balance OK");
         }
     } else {
         return Err(format!(
@@ -1381,14 +1369,7 @@ async fn submit_market_order(
     .map_err(|e| format!("notional validation failed: {e}"))?;
 
     if (normalized_qty - event.decision.quantity).abs() > 1e-9 {
-        println!(
-            "Adjusted order quantity event_id={} symbol={} action={} original_qty={} normalized_qty={}",
-            event.event_id,
-            event.decision.symbol,
-            event.decision.action,
-            event.decision.quantity,
-            normalized_qty
-        );
+        tracing::info!(event_id = %event.event_id, symbol = %event.decision.symbol, action = %event.decision.action, original_qty = event.decision.quantity, normalized_qty = normalized_qty, "Adjusted order quantity");
     }
 
     let qty_str = format_order_qty(normalized_qty, constraints.qty_step);
@@ -1591,10 +1572,7 @@ async fn fetch_order_execution_meta(
     let fills = match fetch_order_execution_fills(http, cfg, symbol, order_id).await {
         Ok(v) => v,
         Err(e) => {
-            eprintln!(
-                "Failed to fetch Bybit fills symbol={} order_id={} err={}",
-                symbol, order_id, e
-            );
+            tracing::warn!(symbol = %symbol, order_id = %order_id, error = %e, "Failed to fetch Bybit fills");
             Vec::new()
         }
     };
@@ -1753,13 +1731,13 @@ async fn set_bybit_trailing_stop(
         let value = bybit_private_post(http, cfg, "/v5/position/trading-stop", &body).await?;
         let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
         if ret_code == 0 {
-            println!(
-                "Configured Bybit trailing stop event_id={} symbol={} active_price={} trailing_distance={} attempt={}",
-                event.event_id,
-                event.decision.symbol,
-                format_price_value(active_price, constraints.tick_size),
-                format_price_value(trailing_distance, constraints.tick_size),
-                attempt,
+            tracing::info!(
+                event_id = %event.event_id,
+                symbol = %event.decision.symbol,
+                active_price = ?format_price_value(active_price, constraints.tick_size),
+                trailing_distance = ?format_price_value(trailing_distance, constraints.tick_size),
+                attempt = attempt,
+                "Configured Bybit trailing stop"
             );
             return Ok(());
         }
@@ -1935,10 +1913,7 @@ async fn run_reconciliation_tick(
             let diff = (local_qty - bybit_qty).abs();
 
             if diff > 1e-6 {
-                eprintln!(
-                    "Reconciliation diff symbol={} side={} local_qty={} bybit_qty={} diff={} fix_mode={}",
-                    symbol, side, local_qty, bybit_qty, diff, cfg.reconcile_fix
-                );
+                tracing::warn!(symbol = %symbol, side = %side, local_qty = local_qty, bybit_qty = bybit_qty, diff = diff, fix_mode = ?cfg.reconcile_fix, "Reconciliation diff");
 
                 if cfg.reconcile_fix {
                     if local_qty > bybit_qty + 1e-6 {
@@ -1956,16 +1931,10 @@ async fn run_reconciliation_tick(
                                     true,
                                 )
                                 .await;
-                                println!(
-                                    "Reconciliation fix applied symbol={} side={} before_local={} target_bybit={} after_local={}",
-                                    symbol, side, before, bybit_qty, after
-                                );
+                                tracing::info!(symbol = %symbol, side = %side, before_local = before, target_bybit = bybit_qty, after_local = after, "Reconciliation fix applied");
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "Reconciliation fix failed symbol={} side={} err={}",
-                                    symbol, side, e
-                                );
+                                tracing::warn!(symbol = %symbol, side = %side, error = %e, "Reconciliation fix failed");
                             }
                         }
                     } else {
@@ -1973,10 +1942,7 @@ async fn run_reconciliation_tick(
                             pool, &symbol, side, local_qty, bybit_qty, diff, false,
                         )
                         .await;
-                        eprintln!(
-                            "Reconciliation fix skipped symbol={} side={} reason=local_less_than_bybit",
-                            symbol, side
-                        );
+                        tracing::warn!(symbol = %symbol, side = %side, "Reconciliation fix skipped");
                     }
                 } else {
                     let _ = record_reconciliation_event(
@@ -2004,10 +1970,7 @@ async fn handle_decision_event(
     let idem_key = idempotency_key(&event).to_string();
 
     if !claim_processed_event(state, &idem_key, &event).await? {
-        println!(
-            "Skipping duplicate decision event_id={} source_event_id={}",
-            event.event_id, idem_key
-        );
+        tracing::info!(event_id = %event.event_id, source_event_id = %idem_key, "Skipping duplicate decision");
         return Ok(());
     }
 
@@ -2026,10 +1989,7 @@ async fn handle_decision_event(
     let runtime_controls = fetch_runtime_controls(state, cfg).await?;
 
     if !runtime_controls.executor_enabled && !is_close {
-        println!(
-            "Executor disabled by operator control; blocking event_id={} action={} symbol={}",
-            event.event_id, event.decision.action, event.decision.symbol
-        );
+        tracing::warn!(event_id = %event.event_id, action = %event.decision.action, symbol = %event.decision.symbol, "Executor disabled by operator control");
         mark_processed(
             state,
             &idem_key,
@@ -2043,18 +2003,17 @@ async fn handle_decision_event(
     }
 
     if runtime_controls.kill_switch_enabled && !is_close {
-        println!(
-            "Kill switch enabled; blocking event_id={} action={} symbol={}",
-            event.event_id, event.decision.action, event.decision.symbol
-        );
+        tracing::warn!(event_id = %event.event_id, action = %event.decision.action, symbol = %event.decision.symbol, "Kill switch enabled");
         mark_processed(state, &idem_key, &event, "blocked_kill_switch", None, None).await?;
         return Ok(());
     }
 
     if cfg.live_orders_enabled && !cfg.is_symbol_allowed_live(&event.decision.symbol) {
-        println!(
-            "Live order blocked by allowlist event_id={} symbol={} allowlist={:?}",
-            event.event_id, event.decision.symbol, cfg.live_symbol_allowlist
+        tracing::warn!(
+            event_id = %event.event_id,
+            symbol = %event.decision.symbol,
+            allowlist = ?cfg.live_symbol_allowlist,
+            "Live order blocked by allowlist"
         );
         mark_processed(
             state,
@@ -2070,9 +2029,11 @@ async fn handle_decision_event(
 
     if !cfg.live_orders_enabled {
         let paper_order_id = format!("paper-{}", event.event_id);
-        println!(
-            "Live orders disabled; paper-trade dry-run for event_id={} action={} symbol={}",
-            event.event_id, event.decision.action, event.decision.symbol,
+        tracing::info!(
+            event_id = %event.event_id,
+            action = %event.decision.action,
+            symbol = %event.decision.symbol,
+            "Live orders disabled; paper-trade dry-run"
         );
 
         let status = if is_close_action(&event.decision.action) {
@@ -2086,10 +2047,7 @@ async fn handle_decision_event(
                 }
                 Ok(CloseReconcileResult::NoLocalOpen) => "paper_close_no_local_open",
                 Err(e) => {
-                    eprintln!(
-                        "Failed to reconcile paper close event_id={} err={}",
-                        event.event_id, e
-                    );
+                    tracing::warn!(event_id = %event.event_id, error = %e, "Failed to reconcile paper close");
                     "paper_close_no_persist"
                 }
             }
@@ -2115,10 +2073,7 @@ async fn handle_decision_event(
                 }
                 Ok(false) => {}
                 Err(e) => {
-                    eprintln!(
-                        "Failed checking open trade for symbol/side event_id={} symbol={} side={} err={}",
-                        event.event_id, event.decision.symbol, side, e
-                    );
+                    tracing::warn!(event_id = %event.event_id, symbol = %event.decision.symbol, side = %side, error = %e, "Failed checking open trade");
                     mark_processed(
                         state,
                         &idem_key,
@@ -2147,10 +2102,7 @@ async fn handle_decision_event(
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!(
-                        "Failed checking global open trades event_id={} err={}",
-                        event.event_id, e
-                    );
+                    tracing::warn!(event_id = %event.event_id, error = %e, "Failed checking global open trades");
                     mark_processed(
                         state,
                         &idem_key,
@@ -2177,10 +2129,7 @@ async fn handle_decision_event(
             )
             .await
             {
-                eprintln!(
-                    "Failed to persist paper trade for event_id={} order_id={} err={}",
-                    event.event_id, paper_order_id, e
-                );
+                tracing::warn!(event_id = %event.event_id, order_id = %paper_order_id, error = %e, "Failed to persist paper trade");
                 "paper_open_no_persist"
             } else {
                 "paper_open"
@@ -2207,9 +2156,12 @@ async fn handle_decision_event(
 
     match submit_market_order(state, http, cfg, &event).await {
         Ok(order_id) => {
-            println!(
-                "Submitted Bybit order event_id={} order_id={} symbol={} action={}",
-                event.event_id, order_id, event.decision.symbol, event.decision.action
+            tracing::info!(
+                event_id = %event.event_id,
+                order_id = %order_id,
+                symbol = %event.decision.symbol,
+                action = %event.decision.action,
+                "Submitted Bybit order"
             );
 
             let mut status = "submitted";
@@ -2224,10 +2176,7 @@ async fn handle_decision_event(
             {
                 Ok(meta) => meta,
                 Err(e) => {
-                    eprintln!(
-                        "Failed to fetch execution metadata event_id={} order_id={} err={}, fallback decision price={}",
-                        event.event_id, order_id, e, event.decision.entry_price
-                    );
+                    tracing::warn!(event_id = %event.event_id, order_id = %order_id, error = %e, entry_price = event.decision.entry_price, "Failed to fetch execution metadata");
                     OrderExecutionMeta {
                         avg_price: None,
                         fee: None,
@@ -2240,10 +2189,7 @@ async fn handle_decision_event(
             if let Err(e) =
                 persist_bybit_fills(state, &event, &order_id, &execution_meta.fills).await
             {
-                eprintln!(
-                    "Failed to persist Bybit fills event_id={} order_id={} err={}",
-                    event.event_id, order_id, e
-                );
+                tracing::warn!(event_id = %event.event_id, order_id = %order_id, error = %e, "Failed to persist Bybit fills");
             }
 
             if is_close_action(&event.decision.action) {
@@ -2260,13 +2206,13 @@ async fn handle_decision_event(
                         trade_id,
                         realized_pnl,
                     }) => {
-                        println!(
-                            "Reconciled local close event_id={} trade_id={} symbol={} action={} realized_pnl={}",
-                            event.event_id,
-                            trade_id,
-                            event.decision.symbol,
-                            event.decision.action,
-                            realized_pnl
+                        tracing::info!(
+                            event_id = %event.event_id,
+                            trade_id = %trade_id,
+                            symbol = %event.decision.symbol,
+                            action = %event.decision.action,
+                            realized_pnl = realized_pnl,
+                            "Reconciled local close"
                         );
                         status = "submitted_close";
                     }
@@ -2275,13 +2221,13 @@ async fn handle_decision_event(
                         remaining_qty,
                         realized_pnl,
                     }) => {
-                        println!(
-                            "Reconciled partial close event_id={} trade_id={} symbol={} remaining_qty={} realized_pnl={}",
-                            event.event_id,
-                            trade_id,
-                            event.decision.symbol,
-                            remaining_qty,
-                            realized_pnl
+                        tracing::info!(
+                            event_id = %event.event_id,
+                            trade_id = %trade_id,
+                            symbol = %event.decision.symbol,
+                            remaining_qty = remaining_qty,
+                            realized_pnl = realized_pnl,
+                            "Reconciled partial close"
                         );
                         status = "submitted_close_partial";
                     }
@@ -2291,29 +2237,15 @@ async fn handle_decision_event(
                         close_qty,
                         realized_pnl,
                     }) => {
-                        eprintln!(
-                            "Close qty exceeds local open qty event_id={} trade_id={} symbol={} close_qty={} open_qty={} realized_pnl={}",
-                            event.event_id,
-                            trade_id,
-                            event.decision.symbol,
-                            close_qty,
-                            open_qty,
-                            realized_pnl
-                        );
+                        tracing::warn!(event_id = %event.event_id, trade_id = %trade_id, symbol = %event.decision.symbol, close_qty = close_qty, open_qty = open_qty, realized_pnl = realized_pnl, "Close qty exceeds local open qty");
                         status = "submitted_close_qty_exceeds_open";
                     }
                     Ok(CloseReconcileResult::NoLocalOpen) => {
-                        eprintln!(
-                            "No local open trade to close event_id={} symbol={} action={}",
-                            event.event_id, event.decision.symbol, event.decision.action
-                        );
+                        tracing::warn!(event_id = %event.event_id, symbol = %event.decision.symbol, action = %event.decision.action, "No local open trade to close");
                         status = "submitted_close_no_local_open";
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Failed to reconcile local close event_id={} order_id={} err={}",
-                            event.event_id, order_id, e
-                        );
+                        tracing::warn!(event_id = %event.event_id, order_id = %order_id, error = %e, "Failed to reconcile local close");
                         status = "submitted_close_no_persist";
                     }
                 }
@@ -2337,19 +2269,13 @@ async fn handle_decision_event(
                 )
                 .await
                 {
-                    eprintln!(
-                        "Failed to persist trade for event_id={} order_id={} err={}",
-                        event.event_id, order_id, e
-                    );
+                    tracing::warn!(event_id = %event.event_id, order_id = %order_id, error = %e, "Failed to persist trade");
                     status = "submitted_no_persist";
                 }
 
                 if let Err(e) = set_bybit_trailing_stop(state, http, cfg, &event, entry_price).await
                 {
-                    eprintln!(
-                        "Failed to configure Bybit trailing stop event_id={} order_id={} symbol={} err={}",
-                        event.event_id, order_id, event.decision.symbol, e
-                    );
+                    tracing::warn!(event_id = %event.event_id, order_id = %order_id, symbol = %event.decision.symbol, error = %e, "Failed to configure Bybit trailing stop");
                     if status == "submitted" {
                         status = "submitted_trailing_not_set";
                     }
@@ -2360,10 +2286,7 @@ async fn handle_decision_event(
         }
         Err(e) => {
             let err = e.to_string();
-            eprintln!(
-                "Failed to submit Bybit order event_id={} action={} symbol={} err={}",
-                event.event_id, event.decision.action, event.decision.symbol, err
-            );
+            tracing::warn!(event_id = %event.event_id, action = %event.decision.action, symbol = %event.decision.symbol, error = %err, "Failed to submit Bybit order");
             mark_processed(state, &idem_key, &event, "error", None, Some(&err)).await?;
         }
     }
@@ -2373,19 +2296,19 @@ async fn handle_decision_event(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    println!("Starting viper-executor");
+    tracing::info!("Starting viper-executor");
 
     let cfg = ExecutorConfig::from_env();
-    println!(
-        "Executor mode={} bybit_env={} executor_default_enabled={} live_orders_enabled={} reconcile_fix={} paper_max_open_positions={} base_url={} allowlist={:?}",
-        cfg.trading_mode.as_str(),
-        cfg.bybit_env,
-        cfg.executor_default_enabled,
-        cfg.live_orders_enabled,
-        cfg.reconcile_fix,
-        cfg.paper_max_open_positions,
-        cfg.bybit_base_url(),
-        cfg.live_symbol_allowlist
+    tracing::info!(
+        mode = %cfg.trading_mode.as_str(),
+        bybit_env = %cfg.bybit_env,
+        executor_default_enabled = cfg.executor_default_enabled,
+        live_orders_enabled = cfg.live_orders_enabled,
+        reconcile_fix = cfg.reconcile_fix,
+        paper_max_open_positions = cfg.paper_max_open_positions,
+        base_url = %cfg.bybit_base_url(),
+        allowlist = ?cfg.live_symbol_allowlist,
+        "Executor config"
     );
 
     let http = reqwest::Client::new();
@@ -2399,7 +2322,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .into());
             }
-            eprintln!("Bybit sanity checks warning (continuing dry-run): {}", err);
+            tracing::warn!(error = %err, "Bybit sanity checks warning (continuing dry-run)");
         }
     }
 
@@ -2412,7 +2335,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let listener = TcpListener::bind("0.0.0.0:8083").await?;
-    println!("Health check server running on :8083");
+    tracing::info!("Health check server running on :8083");
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
@@ -2429,7 +2352,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {
                     if let Err(e) = run_reconciliation_tick(&state_for_reconcile, &http_for_reconcile, &cfg_for_reconcile).await {
-                        eprintln!("Reconciliation tick failed: {}", e);
+                        tracing::warn!(error = %e, "Reconciliation tick failed");
                     }
                 }
             }
@@ -2452,7 +2375,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         tokio::spawn(async move {
                             let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
                             if let Err(e) = socket.write_all(response.as_bytes()).await {
-                                eprintln!("failed to write to socket; err = {:?}", e);
+                                tracing::warn!(error = ?e, "Failed to write to socket");
                             }
                         });
                     }
@@ -2461,25 +2384,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    println!("Connecting to Redis at {}", cfg.redis_url);
+    tracing::info!(redis_url = %cfg.redis_url, "Connecting to Redis");
     let redis_client = redis::Client::open(cfg.redis_url.clone())?;
     let mut ack_conn = redis_client.get_multiplexed_async_connection().await?;
     #[allow(deprecated)]
     let mut pubsub = redis_client.get_async_connection().await?.into_pubsub();
     pubsub.subscribe("viper:decisions").await?;
-    println!("Subscribed to viper:decisions");
+    tracing::info!("Subscribed to viper:decisions");
 
     let mut messages = pubsub.on_message();
 
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                println!("Received shutdown signal, stopping viper-executor");
+                tracing::info!("Received shutdown signal, stopping viper-executor");
                 break;
             }
             maybe_msg = messages.next() => {
                 let Some(msg) = maybe_msg else {
-                    eprintln!("Decision stream ended unexpectedly; exiting so container can restart");
+                    tracing::warn!("Decision stream ended unexpectedly; exiting so container can restart");
                     return Err("decision stream ended unexpectedly".into());
                 };
 
@@ -2487,7 +2410,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
                     if let Err(e) = handle_decision_event(&state, &http, &cfg, event.clone()).await {
-                        eprintln!("Executor failed handling event_id={} err={}", event.event_id, e);
+                        tracing::warn!(event_id = %event.event_id, error = %e, "Executor failed handling event");
                     }
 
                     let _ = ack_conn.publish::<_, _, ()>("viper:executor_events", payload).await;
@@ -2496,18 +2419,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if let Ok(decision) = serde_json::from_str::<StrategyDecision>(&payload) {
                     if let Err(err) = decision.validate() {
-                        eprintln!("Executor rejected invalid legacy decision err={}", err);
+                        tracing::warn!(error = %err, "Executor rejected invalid legacy decision");
                         continue;
                     }
 
-                    eprintln!(
-                        "Executor received legacy decision without event envelope; ignored action={} symbol={}",
-                        decision.action, decision.symbol
-                    );
+                    tracing::warn!(action = %decision.action, symbol = %decision.symbol, "Executor received legacy decision without event envelope");
                     continue;
                 }
 
-                eprintln!("Executor failed to parse decision payload");
+                tracing::warn!("Executor failed to parse decision payload");
             }
         }
     }

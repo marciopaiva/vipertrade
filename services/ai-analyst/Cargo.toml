@@ -1,6 +1,6 @@
 [package]
 name = "viper-ai-analyst"
-version = "0.8.2"
+version = "0.9.0"
 edition = "2021"
 description = "ViperTrade AI-assisted trade analytics service"
 
@@ -14,9 +14,7 @@ sqlx = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 thiserror = { workspace = true }
-tupa-parser = { workspace = true }
-tupa-codegen = { workspace = true }
-tupa-runtime = { workspace = true }
-tupa-typecheck = { workspace = true }
+tupa-core = { workspace = true }
+tupa-engine = { workspace = true }
 warp = "0.3"
 viper-domain = { workspace = true }

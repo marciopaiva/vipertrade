@@ -31,9 +31,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates libssl3 curl libpython3.11 netcat-openbsd && rm -rf /var/lib/apt/lists/*
 
 # Install Tupã CLI
-ARG TUPA_VERSION=v0.8.1
-ADD https://github.com/marciopaiva/tupalang/releases/download/${TUPA_VERSION}/tupa-linux-x86_64 /usr/local/bin/tupa
-RUN chmod +x /usr/local/bin/tupa && ls -l /usr/local/bin/tupa
+ARG TUPA_VERSION=v0.9.5
+# Note: v0.9.5+ uses cargo-tupa instead of tupa binary
+ADD https://github.com/marciopaiva/tupalang/releases/download/${TUPA_VERSION}/cargo-tupa-linux-x86_64 /usr/local/bin/tupa
+RUN chmod +x /usr/local/bin/tupa && ln -sf /usr/local/bin/tupa /usr/local/bin/cargo-tupa
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/viper-strategy /usr/local/bin/viper-strategy
@@ -45,4 +46,4 @@ RUN chmod +x /usr/local/bin/wait-for-deps.sh
 RUN useradd -m -u 1000 -U viper
 USER viper
 
-CMD ["wait-for-deps.sh", "postgres:5432", "redis:6379", "market-data:8081", "api:8080", "--", "viper-strategy"]
+CMD ["wait-for-deps.sh", "postgres:5432", "redis:6379", "market-data:8081", "--", "viper-strategy"]

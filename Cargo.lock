@@ -464,21 +464,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures"
-version = "0.3.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -551,7 +536,6 @@ version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
- "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -1025,15 +1009,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indoc"
-version = "2.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1199,15 +1174,6 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
-
-[[package]]
-name = "memoffset"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "mime"
@@ -1528,12 +1494,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
-name = "portable-atomic"
-version = "1.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
-
-[[package]]
 name = "potential_utf"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1564,69 +1524,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "pyo3"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e00b96a521718e08e03b1a622f01c8a8deb50719335de3f60b3b3950f069d8"
-dependencies = [
- "cfg-if",
- "indoc",
- "libc",
- "memoffset",
- "parking_lot",
- "portable-atomic",
- "pyo3-build-config",
- "pyo3-ffi",
- "pyo3-macros",
- "unindent",
-]
-
-[[package]]
-name = "pyo3-build-config"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7883df5835fafdad87c0d888b266c8ec0f4c9ca48a5bed6bbb592e8dedee1b50"
-dependencies = [
- "once_cell",
- "target-lexicon",
-]
-
-[[package]]
-name = "pyo3-ffi"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01be5843dc60b916ab4dad1dca6d20b9b4e6ddc8e15f50c47fe6d85f1fb97403"
-dependencies = [
- "libc",
- "pyo3-build-config",
-]
-
-[[package]]
-name = "pyo3-macros"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77b34069fc0682e11b31dbd10321cbf94808394c56fd996796ce45217dfac53c"
-dependencies = [
- "proc-macro2",
- "pyo3-macros-backend",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "pyo3-macros-backend"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08260721f32db5e1a5beae69a55553f56b99bd0e1c3e6e0a5e8851a9d0f5a85c"
-dependencies = [
- "heck",
- "proc-macro2",
- "pyo3-build-config",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -2617,12 +2514,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "target-lexicon"
-version = "0.12.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
-
-[[package]]
 name = "tempfile"
 version = "3.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2981,91 +2872,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "tupa-codegen"
-version = "0.8.2"
+name = "tupa-core"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d68c8cfa357ac85ffd82dedc0ddf01d90cfda1c048be8421f6a39dd835e4470"
+checksum = "b68301dfb5fa00534b75e72931c77b1e0c7a2c8e031cce0650464442204052f2"
 dependencies = [
- "serde",
  "serde_json",
- "tupa-lexer",
- "tupa-parser",
- "tupa-typecheck",
+ "tupa-core-macros",
 ]
 
 [[package]]
-name = "tupa-effects"
-version = "0.8.2"
+name = "tupa-core-macros"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b949e1b79196c1cf6a07faabe4802ca79ce5b4c6c8300f16356c5e580d0d12d"
-
-[[package]]
-name = "tupa-lexer"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b985177991a9694270217897312420af6d9565604391c907ab415ae6b5610994"
+checksum = "5f35f4f9795e899924fd19d35aa50ec8b1bb423ef5f5bd6084103bb299773d94"
 dependencies = [
- "nom",
- "serde",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
  "thiserror 1.0.69",
- "unicode-normalization",
 ]
 
 [[package]]
-name = "tupa-parser"
-version = "0.8.2"
+name = "tupa-engine"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91e1de28e8061517dfaf0f4823d255bcfa49138ed6c34bf59781eb82f52464d"
+checksum = "42d7e9c1909f92ed455db0df47fa4dafc7f7c19d823473ff5a5042a061845d90"
 dependencies = [
- "serde",
- "thiserror 1.0.69",
- "tupa-lexer",
-]
-
-[[package]]
-name = "tupa-pyffi"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6653ecb3ed5190308768f57f62c7bd90a371be05c3765207506b562e883eed8f"
-dependencies = [
- "once_cell",
- "pyo3",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tupa-parser",
- "tupa-typecheck",
-]
-
-[[package]]
-name = "tupa-runtime"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73324fd1d8870d24b246abb6d742672355e52f77225454d08e4f53dc7c8949bc"
-dependencies = [
- "async-trait",
- "futures",
- "lazy_static",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
- "tracing-subscriber",
- "tupa-codegen",
- "tupa-pyffi",
-]
-
-[[package]]
-name = "tupa-typecheck"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e210e14c499b158a96ebf81edd11bee9a26ab21486c5aab14d708a93812fb50"
-dependencies = [
- "thiserror 1.0.69",
- "tupa-effects",
- "tupa-lexer",
- "tupa-parser",
+ "tupa-core",
 ]
 
 [[package]]
@@ -3118,12 +2956,6 @@ name = "unicode_categories"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
-
-[[package]]
-name = "unindent"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
 
 [[package]]
 name = "unsafe-libyaml"
@@ -3197,7 +3029,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viper-ai-analyst"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "reqwest 0.11.27",
@@ -3208,17 +3040,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tupa-codegen",
- "tupa-parser",
- "tupa-runtime",
- "tupa-typecheck",
+ "tupa-core",
+ "tupa-engine",
  "viper-domain",
  "warp",
 ]
 
 [[package]]
 name = "viper-analytics"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "reqwest 0.11.27",
@@ -3230,11 +3060,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "viper-domain",
+ "warp",
 ]
 
 [[package]]
 name = "viper-api"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "bcrypt",
  "chrono",
@@ -3259,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "viper-backtest"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "serde",
@@ -3284,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "viper-executor"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3306,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "viper-market-data"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "redis 0.27.6",
@@ -3322,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "viper-monitor"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "hex",
@@ -3343,7 +3174,7 @@ dependencies = [
 
 [[package]]
 name = "viper-strategy"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3358,10 +3189,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tupa-codegen",
- "tupa-parser",
- "tupa-runtime",
- "tupa-typecheck",
+ "tupa-core",
+ "tupa-engine",
  "viper-domain",
 ]
 

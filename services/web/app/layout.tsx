@@ -1,5 +1,4 @@
 import './globals.css';
-import { SessionProvider } from 'next-auth/react';
 
 export const metadata = {
   title: 'ViperTrade Dashboard',
@@ -13,9 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <SessionProvider>{children}</SessionProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

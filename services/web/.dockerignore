@@ -2,8 +2,7 @@
 node_modules
 .npm
 
-# Build output
-.next
+# Build output (exclude only 'out' and 'dist' but keep .next for pre-built image)
 out
 build
 dist

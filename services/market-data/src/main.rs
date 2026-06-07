@@ -623,18 +623,18 @@ async fn fetch_analytics_weights(
     let response = match http.get(analytics_scores_url).send().await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("analytics weights fetch failed: {}", e);
+            tracing::warn!(error = %e, "Analytics weights fetch failed");
             return weights;
         }
     };
     if !response.status().is_success() {
-        eprintln!("analytics weights http {}", response.status());
+        tracing::warn!(status = %response.status(), "Analytics weights HTTP error");
         return weights;
     }
     let payload = match response.json::<AnalyticsScoresResponse>().await {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("analytics weights decode failed: {}", e);
+            tracing::warn!(error = %e, "Analytics weights decode failed");
             return weights;
         }
     };
@@ -1345,15 +1345,12 @@ async fn fetch_market_signal(
         .map(|s| s.source)
         .collect::<Vec<_>>()
         .join(",");
-    println!(
-        "Consensus market signal {} using sources=[{}] failures={}",
-        symbol,
-        used_sources,
-        if errors.is_empty() {
-            "none".to_string()
-        } else {
-            errors.join(" | ")
-        }
+    let failures = if errors.is_empty() { "none" } else { &errors.join(" | ") };
+    tracing::info!(
+        symbol = %symbol,
+        sources = %used_sources,
+        failures = %failures,
+        "Consensus market signal"
     );
     Ok(signal)
 }
@@ -1438,10 +1435,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .json()
         .init();
 
-    println!("Starting viper-market-data");
+    tracing::info!("Starting viper-market-data");
 
     let listener = TcpListener::bind("0.0.0.0:8081").await?;
-    println!("Health check server running on :8081");
+    tracing::info!("Health check server running on :8081");
     let latest_signals = Arc::new(RwLock::new(HashMap::<String, MarketSignal>::new()));
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -1508,7 +1505,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             };
 
                             if let Err(e) = socket.write_all(response.as_bytes()).await {
-                                eprintln!("failed to write to socket; err = {:?}", e);
+                                tracing::warn!(error = ?e, "Failed to write to socket");
                             }
                         });
                     }
@@ -1518,7 +1515,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let redis_url = resolve_redis_url();
-    println!("Connecting to Redis at {}", redis_url);
+    tracing::info!(redis_url = %redis_url, "Connecting to Redis");
 
     let client = redis::Client::open(redis_url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
@@ -1534,12 +1531,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(20)
         .max(1);
     let mut consensus_latch = HashMap::<String, ConsensusLatchState>::new();
-    println!(
-        "Market-data running in BYBIT_ENV={} base_url={} analytics_scores_url={} with pairs={}",
-        bybit_env,
-        base_url,
-        analytics_scores_url,
-        symbols.join(",")
+    tracing::info!(
+        bybit_env = %bybit_env,
+        base_url = %base_url,
+        analytics_scores_url = %analytics_scores_url,
+        pairs = %symbols.join(","),
+        "Market-data config"
     );
 
     let http = reqwest::Client::builder()
@@ -1549,7 +1546,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         if *shutdown_rx.borrow() {
-            println!("Received shutdown signal, stopping viper-market-data");
+            tracing::info!("Received shutdown signal, stopping viper-market-data");
             break;
         }
 
@@ -1563,13 +1560,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(err) => {
                 latest_signals.write().await.clear();
-                eprintln!(
-                    "Failed to refresh BTC macro context; clearing latest signals and skipping cycle: {}",
-                    err
-                );
+                tracing::error!(error = %err, "Failed to refresh BTC macro context; clearing latest signals and skipping cycle");
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
-                        println!("Received shutdown signal, stopping viper-market-data");
+                        tracing::info!("Received shutdown signal, stopping viper-market-data");
                         break;
                     }
                     _ = tokio::time::sleep(Duration::from_secs(5)) => {}
@@ -1595,16 +1589,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             timestamp: chrono::Utc::now().to_rfc3339(),
                         };
                         *last_invalid_signal.write().await = Some(drop.clone());
-                        eprintln!(
-                            "{}",
-                            serde_json::json!({
-                                "service": "market-data",
-                                "event": "invalid_market_signal_dropped",
-                                "symbol": drop.symbol,
-                                "stage": drop.stage,
-                                "reason": drop.reason,
-                                "timestamp": drop.timestamp,
-                            })
+                        tracing::warn!(
+                            symbol = %drop.symbol,
+                            stage = %drop.stage,
+                            reason = %drop.reason,
+                            "Invalid market signal dropped"
                         );
                         cycle_failed = true;
                         break;
@@ -1613,7 +1602,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(err) => {
                     cycle_failed = true;
-                    eprintln!("Failed to fetch market data for {}: {}", symbol, err);
+                    tracing::warn!(symbol = %symbol, error = %err, "Failed to fetch market data");
                     break;
                 }
             }
@@ -1621,10 +1610,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if cycle_failed || cycle_signals.len() != symbols.len() {
             latest_signals.write().await.clear();
-            eprintln!(
-                "Skipping market-data publish cycle because signals are incomplete: expected {} complete symbols, got {}",
-                symbols.len(),
-                cycle_signals.len()
+            tracing::warn!(
+                expected_symbols = symbols.len(),
+                got_symbols = cycle_signals.len(),
+                "Skipping market-data publish cycle because signals are incomplete"
             );
         } else {
             *latest_signals.write().await = cycle_signals.clone();
@@ -1639,34 +1628,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     *last_invalid_signal.write().await = Some(drop.clone());
-                    eprintln!(
-                        "{}",
-                        serde_json::json!({
-                            "service": "market-data",
-                            "event": "invalid_market_signal_dropped",
-                            "symbol": drop.symbol,
-                            "stage": drop.stage,
-                            "reason": drop.reason,
-                            "timestamp": drop.timestamp,
-                        })
-                    );
+tracing::warn!(
+                            symbol = %drop.symbol,
+                            stage = %drop.stage,
+                            reason = %drop.reason,
+                            "Invalid market signal dropped"
+                        );
                     continue;
                 }
                 let json = serde_json::to_string(&event)?;
                 if let Err(e) = conn.publish::<_, _, ()>("viper:market_data", json).await {
-                    eprintln!("Failed to publish market data: {}", e);
+                    tracing::warn!(error = %e, "Failed to publish market data");
                     break;
                 }
-                println!(
-                    "Published real market event {} for {}",
-                    event.event_id, event.signal.symbol
-                );
+                tracing::info!(event_id = %event.event_id, symbol = %event.signal.symbol, "Published real market event");
             }
         }
 
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                println!("Received shutdown signal, stopping viper-market-data");
+                tracing::info!("Received shutdown signal, stopping viper-market-data");
                 break;
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {}
