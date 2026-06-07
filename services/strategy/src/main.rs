@@ -4441,9 +4441,6 @@ if let Err(e) = socket.write_all(response.as_bytes()).await {
         }
     });
 
-    let _pipeline_path = std::env::var("TUPA_PIPELINE_PATH")
-        .or_else(|_| std::env::var("VIPER_PIPELINE_PATH"))
-        .unwrap_or_else(|_| "config/strategies/viper_smart_copy.tp".to_string());
     let strategy_config_path = std::env::var("STRATEGY_CONFIG")
         .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
     let profile_config_path = std::env::var("PROFILE_CONFIG")

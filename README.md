@@ -41,8 +41,9 @@ strong operational controls, and evidence-driven iteration.
 Instead of hiding strategy logic inside application code, ViperTrade uses
 [TupaLang](https://github.com/marciopaiva/tupalang) as a typed policy layer.
 The Rust services handle live state, exchange interaction, persistence, and
-operator tooling; the `.tp` strategy layer keeps decision semantics easier to
-validate, review, and evolve.
+operator tooling; the strategy is expressed as a TupaLang `pipeline!` (the
+Rust-embedded DSL from `tupa-core`/`tupa-engine`), which keeps decision
+semantics easier to validate, review, and evolve.
 
 ## Why ViperTrade
 
@@ -63,7 +64,7 @@ Core services:
 - `market-data`
   - ingests and normalizes exchange signals
 - `strategy`
-  - loads the validated Tupa-derived runtime plan and emits decisions
+  - evaluates the typed TupaLang `pipeline!` policy and emits decisions
 - `executor`
   - translates decisions into paper, testnet, or mainnet actions
 - `monitor`
