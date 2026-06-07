@@ -17,7 +17,7 @@ vt_info "Context: $KIND_CONTEXT | Namespace: $KIND_NAMESPACE | Registry: $KIND_R
 
 # Verify images in registry
 vt_step "Verifying images in registry"
-images=(vipertrade-market-data vipertrade-analytics vipertrade-strategy vipertrade-executor vipertrade-monitor vipertrade-backtest vipertrade-api vipertrade-ai-analyst vipertrade-web)
+images=(vipertrade-market-data vipertrade-analytics vipertrade-strategy vipertrade-executor vipertrade-monitor vipertrade-api vipertrade-ai-analyst vipertrade-web)
 
 for img in "${images[@]}"; do
   if ! curl -s "http://$KIND_REGISTRY/v2/$img/tags/list" 2>/dev/null | grep -q "$IMAGE_TAG"; then
@@ -36,7 +36,7 @@ kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" rollout status deployment
 kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" rollout status deployment/redis --timeout=120s
 
 vt_step "Waiting for application deployments"
-for deployment in market-data analytics strategy executor monitor backtest api ai-analyst web; do
+for deployment in market-data analytics strategy executor monitor api ai-analyst web; do
   kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" rollout status "deployment/$deployment" --timeout=240s
 done
 

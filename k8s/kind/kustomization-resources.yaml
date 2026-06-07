@@ -18,7 +18,6 @@ patchesStrategicMerge:
   # Monitor
   - patches/monitor-resources.yaml
   # Backtest
-  - patches/backtest-resources.yaml
   # API
   - patches/api-resources.yaml
   # AI Analyst

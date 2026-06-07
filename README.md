@@ -73,8 +73,6 @@ Core services:
   - market analysis and strategy performance insights
 - `ai-analyst`
   - optional LLM-powered market analysis
-- `backtest`
-  - historical strategy validation
 - `api`
   - exposes status, trades, positions, controls, and diagnostics
 - `web`
