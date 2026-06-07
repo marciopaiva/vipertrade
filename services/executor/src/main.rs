@@ -455,20 +455,18 @@ struct BybitFill {
     raw_data: Value,
 }
 
-fn realized_pnl(
-    side: &str,
-    entry_price: f64,
-    exit_price: f64,
-    quantity: f64,
-    leverage: f64,
-) -> f64 {
+fn realized_pnl(side: &str, entry_price: f64, exit_price: f64, quantity: f64) -> f64 {
     let signed_delta = if side == "Long" {
         exit_price - entry_price
     } else {
         entry_price - exit_price
     };
 
-    signed_delta * quantity * leverage
+    // `quantity` is the full position size (calc_smart_size: desired_usdt / price,
+    // submitted to the exchange as-is). PnL is the price move over the position;
+    // leverage affects margin/ROI, NOT absolute PnL, so it must NOT be multiplied
+    // in here (doing so double-counted it and inflated realized PnL by leverage).
+    signed_delta * quantity
 }
 
 fn parse_positive_f64(v: Option<&Value>) -> Option<f64> {
@@ -1258,7 +1256,7 @@ async fn close_open_trade(
     .fetch_optional(pool)
     .await?;
 
-    let Some((trade_id, open_qty, entry_price, leverage)) = open_trade else {
+    let Some((trade_id, open_qty, entry_price, _leverage)) = open_trade else {
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
@@ -1268,13 +1266,7 @@ async fn close_open_trade(
     } else {
         close_qty
     };
-    let pnl_delta = realized_pnl(
-        side,
-        entry_price,
-        close_price,
-        effective_close_qty,
-        leverage,
-    );
+    let pnl_delta = realized_pnl(side, entry_price, close_price, effective_close_qty);
     let close_reason = close_reason_from_decision(&event.decision.reason);
 
     if close_qty + eps < open_qty {
@@ -2478,10 +2470,12 @@ mod tests {
 
     #[test]
     fn calculates_realized_pnl() {
-        let long_pnl = realized_pnl("Long", 100.0, 110.0, 2.0, 2.0);
-        let short_pnl = realized_pnl("Short", 100.0, 90.0, 2.0, 2.0);
-        assert_eq!(long_pnl, 40.0);
-        assert_eq!(short_pnl, 40.0);
+        // PnL is the price move over the full position quantity; leverage is not
+        // a factor (it affects margin/ROI, not absolute PnL).
+        let long_pnl = realized_pnl("Long", 100.0, 110.0, 2.0);
+        let short_pnl = realized_pnl("Short", 100.0, 90.0, 2.0);
+        assert_eq!(long_pnl, 20.0);
+        assert_eq!(short_pnl, 20.0);
     }
 
     #[test]
