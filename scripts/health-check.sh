@@ -37,7 +37,6 @@ check_analytics()  { check_http "Analytics" "http://localhost:8086/health"; }
 check_strategy()   { check_http "Strategy" "http://localhost:8082/health"; }
 check_executor()   { check_http "Executor" "http://localhost:8083/health"; }
 check_monitor()    { check_http "Monitor" "http://localhost:8084/health"; }
-check_backtest()   { check_http "Backtest" "http://localhost:8085/health"; }
 check_api()        { check_http "API" "http://localhost:8080/health"; }
 check_web()        { check_http "Web" "http://localhost:3000"; }
 
@@ -51,7 +50,6 @@ check_all() {
   check_strategy || failed=1
   check_executor || failed=1
   check_monitor || failed=1
-  check_backtest || failed=1
   check_api || failed=1
   check_web || failed=1
   
@@ -72,7 +70,6 @@ show_help() {
   echo "  strategy    - Strategy (8082)"
   echo "  executor    - Executor (8083)"
   echo "  monitor     - Monitor (8084)"
-  echo "  backtest    - Backtest (8085)"
   echo "  api         - API (8080)"
   echo "  web         - Web dashboard (3000)"
   echo ""
@@ -107,9 +104,6 @@ case "$SERVICE" in
     ;;
   monitor)
     check_monitor
-    ;;
-  backtest)
-    check_backtest
     ;;
   api)
     check_api

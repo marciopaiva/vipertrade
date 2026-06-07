@@ -264,7 +264,6 @@ async function fetchServices(
     { name: 'executor', urls: [`${protocol}//executor:8083/health`] },
     { name: 'monitor', urls: [`${protocol}//monitor:8084/health`] },
     { name: 'analytics', urls: [`${protocol}//analytics:8086/health`] },
-    { name: 'backtest', urls: [`${protocol}//backtest:8085/health`] },
     { name: 'ai-analyst', urls: [`${protocol}//ai-analyst:8087/health`] },
     { name: 'bybit', urls: [`${bybitRestUrl}/v5/market/time`] },
     { name: 'binance', urls: [`${binanceRestUrl}/fapi/v1/time`] },

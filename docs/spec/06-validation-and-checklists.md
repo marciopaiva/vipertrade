@@ -16,12 +16,13 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
 
 ## Runbook Commands
 
-- Bootstrap (Compose): `make build-base-images`, `./scripts/init-secrets.sh`, `./scripts/security-check.sh`
-- Bootstrap (Kind): `./scripts/kind/prepare-wsl.sh`, `make kind-build-images`
-- Compose runtime: `make compose-up`, `make compose-ps`, `make compose-logs`, `make compose-down`
-- Kind runtime: `make kind-deploy`, `make kind-status`, `make kind-delete`
-- Validation: `make health`, `make validate-runtime`, `make validate-full`, `make validate-ci`
-- Data reset: `make data-reset-paper-db`
+- Bootstrap (Compose): `./scripts/build-base-images.sh`, `./scripts/init-secrets.sh`, `./scripts/security-check.sh`
+- Bootstrap (Kind): `./scripts/kind/prepare-wsl.sh`, `make build`
+- Compose runtime: `./scripts/compose.sh up -d`, `./scripts/compose.sh ps`, `./scripts/compose.sh logs -f`, `./scripts/compose.sh down`
+- Kind runtime: `make deploy`, `./scripts/kind/status.sh`, `./scripts/kind/delete.sh`
+- Validation (health/runtime): `./scripts/health-check.sh all`, `./scripts/validate-runtime.sh bridge all`
+- Validation (workspace): `./scripts/validate-workspace.sh all`, `./scripts/validate-workspace.sh ci`
+- Data reset: `./scripts/reset-paper-db.sh --yes`
 
 ## API Surface (Current Spec)
 

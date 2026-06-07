@@ -50,7 +50,7 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 - Podman rootless + WSL2 is the standard local environment
 - bridge networking via `podman compose`
 - `./scripts/compose.sh` is the wrapper for compose operations
-- `make compose-up`, `make compose-down` for service lifecycle
+- `./scripts/compose.sh up -d`, `./scripts/compose.sh down` for service lifecycle
 - Kind cluster with `KIND_EXPERIMENTAL_PROVIDER=podman` for K8s development
 - `compose/docker-compose.yml` is the only supported compose entrypoint
 - service health checks are part of the default operational flow

@@ -29,13 +29,13 @@ ViperTrade can run via:
 ./scripts/kind/prepare-wsl.sh
 
 # 2. Build and push images to local registry
-make kind-build-images
+make build
 
 # 3. Deploy to cluster
-make kind-deploy
+make deploy
 
 # 4. Check status
-make kind-status
+./scripts/kind/status.sh
 
 # Detailed health check
 ./scripts/kind/health-check.sh
@@ -47,7 +47,7 @@ make kind-status
 To remove resources:
 
 ```bash
-make kind-delete
+./scripts/kind/delete.sh
 ```
 
 ## WSL2 + Podman
@@ -63,7 +63,7 @@ If the registry is not accessible from WSL (e.g., Docker Desktop running on Wind
 use `KIND_REGISTRY=host.docker.internal:5001`:
 
 ```bash
-KIND_REGISTRY=host.docker.internal:5001 make kind-build-images
+KIND_REGISTRY=host.docker.internal:5001 make build
 ```
 
 ## Service Ports
@@ -106,17 +106,17 @@ kubectl get events -n vipertrade --sort-by=.metadata.creationTimestamp | tail -2
 curl http://localhost:5001/v2/vipertrade-strategy/tags/list
 
 # Rebuild with correct tag
-KIND_REGISTRY=localhost:5001 IMAGE_TAG=dev make kind-build-images
+KIND_REGISTRY=localhost:5001 IMAGE_TAG=dev make build
 ```
 
 ### Full reset
 
 ```bash
-make kind-delete
+./scripts/kind/delete.sh
 podman rm -f kind-registry 2>/dev/null || true
 ./scripts/kind/prepare-wsl.sh
-make kind-build-images
-make kind-deploy
+make build
+make deploy
 ```
 
 ## Credentials Note

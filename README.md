@@ -73,8 +73,6 @@ Core services:
   - market analysis and strategy performance insights
 - `ai-analyst`
   - optional LLM-powered market analysis
-- `backtest`
-  - historical strategy validation
 - `api`
   - exposes status, trades, positions, controls, and diagnostics
 - `web`
@@ -101,78 +99,44 @@ That gives us a cleaner split:
 - Rust runtime
   - live market state, exchange execution, persistence, telemetry, controls
 
-## Quickstart (Podman Compose)
-
-```bash
-git clone https://github.com/marciopaiva/vipertrade.git
-cd vipertrade
-cp compose/.env.example compose/.env
-# Edit compose/.env with your Bybit API credentials (TESTNET recommended for first run)
-make build-base-images
-./scripts/init-secrets.sh
-./scripts/security-check.sh
-make compose-up
-make health
-```
-
 ## Quickstart (Kind/K8s)
 
 ```bash
 git clone https://github.com/marciopaiva/vipertrade.git
 cd vipertrade
-# Prerequisites: setup-k8s-wsl2/setup.sh executed
+cp compose/.env.example compose/.env   # add your Bybit API credentials (TESTNET recommended first)
+# Prerequisites: setup-k8s-wsl2/setup.sh executed; base images built via scripts/build-base-images.sh
+./scripts/init-secrets.sh
 ./scripts/kind/prepare-wsl.sh
-make kind-build-images
-make kind-deploy
-make kind-status
+make build    # build all service images and push to the local registry
+make deploy   # apply the Kubernetes manifests
+make start    # start the cluster and local registry
 ```
-
-Both workflows are supported - use Podman Compose for local development, Kind for K8s testing.
 
 Open:
 
 - Web dashboard: `http://localhost:3000`
 - API: `http://localhost:8080`
 
-## Daily Workflow (Podman Compose)
+## Lifecycle
 
-Start the stack:
-
-```bash
-make compose-up
-```
-
-Check service health:
+The Makefile exposes the Kind cluster lifecycle and nothing else:
 
 ```bash
-make health
+make build    # build + push all service images
+make deploy   # apply the Kubernetes manifests
+make start    # start the cluster + local registry
+make stop     # stop the cluster + local registry
 ```
 
-Stop the stack:
+Everything else is invoked directly from `scripts/`:
 
-```bash
-make compose-down
-```
-
-## Daily Workflow (Kind/K8s)
-
-Deploy to cluster:
-
-```bash
-make kind-deploy
-```
-
-Check cluster status:
-
-```bash
-make kind-status
-```
-
-Delete from cluster:
-
-```bash
-make kind-delete
-```
+- Health: `./scripts/health-check.sh all` · `./scripts/kind/health-check.sh`
+- Cluster status / teardown: `./scripts/kind/status.sh` · `./scripts/kind/delete.sh`
+- Validation: `./scripts/ci-local.sh` · `./scripts/validate-workspace.sh`
+- Kill switch: `./scripts/kill-switch-control.sh status|enable|disable`
+- Paper DB reset: `./scripts/reset-paper-db.sh --yes`
+- Podman Compose (alt. local runtime): `./scripts/compose.sh up -d|down`
 
 ## Runtime Modes
 
@@ -200,28 +164,28 @@ This keeps the operational model stable while the execution surface evolves.
 Fast workspace checks:
 
 ```bash
-make validate-workspace-quick
+./scripts/validate-workspace.sh quick
 ```
 
 Full local validation:
 
 ```bash
-make validate-full
+./scripts/validate-workspace.sh all
 ```
 
 CI-aligned local run:
 
 ```bash
-make validate-ci
+./scripts/validate-workspace.sh ci
 ```
 
 Install the versioned pre-push hook:
 
 ```bash
-make install-git-hooks
+./scripts/install-git-hooks.sh
 ```
 
-After that, every `git push` runs `make validate-ci` automatically.
+After that, every `git push` runs the CI-aligned validation automatically.
 
 Direct host-side Rust validation on Fedora WSL:
 
@@ -276,23 +240,22 @@ Start here:
 
 ## Repository Interface
 
-`make` is the main developer and operator interface.
+`make` covers the Kind cluster lifecycle only:
 
-Useful commands:
+- `make build` — build + push all service images to the local registry
+- `make deploy` — apply the Kubernetes manifests
+- `make start` — start the cluster + local registry
+- `make stop` — stop the cluster + local registry
 
-- `make health`
-- `make validate-full`
-- `make validate-workspace-quick`
-- `make validate-ci`
-- `make validate-runtime`
-- `make build-base-images`
-- `make compose-up` / `make compose-down`
-- `make kind-deploy` / `make kind-delete`
-- `make kind-status`
-- `make data-reset-paper-db`
-- `make control-kill-switch-status`
-- `make control-kill-switch-enable`
-- `make control-kill-switch-disable`
+Everything else lives under `scripts/`:
+
+- `./scripts/health-check.sh all` · `./scripts/kind/health-check.sh` — health
+- `./scripts/kind/status.sh` · `./scripts/kind/delete.sh` — cluster status / teardown
+- `./scripts/validate-workspace.sh {quick|all|ci}` · `./scripts/ci-local.sh` — validation
+- `./scripts/build-base-images.sh` — base images
+- `./scripts/kill-switch-control.sh {status|enable|disable}` — execution kill switch
+- `./scripts/reset-paper-db.sh --yes` — reset paper trades/snapshots
+- `./scripts/compose.sh {up -d|down}` — Podman Compose (alternative local runtime)
 
 ## Status
 
