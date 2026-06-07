@@ -80,6 +80,7 @@ compose-logs:        ; @./scripts/compose.sh logs -f
 ## Run full workspace validation and supporting checks
 validate-full:            ; @$(VALIDATE_WORKSPACE) all
 ## Run fmt, clippy, and tests
+validate:             ; @$(VALIDATE_WORKSPACE) quick
 validate-workspace-quick: ; @$(VALIDATE_WORKSPACE) quick
 ## Run the GitHub Actions-equivalent validation before commit/push
 validate-ci:              ; @$(VALIDATE_WORKSPACE) ci
@@ -91,8 +92,12 @@ validate-runtime:         ; @$(VALIDATE_RUNTIME) bridge all
 ## Build the project's base images
 build-base-images: ; @$(BUILD_BASE_IMAGES)
 
-## Build and push images to the local Kind registry
-kind-build-images: ; @$(KIND_BUILD_IMAGES)
+## Build web app (generates .next)
+web-build:
+	@cd services/web && $(YARN) build
+
+## Build and push images to the local Kind registry (depends on web-build)
+kind-build-images: web-build ; @$(KIND_BUILD_IMAGES)
 ## Deploy the stack to the Kind dev cluster
 kind-deploy:       ; @$(KIND_DEPLOY)
 ## Show Kind pods and services

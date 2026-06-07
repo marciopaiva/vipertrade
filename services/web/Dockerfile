@@ -1,41 +1,16 @@
-# ✅ ViperTrade Web - Optimized Multi-Stage Dockerfile
+# ViperTrade Web - Optimized Multi-Stage Dockerfile
 # Security + Performance + Minimal Image Size
 
 ARG NODE_VERSION=20
 
 # Stage 1: Dependencies (production only)
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM node:${NODE_VERSION} AS deps
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production --legacy-peer-deps --frozen-lockfile
+COPY package.json yarn.lock ./
+RUN corepack enable && yarn install --production --frozen-lockfile
 
-# Stage 2: Builder
-FROM node:${NODE_VERSION}-alpine AS builder
-WORKDIR /app
-
-# Build arguments for public env vars (required for Next.js static injection)
-ARG NEXT_PUBLIC_API_URL=http://api:8080
-ARG NEXT_PUBLIC_WS_URL=ws://api:8080/ws
-ARG NEXT_PUBLIC_TRADING_MODE=paper
-ARG NEXT_PUBLIC_ENABLE_WEBSOCKET=true
-ARG NEXT_PUBLIC_ENABLE_ANALYTICS=true
-ARG NEXT_PUBLIC_REFRESH_INTERVAL=5000
-
-# Set environment for build time
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
-ENV NEXT_PUBLIC_TRADING_MODE=$NEXT_PUBLIC_TRADING_MODE
-ENV NEXT_PUBLIC_ENABLE_WEBSOCKET=$NEXT_PUBLIC_ENABLE_WEBSOCKET
-ENV NEXT_PUBLIC_ENABLE_ANALYTICS=$NEXT_PUBLIC_ENABLE_ANALYTICS
-ENV NEXT_PUBLIC_REFRESH_INTERVAL=$NEXT_PUBLIC_REFRESH_INTERVAL
-
-COPY package*.json ./
-RUN npm ci --legacy-peer-deps
-COPY . .
-RUN npm run build
-
-# Stage 3: Runner (minimal production image)
-FROM node:${NODE_VERSION}-alpine AS runner
+# Stage 2: Runner (production image)
+FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
 
 # Environment
@@ -43,31 +18,30 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+# Default secure cookie flag: false for dev; override via deployment env if needed
+ENV VIPERTRADE_SECURE_COOKIE=false
 
-# Security: Create non-root user
-RUN apk add --no-cache netcat-openbsd && \
+# Security: Create non-root user and install netcat
+RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd && \
+    rm -rf /var/lib/apt/lists/* && \
     addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy public directory first
-COPY --from=builder /app/public ./public
+# Copy production node_modules from deps stage
+COPY --from=deps /app/node_modules ./node_modules
 
-# Copy standalone server output
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+# Copy public assets
+COPY public ./public
+
+# Copy standalone build (must run `yarn build` on host before building image)
+COPY --chown=nextjs:nodejs .next/standalone ./
 
 # Copy .next/static for client-side assets
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./public/_next/static
+COPY --chown=nextjs:nodejs .next/static ./public/_next/static
 
-# Copy node_modules from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+# Copy wait-for-deps script
 COPY --chown=nextjs:nodejs docker/wait-for-deps.sh /usr/local/bin/wait-for-deps.sh
 RUN chmod +x /usr/local/bin/wait-for-deps.sh
-
-# Install sharp for Next.js image optimization
-RUN npm install --legacy-peer-deps --arch=x64 --platform=linux sharp
-
-# Set ownership for remaining files
-RUN chown -R nextjs:nodejs /app
 
 # Switch to non-root user
 USER nextjs

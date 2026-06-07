@@ -1,15 +1,14 @@
+mod bybit_client;
+mod position_config;
+mod state;
+
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
-use hmac::{Hmac, Mac};
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
-use sha2::Sha256;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
 use sqlx::PgPool;
-use std::collections::HashMap;
 use std::convert::Infallible;
-use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
 use viper_domain::config::*;
@@ -17,267 +16,15 @@ use warp::http::StatusCode;
 use warp::reply::Json as WarpJson;
 use warp::{Filter, Rejection, Reply};
 
-#[derive(Clone)]
-struct AppState {
-    db_pool: Option<PgPool>,
-    trading_mode: String,
-    trading_profile: String,
-    trade_profile_label: String,
-    initial_capital_usd: f64,
-    operator_auth_mode: String,
-    operator_api_token: Option<String>,
-    executor_default_enabled: bool,
-    default_max_daily_loss_pct: f64,
-    default_max_leverage: f64,
-    default_risk_per_trade_pct: f64,
-    position_config: PositionConfigStore,
-}
-
-#[derive(Serialize)]
-struct ApiError {
-    error: &'static str,
-    message: String,
-}
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-    db_connected: bool,
-}
-
-#[derive(Serialize)]
-struct StatusResponse {
-    service: &'static str,
-    trading_mode: String,
-    trading_profile: String,
-    trade_profile_label: String,
-    db_connected: bool,
-    operator_auth_mode: String,
-    operator_controls_enabled: bool,
-    risk_status: String,
-    critical_reconciliation_events_15m: i64,
-    kill_switch: KillSwitchStatus,
-    executor: ExecutorControlStatus,
-    risk_limits: RiskLimitsStatus,
-}
-
-#[derive(Serialize)]
-struct KillSwitchStatus {
-    enabled: bool,
-    reason: Option<String>,
-    actor: Option<String>,
-    updated_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-struct ExecutorControlStatus {
-    enabled: bool,
-    reason: Option<String>,
-    actor: Option<String>,
-    updated_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-struct RiskLimitsStatus {
-    max_daily_loss_pct: f64,
-    max_leverage: f64,
-    risk_per_trade_pct: f64,
-    reason: Option<String>,
-    actor: Option<String>,
-    updated_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-struct PositionItem {
-    trade_id: String,
-    symbol: String,
-    side: String,
-    quantity: f64,
-    notional_usdt: f64,
-    entry_price: f64,
-    opened_at: DateTime<Utc>,
-    trailing_stop_activated: bool,
-    trailing_stop_peak_price: Option<f64>,
-    trailing_stop_final_distance_pct: Option<f64>,
-    stop_loss_price: Option<f64>,
-    trailing_activation_price: Option<f64>,
-    fixed_take_profit_price: Option<f64>,
-    break_even_price: Option<f64>,
-}
-
-#[derive(Serialize)]
-struct PositionsResponse {
-    items: Vec<PositionItem>,
-}
-
-#[derive(Clone)]
-struct GlobalPositionConfig {
-    trailing_enabled: bool,
-    _trailing_min_move_threshold_pct: f64,
-}
-
-impl Default for GlobalPositionConfig {
-    fn default() -> Self {
-        Self {
-            trailing_enabled: true,
-            _trailing_min_move_threshold_pct: 0.002,
-        }
-    }
-}
-
-#[derive(Clone)]
-struct PairPositionConfig {
-    stop_loss_pct: f64,
-    take_profit_pct: f64,
-    trailing_by_profile: HashMap<String, TrailingProfileConfig>,
-    trailing_enabled: Option<bool>,
-}
-
-#[derive(Clone)]
-struct TrailingProfileConfig {
-    activate_after_profit_pct: f64,
-    move_to_break_even_at: f64,
-}
-
-#[derive(Clone, Default)]
-struct ModePositionConfig {
-    stop_loss_pct: Option<f64>,
-    take_profit_pct: Option<f64>,
-    trailing_enabled: Option<bool>,
-    fixed_take_profit_enabled: Option<bool>,
-    trailing: Option<TrailingProfileConfig>,
-}
-
-#[derive(Clone, Default)]
-struct PositionConfigStore {
-    global: GlobalPositionConfig,
-    pairs: HashMap<String, PairPositionConfig>,
-    mode_profiles: HashMap<String, ModePositionConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairsFile {
-    global: Option<PairsGlobalSection>,
-    #[serde(flatten)]
-    pairs: HashMap<String, PairFileSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairsGlobalSection {
-    mode_profiles: Option<HashMap<String, ModeProfileSection>>,
-    trailing_stop: Option<GlobalTrailingSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModeProfileSection {
-    stop_loss_pct: Option<f64>,
-    take_profit_pct: Option<f64>,
-    trailing_enabled: Option<bool>,
-    fixed_take_profit_enabled: Option<bool>,
-    trailing_stop: Option<ModeTrailingSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModeTrailingSection {
-    activate_after_profit_pct: Option<f64>,
-    move_to_break_even_at: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GlobalTrailingSection {
-    enabled: Option<bool>,
-    min_move_threshold_pct: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairFileSection {
-    risk: Option<PairRiskSection>,
-    trailing_stop: Option<PairTrailingSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairRiskSection {
-    stop_loss_pct: Option<f64>,
-    take_profit_pct: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairTrailingSection {
-    enabled: Option<bool>,
-    by_profile: Option<HashMap<String, PairTrailingProfileSection>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairTrailingProfileSection {
-    activate_after_profit_pct: Option<f64>,
-    move_to_break_even_at: Option<f64>,
-}
-
-#[derive(Deserialize)]
-struct TradesQuery {
-    limit: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct EventsQuery {
-    limit: Option<u32>,
-}
-
-#[derive(Serialize)]
-struct TradeItem {
-    trade_id: String,
-    symbol: String,
-    side: String,
-    status: String,
-    quantity: f64,
-    entry_price: f64,
-    exit_price: Option<f64>,
-    pnl: Option<f64>,
-    close_reason: Option<String>,
-    duration_seconds: Option<i64>,
-    opened_at: DateTime<Utc>,
-    closed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-struct TradesResponse {
-    items: Vec<TradeItem>,
-}
-
-#[derive(Serialize)]
-struct EventItem {
-    event_id: String,
-    event_type: String,
-    severity: String,
-    category: Option<String>,
-    symbol: Option<String>,
-    trade_id: Option<String>,
-    data: Value,
-    timestamp: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-struct EventsResponse {
-    items: Vec<EventItem>,
-}
-
-#[derive(Serialize)]
-struct PerformanceWindow {
-    window_start_utc: DateTime<Utc>,
-    window_end_utc: DateTime<Utc>,
-    total_trades: i64,
-    winning_trades: i64,
-    win_rate: f64,
-    total_pnl: f64,
-}
-
-#[derive(Serialize)]
-struct PerformanceResponse {
-    last_24h: PerformanceWindow,
-    last_7d: PerformanceWindow,
-    last_30d: PerformanceWindow,
-    max_drawdown_30d: Option<f64>,
-}
+use position_config::{default_trailing_profile, load_position_config};
+use state::{
+    ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
+    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, EventItem, EventsQuery,
+    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
+    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
+    RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
+};
 
 #[derive(Serialize)]
 struct RiskKpisResponse {
@@ -335,200 +82,6 @@ struct DailyTradesSummaryResponse {
     error: Option<String>,
     ret_code: Option<i64>,
     ret_msg: Option<String>,
-}
-
-struct BybitWalletFetchResult {
-    checked_at: DateTime<Utc>,
-    account_type: String,
-    url: String,
-    status: u16,
-    latency_ms: i64,
-    ret_code: Option<i64>,
-    ret_msg: Option<String>,
-    body: Value,
-    error: Option<String>,
-}
-
-struct BybitOrderHistoryFetchResult {
-    checked_at: DateTime<Utc>,
-    url: String,
-    status: u16,
-    ret_code: Option<i64>,
-    ret_msg: Option<String>,
-    body: Value,
-    error: Option<String>,
-}
-
-struct BybitClosedPnlFetchResult {
-    status: u16,
-    ret_code: Option<i64>,
-    ret_msg: Option<String>,
-    body: Value,
-    error: Option<String>,
-}
-
-struct BybitPositionFetchResult {
-    status: u16,
-    ret_code: Option<i64>,
-    ret_msg: Option<String>,
-    body: Value,
-    error: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct KillSwitchRequest {
-    enabled: bool,
-    reason: Option<String>,
-}
-
-#[derive(Serialize)]
-struct KillSwitchResponse {
-    updated: bool,
-    kill_switch: KillSwitchStatus,
-}
-
-#[derive(Deserialize)]
-struct ExecutorControlRequest {
-    enabled: bool,
-    reason: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ExecutorControlResponse {
-    updated: bool,
-    executor: ExecutorControlStatus,
-}
-
-#[derive(Deserialize)]
-struct RiskLimitsRequest {
-    max_daily_loss_pct: Option<f64>,
-    max_leverage: Option<f64>,
-    risk_per_trade_pct: Option<f64>,
-    reason: Option<String>,
-}
-
-#[derive(Serialize)]
-struct RiskLimitsResponse {
-    updated: bool,
-    risk_limits: RiskLimitsStatus,
-}
-
-#[derive(Serialize)]
-struct ControlStateResponse {
-    operator_auth_mode: String,
-    operator_controls_enabled: bool,
-    kill_switch: KillSwitchStatus,
-    executor: ExecutorControlStatus,
-    risk_limits: RiskLimitsStatus,
-}
-
-fn load_position_config(path: &str) -> PositionConfigStore {
-    let raw = match fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(err) => {
-            eprintln!("api: failed to read position config '{}': {}", path, err);
-            return PositionConfigStore::default();
-        }
-    };
-
-    let parsed: PairsFile = match serde_yaml::from_str(&raw) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            eprintln!("api: failed to parse position config '{}': {}", path, err);
-            return PositionConfigStore::default();
-        }
-    };
-
-    let global = GlobalPositionConfig {
-        trailing_enabled: parsed
-            .global
-            .as_ref()
-            .and_then(|g| g.trailing_stop.as_ref())
-            .and_then(|t| t.enabled)
-            .unwrap_or(true),
-        _trailing_min_move_threshold_pct: parsed
-            .global
-            .as_ref()
-            .and_then(|g| g.trailing_stop.as_ref())
-            .and_then(|t| t.min_move_threshold_pct)
-            .unwrap_or(0.002),
-    };
-
-    let mode_profiles = parsed
-        .global
-        .as_ref()
-        .and_then(|g| g.mode_profiles.as_ref())
-        .map(|profiles| {
-            profiles
-                .iter()
-                .map(|(mode, cfg)| {
-                    (
-                        mode.to_uppercase(),
-                        ModePositionConfig {
-                            stop_loss_pct: cfg.stop_loss_pct,
-                            take_profit_pct: cfg.take_profit_pct,
-                            trailing_enabled: cfg.trailing_enabled,
-                            fixed_take_profit_enabled: cfg.fixed_take_profit_enabled,
-                            trailing: cfg.trailing_stop.as_ref().map(|ts| TrailingProfileConfig {
-                                activate_after_profit_pct: ts
-                                    .activate_after_profit_pct
-                                    .unwrap_or(0.015),
-                                move_to_break_even_at: ts.move_to_break_even_at.unwrap_or(0.02),
-                            }),
-                        },
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
-
-    let mut pairs = HashMap::new();
-    for (symbol, pair) in parsed.pairs {
-        let Some(risk) = pair.risk else {
-            continue;
-        };
-        let stop_loss_pct = risk.stop_loss_pct.unwrap_or(0.015);
-        let take_profit_pct = risk.take_profit_pct.unwrap_or(0.03);
-        let trailing_enabled = pair.trailing_stop.as_ref().and_then(|t| t.enabled);
-        let trailing_by_profile = pair
-            .trailing_stop
-            .and_then(|t| t.by_profile)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(profile, cfg)| {
-                (
-                    profile.to_uppercase(),
-                    TrailingProfileConfig {
-                        activate_after_profit_pct: cfg.activate_after_profit_pct.unwrap_or(0.015),
-                        move_to_break_even_at: cfg.move_to_break_even_at.unwrap_or(0.02),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        pairs.insert(
-            symbol.to_uppercase(),
-            PairPositionConfig {
-                stop_loss_pct,
-                take_profit_pct,
-                trailing_by_profile,
-                trailing_enabled,
-            },
-        );
-    }
-
-    PositionConfigStore {
-        global,
-        pairs,
-        mode_profiles,
-    }
-}
-
-fn default_trailing_profile() -> TrailingProfileConfig {
-    TrailingProfileConfig {
-        activate_after_profit_pct: 0.015,
-        move_to_break_even_at: 0.02,
-    }
 }
 
 fn resolve_position_triggers(
@@ -616,19 +169,6 @@ fn resolve_position_triggers(
         fixed_take_profit_price,
         break_even_price,
     )
-}
-
-fn resolve_bybit_rest_url() -> String {
-    if let Some(url) = read_non_empty_env("BYBIT_REST_URL") {
-        return url.trim_end_matches('/').to_string();
-    }
-
-    let bybit_env = TradingMode::from_env().bybit_env().to_string();
-    if bybit_env == "mainnet" {
-        "https://api.bybit.com".to_string()
-    } else {
-        "https://api-testnet.bybit.com".to_string()
-    }
 }
 
 fn clamp_limit(limit: Option<u32>, default_value: u32) -> i64 {
@@ -1607,6 +1147,7 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
 
 async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
     if TradingMode::from_env().uses_simulated_wallet() {
+        let client = bybit_client::BybitClient::from_env();
         return json_ok(&BybitPrivateHealthResponse {
             name: "bybit-private",
             ok: true,
@@ -1614,7 +1155,7 @@ async fn bybit_private_health_handler(_state: Arc<AppState>) -> impl Reply {
             latency_ms: 0,
             url: format!(
                 "{}/v5/account/wallet-balance?accountType={}",
-                resolve_bybit_rest_url(),
+                client.base_url,
                 read_non_empty_env("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|| "UNIFIED".to_string())
             ),
             error: None,
@@ -1775,125 +1316,33 @@ async fn build_paper_wallet_response(state: &AppState) -> BybitWalletResponse {
 
 async fn fetch_bybit_wallet_snapshot() -> BybitWalletFetchResult {
     let checked_at = Utc::now();
-    let bybit_url = resolve_bybit_rest_url();
-    let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
     let account_type =
         read_non_empty_env("BYBIT_ACCOUNT_TYPE").unwrap_or_else(|| "UNIFIED".to_string());
+
+    let client = bybit_client::BybitClient::from_env();
+    let url_base = client.base_url.clone();
+    let result = client.wallet_balance(&account_type).await;
     let url = format!(
         "{}/v5/account/wallet-balance?accountType={}",
-        bybit_url, account_type
+        url_base, account_type
     );
 
-    let (api_key, api_secret) = resolve_bybit_credentials();
-    if api_key.is_empty() {
-        return BybitWalletFetchResult {
-            checked_at,
-            account_type,
-            url,
-            status: 0,
-            latency_ms: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
-        };
-    }
-    if api_secret.is_empty() {
-        return BybitWalletFetchResult {
-            checked_at,
-            account_type,
-            url,
-            status: 0,
-            latency_ms: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
-        };
+    if let Some(ref err) = result.error {
+        if result.status != 0 && !err.contains("missing BYBIT_API") {
+            tracing::warn!(service = "api", error = %err, "Bybit wallet fetch error");
+        }
     }
 
-    let timestamp = Utc::now().timestamp_millis().to_string();
-    let query_string = format!("accountType={}", account_type);
-    let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
-    let mut mac = match Hmac::<Sha256>::new_from_slice(api_secret.as_bytes()) {
-        Ok(v) => v,
-        Err(err) => {
-            return BybitWalletFetchResult {
-                checked_at,
-                account_type,
-                url,
-                status: 0,
-                latency_ms: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to initialize signature: {}", err)),
-            };
-        }
-    };
-    mac.update(payload.as_bytes());
-    let sign = hex::encode(mac.finalize().into_bytes());
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BybitWalletFetchResult {
-                checked_at,
-                account_type,
-                url,
-                status: 0,
-                latency_ms: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to build http client: {}", err)),
-            };
-        }
-    };
-
-    let started = std::time::Instant::now();
-    match client
-        .get(&url)
-        .header("X-BAPI-API-KEY", api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", timestamp)
-        .header("X-BAPI-RECV-WINDOW", recv_window)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            BybitWalletFetchResult {
-                checked_at,
-                account_type,
-                url,
-                status,
-                latency_ms: started.elapsed().as_millis() as i64,
-                ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
-                ret_msg: parsed
-                    .get("retMsg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                body: parsed,
-                error: None,
-            }
-        }
-        Err(err) => BybitWalletFetchResult {
-            checked_at,
-            account_type,
-            url,
-            status: 0,
-            latency_ms: started.elapsed().as_millis() as i64,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some(format!("request failed: {}", err)),
-        },
+    BybitWalletFetchResult {
+        checked_at,
+        account_type,
+        url,
+        status: result.status,
+        latency_ms: result.latency_ms,
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        body: result.body,
+        error: result.error,
     }
 }
 
@@ -1978,116 +1427,27 @@ async fn fetch_bybit_order_history_today(
     window_end_utc: DateTime<Utc>,
 ) -> BybitOrderHistoryFetchResult {
     let checked_at = Utc::now();
-    let bybit_url = resolve_bybit_rest_url();
-    let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
     let start_ms = window_start_utc.timestamp_millis();
     let end_ms = window_end_utc.timestamp_millis();
-    let category = "linear";
+
+    let client = bybit_client::BybitClient::from_env();
+    let url_base = client.base_url.clone();
+    let result = client
+        .order_history("linear", "USDT", start_ms, end_ms, 50)
+        .await;
     let url = format!(
-        "{}/v5/order/history?category={}&settleCoin=USDT&startTime={}&endTime={}&limit=50",
-        bybit_url, category, start_ms, end_ms
+        "{}/v5/order/history?category=linear&settleCoin=USDT&startTime={}&endTime={}&limit=50",
+        url_base, start_ms, end_ms
     );
 
-    let (api_key, api_secret) = resolve_bybit_credentials();
-    if api_key.is_empty() {
-        return BybitOrderHistoryFetchResult {
-            checked_at,
-            url,
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
-        };
-    }
-    if api_secret.is_empty() {
-        return BybitOrderHistoryFetchResult {
-            checked_at,
-            url,
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
-        };
-    }
-
-    let timestamp = Utc::now().timestamp_millis().to_string();
-    let query_string = format!(
-        "category={}&settleCoin=USDT&startTime={}&endTime={}&limit=50",
-        category, start_ms, end_ms
-    );
-    let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
-    let mut mac = match Hmac::<Sha256>::new_from_slice(api_secret.as_bytes()) {
-        Ok(v) => v,
-        Err(err) => {
-            return BybitOrderHistoryFetchResult {
-                checked_at,
-                url,
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to initialize signature: {}", err)),
-            };
-        }
-    };
-    mac.update(payload.as_bytes());
-    let sign = hex::encode(mac.finalize().into_bytes());
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BybitOrderHistoryFetchResult {
-                checked_at,
-                url,
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to build http client: {}", err)),
-            };
-        }
-    };
-
-    match client
-        .get(&url)
-        .header("X-BAPI-API-KEY", api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", timestamp)
-        .header("X-BAPI-RECV-WINDOW", recv_window)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            BybitOrderHistoryFetchResult {
-                checked_at,
-                url,
-                status,
-                ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
-                ret_msg: parsed
-                    .get("retMsg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                body: parsed,
-                error: None,
-            }
-        }
-        Err(err) => BybitOrderHistoryFetchResult {
-            checked_at,
-            url,
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some(format!("request failed: {}", err)),
-        },
+    BybitOrderHistoryFetchResult {
+        checked_at,
+        url,
+        status: result.status,
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        body: result.body,
+        error: result.error,
     }
 }
 
@@ -2122,108 +1482,20 @@ async fn fetch_bybit_closed_pnl_page(
     limit: usize,
     cursor: Option<&str>,
 ) -> BybitClosedPnlFetchResult {
-    let bybit_url = resolve_bybit_rest_url();
-    let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
     let start_ms = window_start_utc.timestamp_millis();
     let end_ms = window_end_utc.timestamp_millis();
-    let category = "linear";
-    let mut query_string = format!(
-        "category={}&settleCoin=USDT&startTime={}&endTime={}&limit={}",
-        category,
-        start_ms,
-        end_ms,
-        limit.clamp(1, 100)
-    );
-    if let Some(cursor) = cursor.filter(|value| !value.is_empty()) {
-        query_string.push_str("&cursor=");
-        query_string.push_str(cursor);
-    }
-    let url = format!("{}/v5/position/closed-pnl?{}", bybit_url, query_string);
 
-    let (api_key, api_secret) = resolve_bybit_credentials();
-    if api_key.is_empty() {
-        return BybitClosedPnlFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
-        };
-    }
-    if api_secret.is_empty() {
-        return BybitClosedPnlFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
-        };
-    }
+    let client = bybit_client::BybitClient::from_env();
+    let result = client
+        .closed_pnl("linear", "USDT", start_ms, end_ms, limit, cursor)
+        .await;
 
-    let timestamp = Utc::now().timestamp_millis().to_string();
-    let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
-    let mut mac = match Hmac::<Sha256>::new_from_slice(api_secret.as_bytes()) {
-        Ok(v) => v,
-        Err(err) => {
-            return BybitClosedPnlFetchResult {
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to initialize signature: {}", err)),
-            };
-        }
-    };
-    mac.update(payload.as_bytes());
-    let sign = hex::encode(mac.finalize().into_bytes());
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BybitClosedPnlFetchResult {
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to build http client: {}", err)),
-            };
-        }
-    };
-
-    match client
-        .get(&url)
-        .header("X-BAPI-API-KEY", api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", timestamp)
-        .header("X-BAPI-RECV-WINDOW", recv_window)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            BybitClosedPnlFetchResult {
-                status,
-                ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
-                ret_msg: parsed
-                    .get("retMsg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                body: parsed,
-                error: None,
-            }
-        }
-        Err(err) => BybitClosedPnlFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some(format!("request failed: {}", err)),
-        },
+    BybitClosedPnlFetchResult {
+        status: result.status,
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        body: result.body,
+        error: result.error,
     }
 }
 
@@ -2281,99 +1553,17 @@ async fn fetch_bybit_position_page(
     settle_coin: &str,
     cursor: Option<&str>,
 ) -> BybitPositionFetchResult {
-    let bybit_url = resolve_bybit_rest_url();
-    let recv_window = read_non_empty_env("BYBIT_RECV_WINDOW").unwrap_or_else(|| "5000".to_string());
-    let mut query_string = format!("category=linear&settleCoin={}&limit=200", settle_coin);
-    if let Some(cursor) = cursor.filter(|value| !value.is_empty()) {
-        query_string.push_str("&cursor=");
-        query_string.push_str(cursor);
-    }
-    let url = format!("{}/v5/position/list?{}", bybit_url, query_string);
+    let client = bybit_client::BybitClient::from_env();
+    let result = client
+        .position_list("linear", settle_coin, 200, cursor)
+        .await;
 
-    let (api_key, api_secret) = resolve_bybit_credentials();
-    if api_key.is_empty() {
-        return BybitPositionFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_KEY in api runtime".to_string()),
-        };
-    }
-    if api_secret.is_empty() {
-        return BybitPositionFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some("missing BYBIT_API_SECRET in api runtime".to_string()),
-        };
-    }
-
-    let timestamp = Utc::now().timestamp_millis().to_string();
-    let payload = format!("{}{}{}{}", timestamp, api_key, recv_window, query_string);
-    let mut mac = match Hmac::<Sha256>::new_from_slice(api_secret.as_bytes()) {
-        Ok(v) => v,
-        Err(err) => {
-            return BybitPositionFetchResult {
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to initialize signature: {}", err)),
-            };
-        }
-    };
-    mac.update(payload.as_bytes());
-    let sign = hex::encode(mac.finalize().into_bytes());
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BybitPositionFetchResult {
-                status: 0,
-                ret_code: None,
-                ret_msg: None,
-                body: json!({}),
-                error: Some(format!("failed to build http client: {}", err)),
-            };
-        }
-    };
-
-    match client
-        .get(&url)
-        .header("X-BAPI-API-KEY", api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", timestamp)
-        .header("X-BAPI-RECV-WINDOW", recv_window)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let parsed = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
-            BybitPositionFetchResult {
-                status,
-                ret_code: parsed.get("retCode").and_then(|v| v.as_i64()),
-                ret_msg: parsed
-                    .get("retMsg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                body: parsed,
-                error: None,
-            }
-        }
-        Err(err) => BybitPositionFetchResult {
-            status: 0,
-            ret_code: None,
-            ret_msg: None,
-            body: json!({}),
-            error: Some(format!("request failed: {}", err)),
-        },
+    BybitPositionFetchResult {
+        status: result.status,
+        ret_code: result.ret_code,
+        ret_msg: result.ret_msg,
+        body: result.body,
+        error: result.error,
     }
 }
 
@@ -2895,16 +2085,16 @@ async fn main() {
             .await
         {
             Ok(pool) => {
-                println!("Connected to PostgreSQL for API queries");
+                tracing::info!("Connected to PostgreSQL for API queries");
                 Some(pool)
             }
             Err(err) => {
-                eprintln!("api: failed to connect PostgreSQL: {}", err);
+                tracing::error!(error = %err, "Failed to connect PostgreSQL");
                 None
             }
         }
     } else {
-        eprintln!("api: database env not configured; DB-backed endpoints degraded");
+        tracing::warn!("Database env not configured; DB-backed endpoints degraded");
         None
     };
 
@@ -3073,7 +2263,7 @@ async fn main() {
     let (_addr, server) =
         warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], 8080), async move {
             let _ = shutdown_rx.changed().await;
-            println!("Received shutdown signal, stopping viper-api");
+            tracing::info!("Received shutdown signal, stopping viper-api");
         });
 
     server.await;

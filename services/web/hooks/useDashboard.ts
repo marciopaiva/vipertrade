@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useSession } from 'next-auth/react';
 
 // API base URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const OPERATOR_TOKEN = process.env.NEXT_PUBLIC_OPERATOR_API_TOKEN || '';
 
 interface UseDashboardOptions {
   refreshInterval?: number;
@@ -23,7 +23,6 @@ export function useDashboard<T = unknown>(
   options: UseDashboardOptions = {}
 ): UseDashboardReturn<T> {
   const { refreshInterval = 5000, enabled = true } = options;
-  const { data: session } = useSession();
 
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,11 +37,8 @@ export function useDashboard<T = unknown>(
         : `${API_BASE_URL}${endpoint}`;
 
       const headers: HeadersInit = {};
-      if (session?.user) {
-        const token = (session.user as any).token as string | undefined;
-        if (token) {
-          headers['x-operator-token'] = token;
-        }
+      if (OPERATOR_TOKEN) {
+        headers['x-operator-token'] = OPERATOR_TOKEN;
       }
 
       const res = await fetch(url, {
@@ -68,7 +64,7 @@ export function useDashboard<T = unknown>(
     } finally {
       setLoading(false);
     }
-  }, [endpoint, enabled, session]);
+  }, [endpoint, enabled]);
 
   useEffect(() => {
     fetchData();

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ViperTradeLogo } from '@/components/ViperTradeLogo';
+import { AppHeader } from '@/components/AppHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -343,25 +344,11 @@ export default function AnalysisPage() {
         ? 'improved'
         : 'mixed'
   );
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-panel/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <ViperTradeLogo size="md" />
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/">Dashboard</Link>
-              </Button>
-              <Button variant="outline" size="sm" onClick={fetchAnalysis}>
-                Refresh
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+   return (
+     <div className="min-h-screen bg-background">
+       <AppHeader />
 
-      <main className="container mx-auto px-4 py-4 space-y-4">
+       <main className="container mx-auto px-4 py-4 space-y-4">
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">

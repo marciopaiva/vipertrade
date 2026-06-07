@@ -15,7 +15,7 @@ spec:
       containers:
         - name: market-data
           image: localhost:5001/vipertrade-market-data:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -60,7 +60,7 @@ spec:
       containers:
         - name: analytics
           image: localhost:5001/vipertrade-analytics:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -105,7 +105,7 @@ spec:
       containers:
         - name: strategy
           image: localhost:5001/vipertrade-strategy:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -160,7 +160,7 @@ spec:
       containers:
         - name: executor
           image: localhost:5001/vipertrade-executor:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -205,7 +205,7 @@ spec:
       containers:
         - name: monitor
           image: localhost:5001/vipertrade-monitor:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -250,7 +250,7 @@ spec:
       containers:
         - name: backtest
           image: localhost:5001/vipertrade-backtest:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -301,7 +301,7 @@ spec:
       containers:
         - name: api
           image: localhost:5001/vipertrade-api:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -352,7 +352,7 @@ spec:
       containers:
         - name: ai-analyst
           image: localhost:5001/vipertrade-ai-analyst:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config
@@ -397,7 +397,7 @@ spec:
       containers:
         - name: web
           image: localhost:5001/vipertrade-web:dev
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: vipertrade-config

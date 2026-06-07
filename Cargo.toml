@@ -23,13 +23,9 @@ repository = "https://github.com/seu-usuario/vipertrade"
 [workspace.dependencies]
 viper-domain = { path = "crates/viper-domain" }
 
-# Tupa v0.8.2 (use crates.io for production builds)
-tupa-runtime = "0.8.2"
-tupa-codegen = "0.8.2"
-tupa-audit = "0.8.2"
-tupa-effects = "0.8.2"
-tupa-parser = "0.8.2"
-tupa-typecheck = "0.8.2"
+# TupaLang — Rust DSL crates (strategy policy layer)
+tupa-core = "0.10.0"
+tupa-engine = "0.10.0"
 
 # Async runtime
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -58,6 +54,9 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 # Rate limiting
 governor = "0.6"
+
+# HTTP server
+warp = "0.3"
 
 [profile.release]
 lto = true
