@@ -18,8 +18,8 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
-tupa-core = "0.9.5"
-tupa-engine = "0.9.5"
+tupa-core = { workspace = true }
+tupa-engine = { workspace = true }
 viper-domain = { workspace = true }
 
 [features]
