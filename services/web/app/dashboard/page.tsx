@@ -367,7 +367,6 @@ function ServicesGrid({
     'api',
     'monitor',
     'analytics',
-    'backtest',
   ];
   const sortedServices = [...services].sort((a, b) => {
     const aIndex = flowOrder.findIndex(f => a.name.includes(f));

@@ -4,7 +4,7 @@
 
 ```bash
 cp compose/.env.example compose/.env
-make build-base-images
+./scripts/build-base-images.sh
 ./scripts/init-secrets.sh
 ./scripts/security-check.sh
 ```
@@ -14,21 +14,21 @@ make build-base-images
 ```bash
 # Prerequisites: setup-k8s-wsl2/setup.sh executed
 ./scripts/kind/prepare-wsl.sh
-make kind-build-images
-make kind-deploy
+make build
+make deploy
 ```
 
 ## 2) Start Stack (Compose)
 
 ```bash
-make compose-up
-make health
+./scripts/compose.sh up -d
+./scripts/health-check.sh all
 ```
 
 ## 2b) Check Status (Kind)
 
 ```bash
-make kind-status
+./scripts/kind/status.sh
 # or
 ./scripts/kind/health-check.sh
 ```
@@ -36,13 +36,13 @@ make kind-status
 ## 3) Validate Runtime
 
 ```bash
-make validate-runtime
+./scripts/validate-runtime.sh bridge all
 ```
 
 ## 4) Logs and Diagnostics
 
 ```bash
-make compose-logs
+./scripts/compose.sh logs -f
 ./scripts/compose.sh logs -f strategy
 ./scripts/compose.sh logs -f executor
 ./scripts/compose.sh logs -f monitor
@@ -51,13 +51,13 @@ make compose-logs
 ## 5) Stop Stack
 
 ```bash
-make compose-down
+./scripts/compose.sh down
 ```
 
 ## 6) Full Local Validation (release gate)
 
 ```bash
-make validate-full
+./scripts/validate-workspace.sh all
 ```
 
 This generates a single report file under `logs/`.
@@ -160,7 +160,7 @@ EXECUTOR_RECONCILE_FIX=false
 
 Go:
 
-- `make health` without database errors
+- `./scripts/health-check.sh all` without database errors
 - executor logs show `Submitted Bybit order` and no `submitted_close_no_persist`
 - `bybit_fills` has rows for the smoke cycle
 - no duplicate `source_event_id` in `executor_event_processed`
@@ -176,7 +176,7 @@ No-Go:
 1. Confirm monitor health and recent cycles:
 
 ```bash
-make health
+./scripts/health-check.sh all
 ./scripts/compose.sh logs --since=20m monitor | grep -E "reconciliation: symbol=|bybit live query failed|alert suppressed by cooldown"
 ```
 

@@ -3,16 +3,16 @@
 ## Preflight
 
 - Ensure clean workspace: `git status --short`
-- Run local CI parity: `make validate-ci`
+- Run local CI parity: `./scripts/validate-workspace.sh ci`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
 - Validate pipeline: `./scripts/validate-pipeline.sh`
-- Runtime baseline: `make validate-full`
+- Runtime baseline: `./scripts/validate-workspace.sh all`
 
 ## Runtime Validation
 
 - Start and validate the runtime:
-  - `make compose-up`
-  - `make validate-runtime`
+  - `./scripts/compose.sh up -d`
+  - `./scripts/validate-runtime.sh bridge all`
 - Confirm subscribers:
   - `${CONTAINER_ENGINE:-podman} exec vipertrade-redis redis-cli PUBSUB NUMSUB viper:market_data viper:decisions`
 - Confirm strategy/executor activity:
@@ -25,12 +25,12 @@
   - `database/migrations/20260308_002_executor_fills_idempotency_down.sql`
 
 - Stop current stack:
-  - `make compose-down`
+  - `./scripts/compose.sh down`
 - Revert to last known-good commit:
   - `git checkout <known-good-sha>`
 - Reapply env and bring the stack back up:
-  - `make compose-up`
-  - `make health`
+  - `./scripts/compose.sh up -d`
+  - `./scripts/health-check.sh all`
 
 ## Release Evidence
 
@@ -51,6 +51,6 @@ Phase 3 closure evidence:
 - Kill-switch API validated with deny-by-default (`403`) and positive operator flow (`enable`/`disable`) with DB audit evidence.
 
 - Capture command outputs for:
-  - `make validate-ci`
-  - `make validate-runtime`
+  - `./scripts/validate-workspace.sh ci`
+  - `./scripts/validate-runtime.sh bridge all`
 - Link passing GitHub CI run for release commit.
