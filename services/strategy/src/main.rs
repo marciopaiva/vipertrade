@@ -153,6 +153,13 @@ fn step_audit(_input: &StrategyInput) -> Value {
     json!({ "ok": true, "reason": "audit_ok", "decision_action": "HOLD", "decision_score": 100.0, "smart_copy_compatible": false })
 }
 
+/// Scalar metric step exposing account equity so the pipeline can enforce a
+/// typed invariant on it. Returns a bare number (not an object) because
+/// TupaLang constraints read metrics via `as_f64()`.
+fn step_equity_floor(input: &StrategyInput) -> Value {
+    json!(input.account_equity_usdt)
+}
+
 pipeline! {
     name: ViperSmartCopy,
     input: StrategyInput,
@@ -167,10 +174,18 @@ pipeline! {
         step("signal_confirmation") { step_signal_confirmation(input) },
         step("cooldown_guard") { step_cooldown_guard(input) },
         step("thesis_confirmation") { step_thesis_confirmation(input) },
+        step("equity_floor") { step_equity_floor(input) },
         step("decision") { step_decision(input) },
         step("audit") { step_audit(input) },
     ],
-    constraints: []
+    // Typed invariant: account equity must never be negative (a negative value
+    // signals a data/reconciliation fault, not a tradeable state). This is the
+    // first real constraint — evaluated by tupa-engine into result.failures.
+    // NOTE: the runtime does not yet gate trades on constraint failures; wiring
+    // that (and broader risk constraints) is a follow-up decision.
+    constraints: [
+        metric("equity_floor").ge(0.0)
+    ]
 }
 
 #[derive(Debug, Clone)]
@@ -5343,5 +5358,45 @@ mod tests {
         assert!(evaluation
             .reason
             .contains("thesis_degrading_hard_short_alignment"));
+    }
+
+    fn strategy_input_with_equity(equity: f64) -> StrategyInput {
+        StrategyInput {
+            symbol: "BTCUSDT".to_string(),
+            temporal: json!({}),
+            account_equity_usdt: equity,
+            config: json!({}),
+        }
+    }
+
+    #[tokio::test]
+    async fn equity_floor_constraint_flags_negative_equity() {
+        let executor = Executor::new();
+        let pipeline = ViperSmartCopy::new();
+
+        // Negative equity is a data fault → the typed constraint must fail.
+        let res = executor
+            .run_parallel(&pipeline, &strategy_input_with_equity(-5.0))
+            .await
+            .expect("pipeline should run");
+        assert!(!res.passed, "negative equity must violate the constraint");
+        assert!(
+            res.failures.iter().any(|f| f.metric == "equity_floor"),
+            "expected an equity_floor failure, got {:?}",
+            res.failures
+        );
+    }
+
+    #[tokio::test]
+    async fn equity_floor_constraint_passes_for_non_negative_equity() {
+        let executor = Executor::new();
+        let pipeline = ViperSmartCopy::new();
+
+        let res = executor
+            .run_parallel(&pipeline, &strategy_input_with_equity(1000.0))
+            .await
+            .expect("pipeline should run");
+        assert!(res.passed, "non-negative equity must satisfy the constraint");
+        assert!(res.failures.is_empty(), "unexpected failures: {:?}", res.failures);
     }
 }
