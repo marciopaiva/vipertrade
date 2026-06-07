@@ -7,23 +7,20 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
-use std::fs;
 use std::sync::Arc;
 use tracing::{error, info};
-use tupa_codegen::execution_plan::{codegen_pipeline, ExecutionPlan};
-use tupa_parser::{parse_program, Item, PipelineDecl, Program};
-use tupa_runtime::Runtime;
-use tupa_typecheck::typecheck_program;
+use tupa_engine::Executor;
 use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
+
+mod trade_diagnostics;
 
 #[derive(Clone)]
 struct AppState {
     db_pool: PgPool,
     http_client: Client,
-    runtime: Runtime,
-    execution_plan: Arc<ExecutionPlan>,
+    engine: Executor,
     llm_enabled: bool,
     ollama_url: Option<String>,
     ollama_model: Option<String>,
@@ -74,75 +71,7 @@ struct BreakdownItem {
     avg_duration_s: f64,
 }
 
-#[derive(Debug, Serialize)]
-struct AnalystSnapshot {
-    lookback_hours: i64,
-    summary: SnapshotSummary,
-    expectancy: ExpectancyMetrics,
-    exits: SnapshotExitMetrics,
-    sides: SnapshotSideMetrics,
-    blockers: SnapshotBlockerMetrics,
-    thesis: SnapshotThesisMetrics,
-    symbols: SnapshotSymbolMetrics,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotSummary {
-    closed_trades: i64,
-    total_pnl_usdt: f64,
-    avg_pnl_pct: f64,
-    avg_duration_s: f64,
-    win_rate_pct: f64,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotExitMetrics {
-    thesis_invalidated_pct: f64,
-    thesis_invalidated_avg_pnl_pct: f64,
-    trailing_stop_pct: f64,
-    trailing_stop_avg_pnl_pct: f64,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotSideMetrics {
-    long_trade_share_pct: f64,
-    short_trade_share_pct: f64,
-    long_avg_pnl_pct: f64,
-    short_avg_pnl_pct: f64,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotBlockerMetrics {
-    top_reason: String,
-    top_reason_hits: i64,
-    consensus_blocks: i64,
-    volume_blocks: i64,
-    macd_blocks: i64,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotThesisMetrics {
-    total_closes: i64,
-    top_reason: String,
-    top_reason_hits: i64,
-    positive_close_pct: f64,
-    long_avg_pnl_pct: f64,
-    short_avg_pnl_pct: f64,
-    no_alignment_hits: i64,
-    health_threshold_hits: i64,
-    opposite_side_hits: i64,
-    consensus_trend_hits: i64,
-    price_vs_fast_ema_hits: i64,
-    btc_regime_hits: i64,
-}
-
-#[derive(Debug, Serialize)]
-struct SnapshotSymbolMetrics {
-    worst_symbol: String,
-    worst_symbol_pnl_usdt: f64,
-    best_symbol: String,
-    best_symbol_pnl_usdt: f64,
-}
+use trade_diagnostics::AnalystSnapshot;
 
 #[derive(Debug, Serialize)]
 struct AnalysisResponse {
@@ -388,11 +317,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&db_url)
         .await?;
 
-    let pipeline_path = env::var("AI_ANALYST_TUPA_PIPELINE")
-        .unwrap_or_else(|_| "/app/config/analysts/trade_diagnostics.tp".to_string());
-    let execution_plan = Arc::new(load_execution_plan(&pipeline_path)?);
-    let runtime = Runtime::new();
-    register_analyst_steps(&runtime, execution_plan.as_ref());
+    let engine = Executor::new();
 
     let llm_enabled = env::var("AI_ANALYST_ENABLE_LLM")
         .map(|value| value.eq_ignore_ascii_case("true"))
@@ -401,8 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState {
         db_pool,
         http_client: Client::new(),
-        runtime,
-        execution_plan,
+        engine,
         llm_enabled,
         ollama_url: env::var("OLLAMA_URL").ok(),
         ollama_model: env::var("OLLAMA_MODEL").ok(),
@@ -640,232 +564,17 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
     })
 }
 
-fn first_pipeline(program: &Program) -> Result<&PipelineDecl, AnalystError> {
-    program
-        .items
-        .iter()
-        .find_map(|item| match item {
-            Item::Pipeline(p) => Some(p),
-            _ => None,
-        })
-        .ok_or_else(|| AnalystError::Runtime("no pipeline declaration found".to_string()))
-}
-
-fn load_execution_plan(path: &str) -> Result<ExecutionPlan, AnalystError> {
-    let source = fs::read_to_string(path)?;
-    let program = parse_program(&source).map_err(|err| AnalystError::Runtime(err.to_string()))?;
-
-    if let Err(err) = typecheck_program(&program) {
-        info!("Trade diagnostics typecheck warning (continuing): {}", err);
-    }
-
-    let pipeline = first_pipeline(&program)?;
-    let plan_json = codegen_pipeline("ai_analyst", pipeline, &program)
-        .map_err(|err| AnalystError::Runtime(err.to_string()))?;
-    let plan: ExecutionPlan = serde_json::from_str(&plan_json)?;
-    Ok(plan)
-}
-
-fn register_analyst_steps(runtime: &Runtime, plan: &ExecutionPlan) {
-    for step in &plan.steps {
-        let function_ref = step.function_ref.clone();
-        let fallback_name = step.name.clone();
-        let fn_name = function_ref
-            .rsplit("::")
-            .next()
-            .unwrap_or(&fallback_name)
-            .to_string();
-
-        runtime.register_step(&function_ref, move |state| match fn_name.as_str() {
-            "evaluate_exit_pressure" | "step_exit_pressure" => execute_exit_pressure(state),
-            "evaluate_directional_bias" | "step_directional_bias" => {
-                execute_directional_bias(state)
-            }
-            "evaluate_entry_pressure" | "step_entry_pressure" => execute_entry_pressure(state),
-            "evaluate_thesis_quality" | "step_thesis_quality" => execute_thesis_quality(state),
-            "evaluate_symbol_risk" | "step_symbol_risk" => execute_symbol_risk(state),
-            other => Err(format!("unknown analyst step {}", other)),
-        });
-    }
-}
-
 async fn run_tupa_diagnostics(
-    snapshot: &AnalystSnapshot,
+    snapshot: &trade_diagnostics::AnalystSnapshot,
     state: &AppState,
 ) -> Result<Value, AnalystError> {
-    let input = serde_json::to_value(snapshot)?;
-    state
-        .runtime
-        .run_pipeline_async(state.execution_plan.as_ref(), input)
-        .await
-        .map_err(|err| AnalystError::Runtime(err.to_string()))
-}
+    let pipeline = trade_diagnostics::TradeDiagnostics::new();
+    let result = state
+        .engine
+        .run(&pipeline, snapshot)
+        .map_err(|err| AnalystError::Runtime(err.to_string()))?;
 
-fn as_f64(value: &Value, path: &[&str]) -> Result<f64, String> {
-    let mut current = value;
-    for part in path {
-        current = current
-            .get(*part)
-            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
-    }
-    current
-        .as_f64()
-        .ok_or_else(|| format!("expected f64 at {}", path.join(".")))
-}
-
-fn as_i64(value: &Value, path: &[&str]) -> Result<i64, String> {
-    let mut current = value;
-    for part in path {
-        current = current
-            .get(*part)
-            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
-    }
-    current
-        .as_i64()
-        .ok_or_else(|| format!("expected i64 at {}", path.join(".")))
-}
-
-fn as_str_value(value: &Value, path: &[&str]) -> Result<String, String> {
-    let mut current = value;
-    for part in path {
-        current = current
-            .get(*part)
-            .ok_or_else(|| format!("missing field {}", path.join(".")))?;
-    }
-    current
-        .as_str()
-        .map(|value| value.to_string())
-        .ok_or_else(|| format!("expected string at {}", path.join(".")))
-}
-
-fn execute_exit_pressure(state: Value) -> Result<Value, String> {
-    let thesis_invalidated_pct = as_f64(&state, &["exits", "thesis_invalidated_pct"])?;
-    let trailing_stop_pct = as_f64(&state, &["exits", "trailing_stop_pct"])?;
-
-    let (severity, reason) = if thesis_invalidated_pct >= 80.0 && trailing_stop_pct <= 12.0 {
-        ("fail", "exit_pressure_high")
-    } else if thesis_invalidated_pct >= 65.0 {
-        ("warn", "exit_pressure_elevated")
-    } else {
-        ("pass", "exit_pressure_stable")
-    };
-
-    Ok(json!({
-        "severity": severity,
-        "reason": reason,
-        "thesis_invalidated_pct": thesis_invalidated_pct,
-        "trailing_stop_pct": trailing_stop_pct
-    }))
-}
-
-fn execute_directional_bias(state: Value) -> Result<Value, String> {
-    let long_avg_pnl_pct = as_f64(&state, &["sides", "long_avg_pnl_pct"])?;
-    let short_avg_pnl_pct = as_f64(&state, &["sides", "short_avg_pnl_pct"])?;
-
-    let (score, reason) = if long_avg_pnl_pct >= short_avg_pnl_pct {
-        (1.0, "directional_bias_long")
-    } else {
-        (0.0, "directional_bias_short")
-    };
-
-    Ok(json!({
-        "score": score,
-        "weight": 100.0,
-        "reason": reason
-    }))
-}
-
-fn execute_entry_pressure(state: Value) -> Result<Value, String> {
-    let consensus_blocks = as_i64(&state, &["blockers", "consensus_blocks"])?;
-    let volume_blocks = as_i64(&state, &["blockers", "volume_blocks"])?;
-    let macd_blocks = as_i64(&state, &["blockers", "macd_blocks"])?;
-
-    let (reason, dominant_gate) =
-        if consensus_blocks >= volume_blocks && consensus_blocks >= macd_blocks {
-            ("entry_pressure_consensus", "consensus")
-        } else if volume_blocks >= macd_blocks {
-            ("entry_pressure_volume", "volume")
-        } else {
-            ("entry_pressure_macd", "macd")
-        };
-
-    Ok(json!({
-        "severity": "warn",
-        "reason": reason,
-        "dominant_gate": dominant_gate
-    }))
-}
-
-fn execute_symbol_risk(state: Value) -> Result<Value, String> {
-    let worst_symbol = as_str_value(&state, &["symbols", "worst_symbol"])?;
-    let worst_symbol_pnl_usdt = as_f64(&state, &["symbols", "worst_symbol_pnl_usdt"])?;
-
-    let (severity, reason) = if worst_symbol_pnl_usdt <= -0.30 {
-        ("fail", "symbol_risk_high")
-    } else if worst_symbol_pnl_usdt < 0.0 {
-        ("warn", "symbol_risk_elevated")
-    } else {
-        ("pass", "symbol_risk_stable")
-    };
-
-    Ok(json!({
-        "severity": severity,
-        "reason": reason,
-        "symbol": worst_symbol
-    }))
-}
-
-fn execute_thesis_quality(state: Value) -> Result<Value, String> {
-    let positive_close_pct = as_f64(&state, &["thesis", "positive_close_pct"])?;
-    let long_avg_pnl_pct = as_f64(&state, &["thesis", "long_avg_pnl_pct"])?;
-    let short_avg_pnl_pct = as_f64(&state, &["thesis", "short_avg_pnl_pct"])?;
-    let top_reason = as_str_value(&state, &["thesis", "top_reason"])?;
-    let no_alignment_hits = as_i64(&state, &["thesis", "no_alignment_hits"])?;
-    let health_threshold_hits = as_i64(&state, &["thesis", "health_threshold_hits"])?;
-
-    let (severity, reason, recommendation) = if long_avg_pnl_pct <= -0.20
-        && no_alignment_hits >= health_threshold_hits
-    {
-        (
-            "fail",
-            "thesis_quality_long_fragile",
-            "harden_long_invalidation_inputs",
-        )
-    } else if positive_close_pct >= 25.0 {
-        (
-            "pass",
-            "thesis_quality_profit_protective",
-            "preserve_trailing_capture",
-        )
-    } else if top_reason.contains("health_threshold") || health_threshold_hits > no_alignment_hits {
-        (
-            "warn",
-            "thesis_quality_threshold_driven",
-            "review_health_threshold_balance",
-        )
-    } else if short_avg_pnl_pct >= long_avg_pnl_pct {
-        (
-            "warn",
-            "thesis_quality_directionally_asymmetric",
-            "review_long_side_guard",
-        )
-    } else {
-        (
-            "pass",
-            "thesis_quality_stable",
-            "keep_current_thesis_policy",
-        )
-    };
-
-    Ok(json!({
-        "severity": severity,
-        "reason": reason,
-        "recommendation": recommendation,
-        "positive_close_pct": positive_close_pct,
-        "long_avg_pnl_pct": long_avg_pnl_pct,
-        "short_avg_pnl_pct": short_avg_pnl_pct,
-        "top_reason": top_reason
-    }))
+    Ok(serde_json::to_value(&result.values).unwrap_or(json!({})))
 }
 
 async fn fetch_summary(
@@ -2303,7 +2012,7 @@ fn build_heuristic_summary(ctx: HeuristicSummaryContext<'_>) -> String {
     )
 }
 
-fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
+fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> trade_diagnostics::AnalystSnapshot {
     let total_trades = ctx.summary.closed_trades.max(1) as f64;
     let thesis_invalidated = ctx
         .by_close_reason
@@ -2396,16 +2105,16 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
         .map(|item| item.total)
         .sum();
 
-    AnalystSnapshot {
+    trade_diagnostics::AnalystSnapshot {
         lookback_hours: ctx.hours,
-        summary: SnapshotSummary {
+        summary: trade_diagnostics::SnapshotSummary {
             closed_trades: ctx.summary.closed_trades,
             total_pnl_usdt: ctx.summary.total_pnl_usdt,
             avg_pnl_pct: ctx.summary.avg_pnl_pct,
             avg_duration_s: ctx.summary.avg_duration_s,
             win_rate_pct: ctx.summary.win_rate_pct,
         },
-        expectancy: ExpectancyMetrics {
+        expectancy: trade_diagnostics::ExpectancyMetrics {
             winning_trades: ctx.expectancy.winning_trades,
             losing_trades: ctx.expectancy.losing_trades,
             neutral_trades: ctx.expectancy.neutral_trades,
@@ -2417,7 +2126,7 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
             expectancy_usdt: ctx.expectancy.expectancy_usdt,
             expectancy_pct: ctx.expectancy.expectancy_pct,
         },
-        exits: SnapshotExitMetrics {
+        exits: trade_diagnostics::SnapshotExitMetrics {
             thesis_invalidated_pct: thesis_invalidated
                 .map(|item| 100.0 * item.trades as f64 / total_trades)
                 .unwrap_or(0.0),
@@ -2428,8 +2137,19 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
                 .map(|item| 100.0 * item.trades as f64 / total_trades)
                 .unwrap_or(0.0),
             trailing_stop_avg_pnl_pct: trailing_stop.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
+            dynamic_threshold: {
+                let long_avg = long_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0);
+                let short_avg = short_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0);
+                if long_avg.abs() > 0.3 || short_avg.abs() > 0.3 {
+                    70.0
+                } else if ctx.summary.closed_trades < 20 {
+                    55.0
+                } else {
+                    80.0
+                }
+            },
         },
-        sides: SnapshotSideMetrics {
+        sides: trade_diagnostics::SnapshotSideMetrics {
             long_trade_share_pct: long_side
                 .map(|item| 100.0 * item.trades as f64 / total_trades)
                 .unwrap_or(0.0),
@@ -2439,7 +2159,7 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
             long_avg_pnl_pct: long_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
             short_avg_pnl_pct: short_side.map(|item| item.avg_pnl_pct).unwrap_or(0.0),
         },
-        blockers: SnapshotBlockerMetrics {
+        blockers: trade_diagnostics::SnapshotBlockerMetrics {
             top_reason: ctx
                 .blockers
                 .first()
@@ -2449,8 +2169,14 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
             consensus_blocks,
             volume_blocks,
             macd_blocks,
+            blocker_density: if ctx.summary.closed_trades as f64 > 0.0 {
+                (consensus_blocks + volume_blocks + macd_blocks) as f64
+                    / ctx.summary.closed_trades as f64
+            } else {
+                0.0
+            },
         },
-        thesis: SnapshotThesisMetrics {
+        thesis: trade_diagnostics::SnapshotThesisMetrics {
             total_closes: ctx.thesis_summary.total_closes,
             top_reason: top_thesis_reason,
             top_reason_hits: top_thesis_reason_hits,
@@ -2468,8 +2194,9 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> AnalystSnapshot {
             consensus_trend_hits,
             price_vs_fast_ema_hits,
             btc_regime_hits,
+            confidence: (ctx.summary.closed_trades as f64 / 50.0).min(1.0),
         },
-        symbols: SnapshotSymbolMetrics {
+        symbols: trade_diagnostics::SnapshotSymbolMetrics {
             worst_symbol: worst_symbol
                 .map(|item| item.name.clone())
                 .unwrap_or_else(|| "n/a".to_string()),

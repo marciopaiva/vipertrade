@@ -37,10 +37,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .json()
         .init();
 
-    println!("Starting viper-backtest");
+    tracing::info!("Starting viper-backtest");
 
     let listener = TcpListener::bind("0.0.0.0:8085").await?;
-    println!("Health check server running on :8085");
+    tracing::info!("Health check server running on :8085");
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                println!("Received shutdown signal, stopping viper-backtest");
+                tracing::info!("Received shutdown signal, stopping viper-backtest");
                 break;
             }
             accept_result = listener.accept() => {
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tokio::spawn(async move {
                     let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+                        tracing::warn!(error = ?e, "Failed to write to socket");
                     }
                 });
             }
