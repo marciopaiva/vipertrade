@@ -236,57 +236,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backtest
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: backtest
-  template:
-    metadata:
-      labels:
-        app: backtest
-    spec:
-      containers:
-        - name: backtest
-          image: localhost:5001/vipertrade-backtest:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8085
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "1000m"
-            limits:
-              memory: "512Mi"
-              cpu: "1000m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8085
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8085
-            initialDelaySeconds: 30
-            periodSeconds: 20
-          volumeMounts:
-            - name: logs
-              mountPath: /app/logs
-      volumes:
-        - name: logs
-          emptyDir: {}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: api
 spec:
   replicas: 1

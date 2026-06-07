@@ -40,7 +40,7 @@ check_pods_ready() {
 
 check_deployments_available() {
   print_step "Deployments available"
-  local deployments=(market-data analytics strategy executor monitor backtest api ai-analyst web)
+  local deployments=(market-data analytics strategy executor monitor api ai-analyst web)
   local failed=0
 
   for dep in "${deployments[@]}"; do
@@ -60,7 +60,7 @@ check_deployments_available() {
 
 check_services_exist() {
   print_step "Services exist"
-  local services=(postgres redis market-data analytics strategy executor monitor backtest api ai-analyst web)
+  local services=(postgres redis market-data analytics strategy executor monitor api ai-analyst web)
   local missing=0
 
   for svc in "${services[@]}"; do

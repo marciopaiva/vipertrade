@@ -330,44 +330,6 @@ services:
           memory: 128M
           cpus: '0.25'
 
-  backtest:
-    build:
-      context: ..
-      dockerfile: services/backtest/Dockerfile
-      args:
-        RUST_VERSION: "1.83"
-        RUST_BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
-        RUST_RUNTIME_IMAGE: ${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}
-    container_name: vipertrade-backtest
-    ports:
-      - "8085:8085"
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-vipertrade}
-      DB_USER: ${POSTGRES_USER:-viper}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      postgres:
-        condition: service_healthy
-        restart: true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    stop_signal: SIGINT
-    stop_grace_period: 45s
-    networks:
-      - viper-net
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
-
   # ═══════════════════════════════════════════════════════════
   # WEB & API SERVICES
   # ═══════════════════════════════════════════════════════════

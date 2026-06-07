@@ -132,7 +132,7 @@ check_kind_deployments() {
 
   local context="${KIND_CONTEXT:-kind-dev}"
   local namespace="${KIND_NAMESPACE:-vipertrade}"
-  local deployments=(market-data analytics strategy executor monitor backtest api ai-analyst web)
+  local deployments=(market-data analytics strategy executor monitor api ai-analyst web)
   local failed=0
 
   for dep in "${deployments[@]}"; do
