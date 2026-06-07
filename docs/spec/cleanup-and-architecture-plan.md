@@ -9,7 +9,7 @@
 
 Only **3 of 9 services** are on the trading hot path (Redis event bus):
 
-```
+```text
 market-data ──viper:market_data──▶ strategy ──viper:decisions──▶ executor ──viper:executor_events─▶
                                        ▲
                           analytics (scores via HTTP :8086)
@@ -22,7 +22,7 @@ backtest ──▶ STUB (health check only, no logic)
 ## 2. Service inventory & verdict
 
 | Service | Lines | Hot path | Evidence | Verdict |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | market-data | 1,664 | yes (publishes `market_data`) | real multi-source consensus | Keep |
 | strategy | 5,493 | yes (core) | monolith; real decision logic is **dead code**, pipeline steps are stubs | Keep + refactor (critical) |
 | executor | 2,778 | yes (consumes `decisions`) | real paper/live execution | Keep |
@@ -41,7 +41,7 @@ with disconnected logic.
 ## 3. Residue inventory
 
 | Residue | What | Action |
-|---|---|---|
+| --- | --- | --- |
 | `config/strategies/viper_smart_copy.tp` | 485 lines, orphaned (runtime load already removed) | Relocate to `docs/spec/` as business-rules reference |
 | `docs/legacy/` | old `VIPERTRADE_SPEC.md` + README | Remove |
 | `ANALYSIS_DEEP_DIVE.md` (40 KB, root) | likely stale analysis | Evaluate (kept for now) |
