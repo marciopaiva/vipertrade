@@ -6,10 +6,10 @@ Use the repository `make` interface for the main local workflow:
 
 ```bash
 cp compose/.env.example compose/.env
-make build-base-images
-make compose-up
-make health
-make validate-ci
+./scripts/build-base-images.sh
+./scripts/compose.sh up -d
+./scripts/health-check.sh all
+./scripts/validate-workspace.sh ci
 ```
 
 For a fresh clone, run the environment bootstrap first:
@@ -17,7 +17,7 @@ For a fresh clone, run the environment bootstrap first:
 ```bash
 sudo dnf install -y openssl-devel
 cp compose/.env.example compose/.env
-make build-base-images
+./scripts/build-base-images.sh
 ```
 
 On Fedora 43 WSL, the validation scripts default
@@ -26,13 +26,13 @@ system Python 3.14 during host-side Rust checks.
 
 Recommended sequence before commit/push:
 
-1. run `make validate-workspace-quick` during development
-2. run `make validate-ci` before commit/push
-3. use `make health` when touching runtime behavior
+1. run `./scripts/validate-workspace.sh quick` during development
+2. run `./scripts/validate-workspace.sh ci` before commit/push
+3. use `./scripts/health-check.sh all` when touching runtime behavior
 
 Prefer `make` targets over calling lower-level scripts directly unless you are working on an advanced or diagnostic flow.
 
-The supported local runtime path is the bridge-based container workflow via Podman on WSL2, exposed through `make compose-*`.
+The supported local runtime path is the bridge-based container workflow via Podman on WSL2, exposed through `./scripts/compose.sh`.
 The wrapper auto-detects Podman; use `CONTAINER_ENGINE=podman VT_COMPOSE_COMMAND="podman compose"` if needed.
 
 ## Commit Message Convention
@@ -55,9 +55,9 @@ Guidelines:
 
 Main validation commands:
 
-- `make validate-workspace-quick`
-- `make validate-full`
-- `make validate-ci`
+- `./scripts/validate-workspace.sh quick`
+- `./scripts/validate-workspace.sh all`
+- `./scripts/validate-workspace.sh ci`
 
 If you run Cargo directly on the host, prefer:
 
@@ -67,6 +67,6 @@ PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo check --workspace --locked
 
 Runtime checks:
 
-- `make compose-up`
-- `make health`
-- `make validate-runtime`
+- `./scripts/compose.sh up -d`
+- `./scripts/health-check.sh all`
+- `./scripts/validate-runtime.sh bridge all`

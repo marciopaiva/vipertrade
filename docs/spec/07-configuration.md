@@ -156,8 +156,8 @@ Recommended workflow for configuration changes:
 
 1. change one class of variables at a time
 2. validate locally with:
-   - `make validate-ci`
-   - `make validate-runtime`
+   - `./scripts/validate-workspace.sh ci`
+   - `./scripts/validate-runtime.sh bridge all`
 3. run in `paper`
 4. collect enough closed trades to evaluate behavior
 5. only then promote to `testnet`
