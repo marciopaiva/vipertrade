@@ -32,17 +32,124 @@ pub struct StrategyInput {
     pub account_equity_usdt: f64,
     #[serde(default)]
     pub config: Value,
+    /// Serialized `MarketSignal` (flat market features). Populated by the live
+    /// loop; consumed by the real decision logic when it is enabled.
+    #[serde(default)]
+    pub signal: Value,
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Real strategy decision logic (Phase 1) — gated behind STRATEGY_REAL_DECISIONS.
+//
+// The pipeline! steps are independent fns of `&StrategyInput`, but the legacy
+// `execute_strategy_step` logic accumulates state (later steps read earlier
+// results). To adapt it to the pipeline while keeping TupaLang as the decision
+// layer: each step rebuilds its base state from the input and calls
+// execute_strategy_step for its own step; the `decision` step re-runs the
+// prerequisite steps to assemble the state it aggregates over.
+//
+// Default OFF: when disabled, the original stub behavior is preserved.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Process-wide strategy config, set once at startup so the (free-fn) pipeline
+/// steps can reach it.
+static STRATEGY_CFG: std::sync::OnceLock<Arc<StrategyConfig>> = std::sync::OnceLock::new();
+
+/// `Some(cfg)` when real decisions are enabled and the config is available.
+fn real_cfg() -> Option<Arc<StrategyConfig>> {
+    let enabled = std::env::var("STRATEGY_REAL_DECISIONS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    STRATEGY_CFG.get().cloned()
+}
+
+/// Assemble the flat `state` the legacy logic reads: market signal features
+/// (flat) + symbol + account equity + temporal state + safe account-history
+/// defaults.
+fn build_base_state(input: &StrategyInput) -> Value {
+    let mut state = if input.signal.is_object() {
+        input.signal.clone()
+    } else {
+        json!({})
+    };
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert("symbol".to_string(), json!(input.symbol));
+        obj.insert(
+            "account_equity_usdt".to_string(),
+            json!(input.account_equity_usdt),
+        );
+        // TODO(phase-1): source these from trade history (DB). Safe defaults
+        // for now — the daily-loss / consecutive-losses guards pass trivially.
+        obj.entry("current_daily_loss".to_string())
+            .or_insert(json!(0.0));
+        obj.entry("consecutive_losses".to_string())
+            .or_insert(json!(0));
+        if let Some(temporal) = input.temporal.as_object() {
+            for (k, v) in temporal {
+                obj.entry(k.clone()).or_insert(v.clone());
+            }
+        }
+    }
+    state
+}
+
+/// Run a single legacy step, returning its result (or a HOLD/false-ish marker
+/// on error).
+fn real_step(step_name: &str, input: &StrategyInput, cfg: &StrategyConfig) -> Value {
+    execute_strategy_step(step_name, build_base_state(input), cfg).unwrap_or_else(
+        |e| json!({ "passed": false, "severity": "error", "reason": format!("step_error_{}", e) }),
+    )
+}
+
+/// Run the prerequisite steps in order (accumulating their results into state),
+/// then run the `decision` branch over the assembled state.
+fn real_decision(input: &StrategyInput, cfg: &StrategyConfig) -> Value {
+    let mut state = build_base_state(input);
+    for step in [
+        "check_daily_loss",
+        "check_consecutive_losses",
+        "validate_entry",
+        "check_funding",
+        "calc_smart_size",
+        "validate_size",
+        "get_trailing_config",
+    ] {
+        match execute_strategy_step(step, state.clone(), cfg) {
+            Ok(res) => {
+                if let Some(obj) = state.as_object_mut() {
+                    obj.insert(step.to_string(), res);
+                }
+            }
+            Err(e) => {
+                error!(step = step, err = %e, "real decision prerequisite step failed");
+            }
+        }
+    }
+    execute_strategy_step("decision", state, cfg)
+        .unwrap_or_else(|e| json!({ "action": "HOLD", "reason": format!("decision_error_{}", e) }))
 }
 
 fn step_check_daily_loss(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("check_daily_loss", input, &cfg);
+    }
     json!({ "passed": true, "severity": "info", "reason": "daily_loss_valid", "symbol": input.symbol })
 }
 
 fn step_check_consecutive_losses(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("check_consecutive_losses", input, &cfg);
+    }
     json!({ "passed": true, "severity": "info", "reason": "consecutive_losses_valid", "symbol": input.symbol })
 }
 
 fn step_validate_entry(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("validate_entry", input, &cfg);
+    }
     json!({
         "passed": true,
         "severity": "info",
@@ -58,7 +165,10 @@ fn step_validate_entry(input: &StrategyInput) -> Value {
     })
 }
 
-fn step_check_funding(_input: &StrategyInput) -> Value {
+fn step_check_funding(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("check_funding", input, &cfg);
+    }
     json!({
         "passed": true,
         "severity": "info",
@@ -73,7 +183,10 @@ fn step_check_funding(_input: &StrategyInput) -> Value {
     })
 }
 
-fn step_calc_smart_size(_input: &StrategyInput) -> Value {
+fn step_calc_smart_size(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("calc_smart_size", input, &cfg);
+    }
     json!({
         "quantity": 0.0,
         "desired_usdt": 0.0,
@@ -89,7 +202,10 @@ fn step_calc_smart_size(_input: &StrategyInput) -> Value {
     })
 }
 
-fn step_validate_size(_input: &StrategyInput) -> Value {
+fn step_validate_size(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("validate_size", input, &cfg);
+    }
     json!({
         "passed": true,
         "severity": "info",
@@ -104,7 +220,10 @@ fn step_validate_size(_input: &StrategyInput) -> Value {
     })
 }
 
-fn step_get_trailing_config(_input: &StrategyInput) -> Value {
+fn step_get_trailing_config(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_step("get_trailing_config", input, &cfg);
+    }
     json!({
         "enabled": false,
         "activate_after_profit_pct": 0.0,
@@ -129,10 +248,13 @@ fn step_thesis_confirmation(_input: &StrategyInput) -> Value {
     json!({ "passed": true, "pending": false, "remaining_hits": 0, "reason": "thesis_clear" })
 }
 
-fn step_decision(_input: &StrategyInput) -> Value {
+fn step_decision(input: &StrategyInput) -> Value {
+    if let Some(cfg) = real_cfg() {
+        return real_decision(input, &cfg);
+    }
     json!({
         "action": "HOLD",
-        "symbol": _input.symbol,
+        "symbol": input.symbol,
         "quantity": 0.0,
         "leverage": 0.0,
         "entry_price": 0.0,
@@ -4469,6 +4591,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &trading_profile,
         &trading_mode,
     )?);
+    // Expose config to the pipeline steps for the real (flag-gated) decision logic.
+    let _ = STRATEGY_CFG.set(cfg.clone());
+    if real_cfg().is_some() {
+        info!("STRATEGY_REAL_DECISIONS enabled — using real decision logic");
+    }
 
     let executor = Executor::new();
     let pipeline = ViperSmartCopy::new();
@@ -4789,6 +4916,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     "invalidation_threshold": cfg.bollinger_invalidation_threshold
                                 }
                             }),
+                            signal: serde_json::to_value(&signal_event.signal)
+                                .unwrap_or_else(|_| json!({})),
                         })?;
                         let pipeline_input = input_value.clone();
                         let strategy_input: StrategyInput = serde_json::from_value(input_value.clone())?;
@@ -5170,6 +5299,7 @@ mod tests {
             }),
             account_equity_usdt: 1000.0,
             config: json!({}),
+            signal: json!({}),
         };
 
         let audit = step_audit(&input);
@@ -5366,7 +5496,54 @@ mod tests {
             temporal: json!({}),
             account_equity_usdt: equity,
             config: json!({}),
+            signal: json!({}),
         }
+    }
+
+    fn strategy_input_with_signal(equity: f64) -> StrategyInput {
+        let sig = sample_market_signal();
+        StrategyInput {
+            symbol: sig.symbol.clone(),
+            temporal: json!({ "cooldown_guard": { "active": false } }),
+            account_equity_usdt: equity,
+            config: json!({}),
+            signal: serde_json::to_value(&sig).unwrap(),
+        }
+    }
+
+    #[test]
+    fn build_base_state_flattens_signal_and_account() {
+        let sig = sample_market_signal();
+        let input = strategy_input_with_signal(1234.0);
+        let state = build_base_state(&input);
+        // market feature from the signal is flattened to the top level
+        assert_eq!(get_f64(&state, "trend_score", f64::NAN), sig.trend_score);
+        assert_eq!(get_string(&state, "symbol", ""), sig.symbol);
+        assert_eq!(get_f64(&state, "account_equity_usdt", 0.0), 1234.0);
+        // safe defaults for unsourced account-history guards
+        assert_eq!(get_f64(&state, "current_daily_loss", -1.0), 0.0);
+        assert_eq!(get_i64(&state, "consecutive_losses", -1), 0);
+        // temporal merged
+        assert!(state.get("cooldown_guard").is_some());
+    }
+
+    #[test]
+    fn real_decision_runs_end_to_end_and_returns_valid_action() {
+        let input = strategy_input_with_signal(1000.0);
+        let cfg = sample_cfg();
+        let decision = real_decision(&input, &cfg);
+        let action = get_string(&decision, "action", "");
+        assert!(
+            matches!(action.as_str(), "ENTER_LONG" | "ENTER_SHORT" | "HOLD"),
+            "unexpected decision action: {action}"
+        );
+    }
+
+    #[test]
+    fn decision_step_defaults_to_hold_when_real_logic_disabled() {
+        // STRATEGY_CFG is unset in tests, so real_cfg() is None → stub path.
+        let decision = step_decision(&strategy_input_with_signal(1000.0));
+        assert_eq!(get_string(&decision, "action", ""), "HOLD");
     }
 
     #[tokio::test]

@@ -63,6 +63,28 @@ Decision required (Phase 1): (a) revive the real logic into the `pipeline!` step
 Once rules are real, gate trades on tupa constraint failures (`result.failures`) — the
 runtime currently ignores them; the `equity_floor` constraint is the first hook.
 
+### Phase 1 status — revive, flag-gated
+
+Decision: **revive** the proven `execute_strategy_step` logic (vs rewrite), adapted to
+the pipeline and gated behind `STRATEGY_REAL_DECISIONS` (default **off**).
+
+- The `pipeline!` steps are independent fns of `&StrategyInput`, but the legacy logic
+  accumulates state (the `decision` step reads earlier step results). Adaptation: each
+  step rebuilds its base state from the input and calls `execute_strategy_step` for its
+  own step; the `decision` step re-runs the prerequisite steps to assemble the state it
+  aggregates over (`real_decision`).
+- `StrategyInput` now carries the serialized `MarketSignal` (`signal` field) so steps
+  can read the flat market features; `StrategyConfig` is exposed to the (free-fn) steps
+  via a process `OnceLock` set at startup.
+- Account-history guards (`current_daily_loss`, `consecutive_losses`) are not yet sourced
+  from the DB — safe defaults (0) for now; the daily-loss / consecutive-losses guards pass
+  trivially until that plumbing is added (tracked TODO in `build_base_state`).
+- Default off ⇒ behavior unchanged (still HOLD). Enabling (`STRATEGY_REAL_DECISIONS=1`)
+  makes the bot produce real `ENTER_LONG`/`ENTER_SHORT` decisions in paper.
+
+Remaining for Phase 1: validate enabled behavior in paper, source the account-history
+guards, then wire trade-gating on constraint failures.
+
 ## 5. Architecture reassessment
 
 Central question: do 9 microservices + Kind/K8s justify themselves for a single-strategy
