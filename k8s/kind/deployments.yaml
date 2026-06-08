@@ -13,35 +13,43 @@ spec:
         app: market-data
     spec:
       containers:
-        - name: market-data
-          image: localhost:5001/vipertrade-market-data:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8081
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8081
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8081
-            initialDelaySeconds: 30
-            periodSeconds: 20
+      - name: market-data
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8081
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 500m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        command:
+        - wait-for-deps.sh
+        - redis:6379
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: market-data
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,35 +66,43 @@ spec:
         app: analytics
     spec:
       containers:
-        - name: analytics
-          image: localhost:5001/vipertrade-analytics:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8086
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8086
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8086
-            initialDelaySeconds: 30
-            periodSeconds: 20
+      - name: analytics
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8086
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 500m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8086
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8086
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: analytics
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -103,45 +119,55 @@ spec:
         app: strategy
     spec:
       containers:
-        - name: strategy
-          image: localhost:5001/vipertrade-strategy:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8082
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "1000m"
-            limits:
-              memory: "512Mi"
-              cpu: "1000m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8082
-            initialDelaySeconds: 20
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8082
-            initialDelaySeconds: 45
-            periodSeconds: 20
-          volumeMounts:
-            - name: logs
-              mountPath: /app/logs
-            - name: tupa-cache
-              mountPath: /home/viper/.cache/tupa
-      volumes:
+      - name: strategy
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8082
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 1000m
+          limits:
+            memory: 512Mi
+            cpu: 1000m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 45
+          periodSeconds: 20
+        volumeMounts:
         - name: logs
-          emptyDir: {}
+          mountPath: /app/logs
         - name: tupa-cache
-          emptyDir: {}
+          mountPath: /home/viper/.cache/tupa
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - redis:6379
+        - market-data:8081
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: strategy
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: tupa-cache
+        emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -158,35 +184,45 @@ spec:
         app: executor
     spec:
       containers:
-        - name: executor
-          image: localhost:5001/vipertrade-executor:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8083
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8083
-            initialDelaySeconds: 20
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8083
-            initialDelaySeconds: 45
-            periodSeconds: 20
+      - name: executor
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8083
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 500m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 45
+          periodSeconds: 20
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - redis:6379
+        - strategy:8082
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: executor
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -203,35 +239,43 @@ spec:
         app: monitor
     spec:
       containers:
-        - name: monitor
-          image: localhost:5001/vipertrade-monitor:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8084
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "250m"
-            limits:
-              memory: "128Mi"
-              cpu: "250m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8084
-            initialDelaySeconds: 20
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8084
-            initialDelaySeconds: 45
-            periodSeconds: 20
+      - name: monitor
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8084
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 250m
+          limits:
+            memory: 128Mi
+            cpu: 250m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8084
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8084
+          initialDelaySeconds: 45
+          periodSeconds: 20
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: monitor
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -248,41 +292,50 @@ spec:
         app: api
     spec:
       containers:
-        - name: api
-          image: localhost:5001/vipertrade-api:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8080
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 20
-          volumeMounts:
-            - name: logs
-              mountPath: /app/logs
-      volumes:
+      - name: api
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 500m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        volumeMounts:
         - name: logs
-          emptyDir: {}
+          mountPath: /app/logs
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - redis:6379
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: api
+      volumes:
+      - name: logs
+        emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -299,35 +352,43 @@ spec:
         app: ai-analyst
     spec:
       containers:
-        - name: ai-analyst
-          image: localhost:5001/vipertrade-ai-analyst:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 8087
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8087
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8087
-            initialDelaySeconds: 30
-            periodSeconds: 20
+      - name: ai-analyst
+        image: localhost:5001/vipertrade:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 8087
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 500m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8087
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8087
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        command:
+        - wait-for-deps.sh
+        - postgres:5432
+        - --
+        - viper
+        env:
+        - name: VIPER_ROLE
+          value: ai-analyst
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -344,32 +405,32 @@ spec:
         app: web
     spec:
       containers:
-        - name: web
-          image: localhost:5001/vipertrade-web:dev
-          imagePullPolicy: Always
-          envFrom:
-            - configMapRef:
-                name: vipertrade-config
-            - secretRef:
-                name: vipertrade-secrets
-          ports:
-            - containerPort: 3000
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "1000m"
-            limits:
-              memory: "512Mi"
-              cpu: "1000m"
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 3000
-            initialDelaySeconds: 20
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 3000
-            initialDelaySeconds: 45
-            periodSeconds: 20
+      - name: web
+        image: localhost:5001/vipertrade-web:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: vipertrade-config
+        - secretRef:
+            name: vipertrade-secrets
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 1000m
+          limits:
+            memory: 512Mi
+            cpu: 1000m
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 45
+          periodSeconds: 20
