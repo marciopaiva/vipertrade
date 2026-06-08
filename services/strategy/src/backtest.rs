@@ -253,9 +253,21 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
     let overrides = parse_set_overrides();
     if !overrides.is_empty() {
         let mut variant = cfg.clone();
+        // Apply each override to BOTH the global mode profile and every
+        // per-symbol block. Lookup precedence varies per parameter (some read
+        // global first, some the per-symbol block), so patching everywhere
+        // guarantees the override takes effect instead of silently no-op'ing.
         for (path, raw) in &overrides {
             set_json_path(&mut variant.global, path, raw);
+            for pair in variant.pairs.values_mut() {
+                set_json_path(pair, path, raw);
+            }
         }
+        println!(
+            "Applied {} override(s) to global + {} per-symbol blocks",
+            overrides.len(),
+            variant.pairs.len()
+        );
         let label = overrides
             .iter()
             .map(|(p, v)| format!("{p}={v}"))
