@@ -4,9 +4,16 @@
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Role resolution order: VIPER_ROLE env, then `--role <x>`, then first positional arg.
+    let args: Vec<String> = std::env::args().skip(1).collect();
     let role = std::env::var("VIPER_ROLE")
         .ok()
-        .or_else(|| std::env::args().nth(1))
+        .or_else(|| {
+            args.iter()
+                .position(|a| a == "--role")
+                .and_then(|i| args.get(i + 1).cloned())
+                .or_else(|| args.first().filter(|a| !a.starts_with('-')).cloned())
+        })
         .unwrap_or_default();
 
     match role.as_str() {

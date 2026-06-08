@@ -28,13 +28,19 @@ build_image() {
 rust_args=(--build-arg RUST_VERSION=1.83 --build-arg RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}" --build-arg RUST_RUNTIME_IMAGE="${RUST_RUNTIME_IMAGE:-vipertrade-base-rust-runtime:bookworm}")
 
 build_image postgres . database/Dockerfile
-build_image market-data . services/market-data/Dockerfile "${rust_args[@]}"
-build_image analytics . services/analytics/Dockerfile "${rust_args[@]}"
-build_image strategy . services/strategy/Dockerfile --build-arg TUPA_VERSION="${TUPA_VERSION:-v0.9.5}" --build-arg TUPA_BACKEND="${TUPA_BACKEND:-hybrid}" --build-arg RUST_VERSION=1.83 --build-arg STRATEGY_BUILDER_IMAGE="${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}" --build-arg STRATEGY_RUNTIME_IMAGE="${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}" "${rust_args[@]}"
-build_image executor . services/executor/Dockerfile "${rust_args[@]}"
-build_image monitor . services/monitor/Dockerfile "${rust_args[@]}"
-build_image api . services/api/Dockerfile "${rust_args[@]}"
-build_image ai-analyst . services/ai-analyst/Dockerfile "${rust_args[@]}"
+
+# Unified multi-role Rust binary: one image (vipertrade:TAG) for all 7 services,
+# selected at runtime via VIPER_ROLE. Uses the strategy base images (python +
+# cargo-tupa runtime) so every role is covered.
+vt_step "Building $KIND_REGISTRY/vipertrade:$IMAGE_TAG (unified viper)"
+vt_container build -t "$KIND_REGISTRY/vipertrade:$IMAGE_TAG" -f services/viper/Dockerfile \
+  --build-arg TUPA_VERSION="${TUPA_VERSION:-v0.10.0}" \
+  --build-arg BUILDER_IMAGE="${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}" \
+  --build-arg RUNTIME_IMAGE="${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}" \
+  .
+vt_step "Pushing $KIND_REGISTRY/vipertrade:$IMAGE_TAG"
+vt_container push "$KIND_REGISTRY/vipertrade:$IMAGE_TAG"
+
 build_image web services/web services/web/Dockerfile --build-arg NODE_VERSION=20 --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://api:8080}" --build-arg NEXT_PUBLIC_TRADING_MODE="${NEXT_PUBLIC_TRADING_MODE:-paper}"
 
 vt_ok "All images built and pushed to $KIND_REGISTRY"
