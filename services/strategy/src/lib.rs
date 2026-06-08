@@ -1066,10 +1066,12 @@ impl StrategyConfig {
     /// for shorts a floor (block when below it — shorting an exhausted bottom).
     /// Defaults are neutral (never trip) so behavior is unchanged until set.
     fn percent_b_limit_for_side(&self, symbol: &str, side: &str) -> f64 {
+        // Defaults are ±infinity so an unconfigured guard never blocks an entry,
+        // even at extreme %B (price far outside the bands).
         let (key, default) = if side.eq_ignore_ascii_case("short") {
-            ("min_percent_b_short", -1.0)
+            ("min_percent_b_short", f64::NEG_INFINITY)
         } else {
-            ("max_percent_b_long", 2.0)
+            ("max_percent_b_long", f64::INFINITY)
         };
         if let Some(value) = self.mode_f64(key) {
             return value;
@@ -5339,9 +5341,15 @@ mod tests {
     #[test]
     fn percent_b_limit_defaults_are_neutral() {
         let cfg = sample_cfg();
-        // No %B keys configured => neutral limits that never block an entry.
-        assert_eq!(cfg.percent_b_limit_for_side("BTCUSDT", "long"), 2.0);
-        assert_eq!(cfg.percent_b_limit_for_side("BTCUSDT", "short"), -1.0);
+        // No %B keys configured => ±infinity limits that never block an entry.
+        assert_eq!(
+            cfg.percent_b_limit_for_side("BTCUSDT", "long"),
+            f64::INFINITY
+        );
+        assert_eq!(
+            cfg.percent_b_limit_for_side("BTCUSDT", "short"),
+            f64::NEG_INFINITY
+        );
     }
 
     #[test]
