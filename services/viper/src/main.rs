@@ -27,10 +27,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             viper_api::run().await;
             Ok(())
         }
+        // One-shot deterministic backtest over the recorded input corpus (#37).
+        "backtest" => viper_strategy::backtest::run_backtest_cli().await,
         other => {
             eprintln!(
                 "unknown role {other:?}; set VIPER_ROLE or pass a role arg: \
-                 market-data | analytics | ai-analyst | strategy | executor | monitor | api"
+                 market-data | analytics | ai-analyst | strategy | executor | monitor | api | backtest"
             );
             std::process::exit(2);
         }
