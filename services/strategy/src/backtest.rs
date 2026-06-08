@@ -84,30 +84,29 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
             // Exit precedence mirrors live: SL/TP/trailing first (replay tick time
             // so min_hold is faithful), then stateful thesis invalidation.
             let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None, t.ts);
-            let close_reason = if eval
-                .decision
-                .as_ref()
-                .map(|d| d.action.starts_with("CLOSE_"))
-                .unwrap_or(false)
-            {
-                Some(eval.trigger.clone())
-            } else if let Ok(signal) =
-                serde_json::from_value::<MarketSignal>(t.input.signal.clone())
-            {
-                match enforce_open_position_thesis_guard(
-                    &symbol,
-                    &signal,
-                    pos,
-                    cfg,
-                    &mut thesis_state,
-                ) {
-                    Some(d) if d.action.starts_with("CLOSE_") => {
-                        Some("thesis_invalidated".to_string())
-                    }
-                    _ => None,
-                }
-            } else {
-                None
+            let close_reason = match eval.decision.as_ref() {
+                // SL/TP/trailing fired.
+                Some(d) if d.action.starts_with("CLOSE_") => Some(eval.trigger.clone()),
+                // Explicit hold (min_hold / invalid_price): keep the position,
+                // and crucially do NOT run thesis — mirrors live, where a Some
+                // exit decision takes priority over the thesis guard.
+                Some(_) => None,
+                // No exit opinion (no_exit / trailing_monitoring): now check thesis.
+                None => match serde_json::from_value::<MarketSignal>(t.input.signal.clone()) {
+                    Ok(signal) => match enforce_open_position_thesis_guard(
+                        &symbol,
+                        &signal,
+                        pos,
+                        cfg,
+                        &mut thesis_state,
+                    ) {
+                        Some(d) if d.action.starts_with("CLOSE_") => {
+                            Some("thesis_invalidated".to_string())
+                        }
+                        _ => None,
+                    },
+                    Err(_) => None,
+                },
             };
 
             if let Some(reason) = close_reason {
