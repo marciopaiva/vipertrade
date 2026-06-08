@@ -98,6 +98,10 @@ global:
       rsi_long_max: 100
       rsi_short_min: 0
       rsi_short_max: 100
+      # Bollinger %B entry guard: skip longs at band tops / shorts at band
+      # bottoms. Backtest (#37): net -0.3488 -> +0.0030, thesis bleed 37 -> 17.
+      max_percent_b_long: 0.85
+      min_percent_b_short: 0.15
       stop_loss_cooldown_minutes_long: 0
       stop_loss_cooldown_minutes_short: 0
     # ═══════════════════════════════════════════════════════════
