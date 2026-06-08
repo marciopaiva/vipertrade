@@ -70,7 +70,9 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
         }
 
         if let Some(pos) = open.get_mut(&symbol) {
-            let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None);
+            // Use the replay tick time (not Utc::now()) so min_hold_seconds is
+            // simulated faithfully against historical timestamps.
+            let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None, t.ts);
             let is_close = eval
                 .decision
                 .as_ref()
@@ -202,22 +204,139 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
 
     let ticks: Vec<Tick> = rows
         .into_iter()
-        .filter_map(|(ts, json)| {
-            serde_json::from_str::<StrategyInput>(&json)
-                .ok()
-                .map(|input| Tick { ts, input })
-        })
+        .filter_map(|(ts, json)| parse_tick(ts, &json))
         .collect();
-
     println!("Loaded {} replay ticks from tupa_audit_logs", ticks.len());
-    let report = simulate(&ticks, &cfg);
-    print_report(&report, &format!("{trading_profile}/{trading_mode}"));
+
+    let base = simulate(&ticks, &cfg);
+    print_report(
+        &base,
+        &format!("{trading_profile}/{trading_mode} [baseline]"),
+    );
+
+    // Optional variant: `--set <dotted.path>=<value>` (repeatable) patches the
+    // config and runs the SAME corpus, for deterministic config comparison.
+    let overrides = parse_set_overrides();
+    if !overrides.is_empty() {
+        let mut variant = cfg.clone();
+        for (path, raw) in &overrides {
+            set_json_path(&mut variant.global, path, raw);
+        }
+        let label = overrides
+            .iter()
+            .map(|(p, v)| format!("{p}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let var = simulate(&ticks, &variant);
+        print_report(&var, &format!("variant [{label}]"));
+        println!("─ Comparison (variant − baseline) ──────────────────────");
+        println!("  Δ net PnL : {:+.4}", var.net_pnl - base.net_pnl);
+        println!("  Δ opened  : {:+}", var.opened as i64 - base.opened as i64);
+        println!("  Δ closed  : {:+}", var.closed as i64 - base.closed as i64);
+    }
     Ok(())
+}
+
+/// Parse an audit `input_data` row into a replay tick. Entry rows are a full
+/// `StrategyInput` (nested `signal`); open-position rows store the raw
+/// `MarketSignal` — wrap those so the price tick is still captured.
+fn parse_tick(ts: DateTime<Utc>, json: &str) -> Option<Tick> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let input = if v.get("signal").is_some() {
+        serde_json::from_value::<StrategyInput>(v).ok()?
+    } else {
+        StrategyInput {
+            symbol: v
+                .get("symbol")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            temporal: serde_json::Value::Null,
+            account_equity_usdt: 0.0,
+            config: serde_json::Value::Null,
+            signal: v,
+        }
+    };
+    Some(Tick { ts, input })
+}
+
+/// Collect repeated `--set <dotted.path>=<value>` CLI args.
+fn parse_set_overrides() -> Vec<(String, String)> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--set" {
+            if let Some((k, v)) = args.get(i + 1).and_then(|kv| kv.split_once('=')) {
+                out.push((k.to_string(), v.to_string()));
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Set a dotted-path value inside a JSON object, creating intermediate objects.
+/// The raw value is parsed as i64, then f64, then bool, else kept as a string.
+fn set_json_path(root: &mut serde_json::Value, path: &str, raw: &str) {
+    let parsed = raw
+        .parse::<i64>()
+        .map(serde_json::Value::from)
+        .or_else(|_| raw.parse::<f64>().map(serde_json::Value::from))
+        .or_else(|_| raw.parse::<bool>().map(serde_json::Value::from))
+        .unwrap_or_else(|_| serde_json::Value::from(raw));
+    let parts: Vec<&str> = path.split('.').collect();
+    let Some((last, parents)) = parts.split_last() else {
+        return;
+    };
+    let mut cur = root;
+    for part in parents {
+        if !cur.is_object() {
+            *cur = serde_json::json!({});
+        }
+        cur = cur
+            .as_object_mut()
+            .unwrap()
+            .entry(part.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+    }
+    if !cur.is_object() {
+        *cur = serde_json::json!({});
+    }
+    cur.as_object_mut()
+        .unwrap()
+        .insert(last.to_string(), parsed);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_json_path_creates_nested_and_typed_value() {
+        let mut root = serde_json::json!({});
+        set_json_path(&mut root, "a.b.thesis_ticks", "8");
+        assert_eq!(root["a"]["b"]["thesis_ticks"], serde_json::json!(8));
+        // overwrites + parses float
+        set_json_path(&mut root, "a.b.thesis_ticks", "1.5");
+        assert_eq!(root["a"]["b"]["thesis_ticks"], serde_json::json!(1.5));
+    }
+
+    #[test]
+    fn parse_tick_handles_both_corpus_shapes() {
+        // Full StrategyInput row (nested "signal").
+        let full = r#"{"symbol":"BTCUSDT","signal":{"current_price":42.0}}"#;
+        let t = parse_tick(Utc::now(), full).unwrap();
+        assert_eq!(t.input.symbol, "BTCUSDT");
+        assert!((tick_price(&t.input) - 42.0).abs() < 1e-9);
+        // Raw MarketSignal row (open-position path) — wrapped so price survives.
+        let raw = r#"{"symbol":"ETHUSDT","current_price":99.0}"#;
+        let t = parse_tick(Utc::now(), raw).unwrap();
+        assert_eq!(t.input.symbol, "ETHUSDT");
+        assert!((tick_price(&t.input) - 99.0).abs() < 1e-9);
+    }
 
     #[test]
     fn realized_pnl_has_no_leverage_factor() {
