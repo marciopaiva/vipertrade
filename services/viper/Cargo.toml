@@ -1,0 +1,19 @@
+[package]
+name = "viper"
+version = "0.9.0"
+edition = "2021"
+description = "ViperTrade unified multi-role binary (runs any service via --role)"
+
+[[bin]]
+name = "viper"
+path = "src/main.rs"
+
+[dependencies]
+viper-market-data = { path = "../market-data" }
+viper-analytics = { path = "../analytics" }
+viper-ai-analyst = { path = "../ai-analyst" }
+viper-strategy = { path = "../strategy" }
+viper-executor = { path = "../executor" }
+viper-monitor = { path = "../monitor" }
+viper-api = { path = "../api" }
+tokio = { version = "1", features = ["full", "tracing"] }
