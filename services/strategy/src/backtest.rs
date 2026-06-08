@@ -12,10 +12,12 @@
 //! `viper backtest` / `VIPER_ROLE=backtest`.
 
 use crate::{
-    evaluate_open_trade_exit, run_steps_through, OpenTradeSnapshot, StrategyConfig, StrategyInput,
+    enforce_open_position_thesis_guard, evaluate_open_trade_exit, run_steps_through,
+    OpenTradeSnapshot, StrategyConfig, StrategyInput, ThesisInvalidationState,
 };
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use viper_domain::MarketSignal;
 
 /// One replay tick: a timestamped market input for a single symbol.
 pub struct Tick {
@@ -63,6 +65,8 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
     let mut rep = BacktestReport::default();
     // One open position per symbol (mirrors the single-position-per-symbol live model).
     let mut open: BTreeMap<String, OpenTradeSnapshot> = BTreeMap::new();
+    // Per-symbol thesis-degradation state, threaded across ticks like the live loop.
+    let mut thesis_state: HashMap<String, ThesisInvalidationState> = HashMap::new();
 
     for t in ticks {
         rep.ticks += 1;
@@ -72,17 +76,41 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
             continue;
         }
 
-        if let Some(pos) = open.get_mut(&symbol) {
-            // Use the replay tick time (not Utc::now()) so min_hold_seconds is
-            // simulated faithfully against historical timestamps.
+        if open.contains_key(&symbol) {
+            let pos = &open[&symbol];
+            // Capture fields up front so the close path can mutate `open` later.
+            let (p_side, p_entry, p_qty) = (pos.side.clone(), pos.entry_price, pos.quantity);
+
+            // Exit precedence mirrors live: SL/TP/trailing first (replay tick time
+            // so min_hold is faithful), then stateful thesis invalidation.
             let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None, t.ts);
-            let is_close = eval
-                .decision
-                .as_ref()
-                .map(|d| d.action.starts_with("CLOSE_"))
-                .unwrap_or(false);
-            if is_close {
-                let pnl = realized_pnl(&pos.side, pos.entry_price, price, pos.quantity);
+            let close_reason = match eval.decision.as_ref() {
+                // SL/TP/trailing fired.
+                Some(d) if d.action.starts_with("CLOSE_") => Some(eval.trigger.clone()),
+                // Explicit hold (min_hold / invalid_price): keep the position,
+                // and crucially do NOT run thesis — mirrors live, where a Some
+                // exit decision takes priority over the thesis guard.
+                Some(_) => None,
+                // No exit opinion (no_exit / trailing_monitoring): now check thesis.
+                None => match serde_json::from_value::<MarketSignal>(t.input.signal.clone()) {
+                    Ok(signal) => match enforce_open_position_thesis_guard(
+                        &symbol,
+                        &signal,
+                        pos,
+                        cfg,
+                        &mut thesis_state,
+                    ) {
+                        Some(d) if d.action.starts_with("CLOSE_") => {
+                            Some("thesis_invalidated".to_string())
+                        }
+                        _ => None,
+                    },
+                    Err(_) => None,
+                },
+            };
+
+            if let Some(reason) = close_reason {
+                let pnl = realized_pnl(&p_side, p_entry, price, p_qty);
                 rep.closed += 1;
                 rep.net_pnl += pnl;
                 if pnl > 0.0 {
@@ -90,15 +118,18 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
                 } else if pnl < 0.0 {
                     rep.losses += 1;
                 }
-                let entry = rep.by_reason.entry(eval.trigger.clone()).or_default();
+                let entry = rep.by_reason.entry(reason).or_default();
                 entry.0 += 1;
                 entry.1 += pnl;
                 open.remove(&symbol);
+                thesis_state.remove(&symbol);
             } else if let Some(tr) = eval.trailing {
-                // Thread trailing state forward so the stop ratchets like live.
-                pos.trailing_stop_activated = tr.activated;
-                pos.trailing_stop_peak_price = tr.peak_price;
-                pos.trailing_stop_final_distance_pct = tr.trail_pct;
+                if let Some(pos) = open.get_mut(&symbol) {
+                    // Thread trailing state forward so the stop ratchets like live.
+                    pos.trailing_stop_activated = tr.activated;
+                    pos.trailing_stop_peak_price = tr.peak_price;
+                    pos.trailing_stop_final_distance_pct = tr.trail_pct;
+                }
             }
         } else if t.entry_eligible {
             let decision = run_steps_through(&t.input, cfg, "decision");
