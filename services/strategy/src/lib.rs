@@ -1061,6 +1061,32 @@ impl StrategyConfig {
         (min_value, max_value)
     }
 
+    /// Bollinger %B entry limit per side: for longs a ceiling (block when
+    /// consensus_bollinger_percent_b is above it — buying an extended top),
+    /// for shorts a floor (block when below it — shorting an exhausted bottom).
+    /// Defaults are neutral (never trip) so behavior is unchanged until set.
+    fn percent_b_limit_for_side(&self, symbol: &str, side: &str) -> f64 {
+        // Defaults are ±infinity so an unconfigured guard never blocks an entry,
+        // even at extreme %B (price far outside the bands).
+        let (key, default) = if side.eq_ignore_ascii_case("short") {
+            ("min_percent_b_short", f64::NEG_INFINITY)
+        } else {
+            ("max_percent_b_long", f64::INFINITY)
+        };
+        if let Some(value) = self.mode_f64(key) {
+            return value;
+        }
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", key],
+                    cfg_f64(&self.global, &["entry_filters", key], default),
+                )
+            })
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", key], default))
+    }
+
     fn btc_macro_penalty_for_side(
         &self,
         symbol: &str,
@@ -2372,6 +2398,15 @@ fn execute_strategy_step(
                                     + btc_macro_penalty)
                     }
             };
+            // Bollinger %B guard: avoid entering at price-band extremes (longs
+            // above the ceiling, shorts below the floor). Neutral by default.
+            let percent_b_limit = cfg.percent_b_limit_for_side(&symbol, entry_side);
+            let percent_b_ok = if entry_side.eq_ignore_ascii_case("short") {
+                consensus_bollinger_percent_b >= percent_b_limit
+            } else {
+                consensus_bollinger_percent_b <= percent_b_limit
+            };
+            let directional_ok = directional_ok && percent_b_ok;
             let max_spread_pct = cfg.max_spread_pct(&symbol);
             let min_volume_24h = cfg.min_volume_24h_usdt(&symbol);
             let max_atr_pct = cfg.max_atr_pct(&symbol);
@@ -5301,6 +5336,20 @@ mod tests {
         assert!(eval.reason.contains("trailing_raw_"));
         assert!(eval.reason.contains("activation_progress"));
         assert!(eval.reason.contains("break_even"));
+    }
+
+    #[test]
+    fn percent_b_limit_defaults_are_neutral() {
+        let cfg = sample_cfg();
+        // No %B keys configured => ±infinity limits that never block an entry.
+        assert_eq!(
+            cfg.percent_b_limit_for_side("BTCUSDT", "long"),
+            f64::INFINITY
+        );
+        assert_eq!(
+            cfg.percent_b_limit_for_side("BTCUSDT", "short"),
+            f64::NEG_INFINITY
+        );
     }
 
     #[test]
