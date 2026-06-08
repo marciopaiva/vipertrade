@@ -21,6 +21,9 @@ use std::collections::BTreeMap;
 pub struct Tick {
     pub ts: DateTime<Utc>,
     pub input: StrategyInput,
+    /// True for full entry-context rows (StrategyInput); false for raw
+    /// open-position price ticks, which may only drive exits, never entries.
+    pub entry_eligible: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -97,7 +100,7 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
                 pos.trailing_stop_peak_price = tr.peak_price;
                 pos.trailing_stop_final_distance_pct = tr.trail_pct;
             }
-        } else {
+        } else if t.entry_eligible {
             let decision = run_steps_through(&t.input, cfg, "decision");
             let action = decision
                 .get("action")
@@ -242,22 +245,30 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
 /// `MarketSignal` — wrap those so the price tick is still captured.
 fn parse_tick(ts: DateTime<Utc>, json: &str) -> Option<Tick> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    let input = if v.get("signal").is_some() {
-        serde_json::from_value::<StrategyInput>(v).ok()?
+    let (input, entry_eligible) = if v.get("signal").is_some() {
+        (serde_json::from_value::<StrategyInput>(v).ok()?, true)
     } else {
-        StrategyInput {
-            symbol: v
-                .get("symbol")
-                .and_then(|s| s.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            temporal: serde_json::Value::Null,
-            account_equity_usdt: 0.0,
-            config: serde_json::Value::Null,
-            signal: v,
-        }
+        // Raw MarketSignal (open-position row): a price tick for exits only.
+        (
+            StrategyInput {
+                symbol: v
+                    .get("symbol")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                temporal: serde_json::Value::Null,
+                account_equity_usdt: 0.0,
+                config: serde_json::Value::Null,
+                signal: v,
+            },
+            false,
+        )
     };
-    Some(Tick { ts, input })
+    Some(Tick {
+        ts,
+        input,
+        entry_eligible,
+    })
 }
 
 /// Collect repeated `--set <dotted.path>=<value>` CLI args.
@@ -331,11 +342,14 @@ mod tests {
         let t = parse_tick(Utc::now(), full).unwrap();
         assert_eq!(t.input.symbol, "BTCUSDT");
         assert!((tick_price(&t.input) - 42.0).abs() < 1e-9);
-        // Raw MarketSignal row (open-position path) — wrapped so price survives.
+        assert!(t.entry_eligible, "full rows may open entries");
+        // Raw MarketSignal row (open-position path) — wrapped so price survives,
+        // but exit-only (must not open entries).
         let raw = r#"{"symbol":"ETHUSDT","current_price":99.0}"#;
         let t = parse_tick(Utc::now(), raw).unwrap();
         assert_eq!(t.input.symbol, "ETHUSDT");
         assert!((tick_price(&t.input) - 99.0).abs() < 1e-9);
+        assert!(!t.entry_eligible, "raw exit ticks must not open entries");
     }
 
     #[test]
@@ -368,6 +382,7 @@ mod tests {
                 config: serde_json::json!({}),
                 signal: serde_json::json!({ "current_price": price }),
             },
+            entry_eligible: true,
         };
         let rep = simulate(&[mk(0.0), mk(-1.0)], &cfg);
         assert_eq!(rep.ticks, 2);
