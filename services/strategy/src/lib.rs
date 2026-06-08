@@ -21,6 +21,7 @@ use tupa_engine::Executor;
 use viper_domain::config::*;
 use viper_domain::{MarketSignal, MarketSignalEvent, StrategyDecision, StrategyDecisionEvent};
 
+pub mod backtest;
 mod tupa_extensions;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -591,6 +592,36 @@ struct WalletSizingResponse {
     margin_balance: Option<f64>,
     wallet_balance: Option<f64>,
     available_balance: Option<f64>,
+}
+
+#[cfg(test)]
+impl StrategyConfig {
+    /// Minimal config for tests in sibling modules (e.g. `backtest`).
+    pub(crate) fn sample_for_tests() -> Self {
+        StrategyConfig {
+            profile: "TEST".to_string(),
+            trading_mode: "PAPER".to_string(),
+            global: serde_json::json!({
+                "mode_profiles": { "PAPER": {
+                    "stop_loss_pct": 0.01,
+                    "fixed_take_profit_enabled": true,
+                    "take_profit_pct": 0.02,
+                    "min_hold_seconds": 0,
+                    "trailing_enabled": true,
+                    "trailing_stop": {
+                        "activate_after_profit_pct": 0.01,
+                        "initial_trail_pct": 0.005,
+                        "move_to_break_even_at": 0.015
+                    }
+                }},
+                "trailing_stop": { "min_move_threshold_pct": 0.002 }
+            }),
+            pairs: std::collections::HashMap::new(),
+            profiles: serde_json::json!({}),
+            bollinger_std_dev_multiplier: 2.0,
+            bollinger_invalidation_threshold: 0.7,
+        }
+    }
 }
 
 impl StrategyConfig {
