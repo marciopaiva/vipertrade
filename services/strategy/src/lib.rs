@@ -3167,6 +3167,7 @@ fn evaluate_open_trade_exit(
     open: &OpenTradeSnapshot,
     cfg: &StrategyConfig,
     active_position_advice: Option<&ActivePositionAdviceSnapshot>,
+    now: DateTime<Utc>,
 ) -> ExitEvaluation {
     if current_price <= 0.0 || open.entry_price <= 0.0 {
         return ExitEvaluation {
@@ -3179,7 +3180,7 @@ fn evaluate_open_trade_exit(
 
     let min_hold_seconds = cfg.min_hold_seconds();
     if min_hold_seconds > 0 {
-        let held_for = Utc::now()
+        let held_for = now
             .signed_duration_since(open.opened_at)
             .num_seconds()
             .max(0);
@@ -4838,6 +4839,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                                 &symbol,
                                                 &open.side,
                                             ),
+                                            Utc::now(),
                                         );
                                     let close_decision = exit_evaluation.decision.clone();
                                     let trailing_eval = exit_evaluation.trailing.clone();
@@ -5306,7 +5308,7 @@ mod tests {
         let open = sample_open_trade();
         let cfg = sample_cfg();
 
-        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg, None);
+        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg, None, Utc::now());
 
         assert_eq!(eval.trigger, "take_profit");
         assert!(eval.reason.contains("take_profit_triggered"));
