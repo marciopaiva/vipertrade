@@ -8,6 +8,7 @@ members = [
     "services/executor",
     "services/monitor",
     "services/api",
+    "services/viper",
 ]
 resolver = "2"
 
