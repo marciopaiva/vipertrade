@@ -21,9 +21,9 @@ interface ServiceFlowDiagramProps {
 
 const STAGE_COLORS = {
   sources: {
-    border: 'border-slate-700/70',
+    border: 'border-border',
     panel: 'bg-slate-950/45',
-    pill: 'border-slate-700/70 bg-slate-900/70 text-slate-200',
+    pill: 'border-border bg-secondary/40 text-foreground',
   },
   marketData: {
     border: 'border-sky-400/55',
@@ -45,14 +45,14 @@ const STAGE_COLORS = {
     border: 'border-emerald-400/65',
     panel: 'bg-emerald-500/[0.07]',
     glow: 'shadow-[0_0_0_1px_rgba(52,211,153,0.18),0_0_38px_rgba(16,185,129,0.14)]',
-    accent: 'text-emerald-300',
-    dot: 'bg-emerald-400',
+    accent: 'text-accent',
+    dot: 'bg-accent',
     rail: 'from-emerald-400/40 via-emerald-400/12 to-transparent',
   },
   sidecars: {
-    border: 'border-slate-700/70',
+    border: 'border-border',
     panel: 'bg-slate-950/45',
-    pill: 'border-slate-700/70 bg-slate-900/60 text-slate-200',
+    pill: 'border-border bg-secondary/40 text-foreground',
   },
 };
 
@@ -71,7 +71,7 @@ function getStatusTone(ok: boolean | undefined, latency: number | undefined) {
   if (ok === false) {
     return {
       ring: 'ring-1 ring-red-400/45',
-      badge: 'text-red-300 border-red-400/40 bg-red-500/10',
+      badge: 'text-destructive border-red-400/40 bg-red-500/10',
       dot: 'bg-red-400',
       label: 'down',
     };
@@ -79,15 +79,15 @@ function getStatusTone(ok: boolean | undefined, latency: number | undefined) {
   if ((latency ?? 0) > 500) {
     return {
       ring: 'ring-1 ring-amber-400/40',
-      badge: 'text-amber-300 border-amber-400/35 bg-amber-500/10',
+      badge: 'text-primary border-amber-400/35 bg-amber-500/10',
       dot: 'bg-amber-400',
       label: 'slow',
     };
   }
   return {
     ring: 'ring-1 ring-emerald-400/35',
-    badge: 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10',
-    dot: 'bg-emerald-400',
+    badge: 'text-accent border-emerald-400/30 bg-accent/10',
+    dot: 'bg-accent',
     label: 'live',
   };
 }
@@ -135,11 +135,11 @@ function StageCard({
       />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
             Stage
           </div>
           <div
-            className={`mt-1 font-semibold text-slate-100 ${hero ? 'text-base' : 'text-sm'}`}
+            className={`mt-1 font-semibold text-foreground ${hero ? 'text-base' : 'text-sm'}`}
           >
             {title}
           </div>
@@ -154,7 +154,7 @@ function StageCard({
 
       <div className="mt-5 flex items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             Latency
           </div>
           <div
@@ -164,22 +164,22 @@ function StageCard({
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             Role
           </div>
-          <div className="mt-1 text-xs text-slate-300">{subtitle}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
         </div>
       </div>
 
       {(statusLine || detailLine) && (
         <div className="mt-4 border-t border-white/5 pt-3">
           {statusLine && (
-            <div className="text-[11px] font-medium tracking-[0.08em] text-slate-300">
+            <div className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
               {statusLine}
             </div>
           )}
           {detailLine && (
-            <div className="mt-1 text-[11px] text-slate-500">{detailLine}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{detailLine}</div>
           )}
         </div>
       )}
@@ -207,11 +207,11 @@ function SourcePill({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${accent}`} />
-          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">
+          <span className="text-xs font-semibold tracking-[0.14em] text-foreground">
             {label}
           </span>
         </div>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-muted-foreground">
           {typeof latency === 'number' ? `${latency}ms` : '--'}
         </span>
       </div>
@@ -237,11 +237,11 @@ function SidecarPill({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-          <span className="text-xs font-semibold tracking-[0.14em] text-slate-100">
+          <span className="text-xs font-semibold tracking-[0.14em] text-foreground">
             {label}
           </span>
         </div>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-muted-foreground">
           {typeof latency === 'number' ? `${latency}ms` : '--'}
         </span>
       </div>
@@ -263,13 +263,13 @@ function BlockConnector({
   return (
     <>
       <div className="xl:hidden flex items-center justify-center py-1">
-        <div className="inline-flex items-center gap-2 rounded-full border border-slate-700/70 bg-slate-900/60 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/40 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
           <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
           {mobileLabel}
         </div>
       </div>
       <div className="hidden xl:flex items-center justify-center">
-        <div className="relative h-[2px] w-16 rounded-full bg-slate-800/90">
+        <div className="relative h-[2px] w-16 rounded-full bg-secondary/90">
           <div
             className={`absolute inset-y-0 left-0 w-full rounded-full bg-gradient-to-r ${from} ${to} opacity-70`}
           />
@@ -387,17 +387,17 @@ export default function ServiceFlowDiagram({
           }
         }
       `}</style>
-      <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
+      <div className="rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Sources
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-100">
+            <div className="mt-1 text-sm font-semibold text-foreground">
               {showMultiSource ? 'Exchange Feeds' : 'Execution Venue'}
             </div>
           </div>
-          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             {showMultiSource ? '3 venues' : 'single venue'}
           </div>
         </div>
@@ -435,17 +435,17 @@ export default function ServiceFlowDiagram({
         dotClass={strategyTone.dot}
       />
 
-      <div className="relative overflow-hidden rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
+      <div className="relative overflow-hidden rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Core pipeline
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-100">
+            <div className="mt-1 text-sm font-semibold text-foreground">
               Market Data to Execution
             </div>
           </div>
-          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             runtime path
           </div>
         </div>
@@ -502,17 +502,17 @@ export default function ServiceFlowDiagram({
         dotClass={executorTone.dot}
       />
 
-      <div className="rounded-[28px] border border-slate-700/70 bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
+      <div className="rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Sidecars
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-100">
+            <div className="mt-1 text-sm font-semibold text-foreground">
               State and Analysis
             </div>
           </div>
-          <div className="rounded-full border border-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             observers
           </div>
         </div>
