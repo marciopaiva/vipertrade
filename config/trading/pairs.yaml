@@ -26,8 +26,10 @@ global:
       fixed_take_profit_enabled: false
       trailing_enabled: true
       trailing_stop:
-        activate_after_profit_pct: 0.0020
-        initial_trail_pct: 0.0008
+        # Tuned via backtest (large corpus): activate sooner + tighter initial
+        # trail captures more of the trailing edge. net -0.3034 -> -0.2310.
+        activate_after_profit_pct: 0.0015
+        initial_trail_pct: 0.0006
         ratchet_levels:
           - at_profit_pct: 0.003
             trail_pct: 0.0007
