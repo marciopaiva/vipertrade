@@ -71,6 +71,7 @@ struct ExchangeSignal {
     source: &'static str,
     current_price: f64,
     atr_14: f64,
+    adx_14: f64,
     volume_24h: i64,
     funding_rate: f64,
     trend_score: f64,
@@ -358,6 +359,65 @@ fn compute_atr14(candles: &[Candle]) -> f64 {
     let start = trs.len() - tail;
     let sum: f64 = trs[start..].iter().sum();
     sum / tail as f64
+}
+
+/// Wilder's ADX(14) — trend strength (0..100). Needs ~2*period+1 candles for a
+/// stable value; returns None below that. High ADX = strong trend, low = chop.
+fn compute_adx14(candles: &[Candle]) -> Option<f64> {
+    let period = 14usize;
+    if candles.len() < period * 2 + 1 {
+        return None;
+    }
+    let mut tr = Vec::with_capacity(candles.len());
+    let mut plus_dm = Vec::with_capacity(candles.len());
+    let mut minus_dm = Vec::with_capacity(candles.len());
+    for i in 1..candles.len() {
+        let c = candles[i];
+        let p = candles[i - 1];
+        let up = c.high - p.high;
+        let down = p.low - c.low;
+        plus_dm.push(if up > down && up > 0.0 { up } else { 0.0 });
+        minus_dm.push(if down > up && down > 0.0 { down } else { 0.0 });
+        let t = (c.high - c.low)
+            .max((c.high - p.close).abs())
+            .max((c.low - p.close).abs());
+        tr.push(t.max(0.0));
+    }
+    if tr.len() < period * 2 {
+        return None;
+    }
+    let dx = |atr: f64, sp: f64, sm: f64| -> f64 {
+        if atr <= 0.0 {
+            return 0.0;
+        }
+        let pdi = 100.0 * sp / atr;
+        let mdi = 100.0 * sm / atr;
+        let denom = pdi + mdi;
+        if denom <= 0.0 {
+            0.0
+        } else {
+            100.0 * (pdi - mdi).abs() / denom
+        }
+    };
+    let mut atr = tr[..period].iter().sum::<f64>();
+    let mut sp = plus_dm[..period].iter().sum::<f64>();
+    let mut sm = minus_dm[..period].iter().sum::<f64>();
+    let mut dxs = vec![dx(atr, sp, sm)];
+    let pf = period as f64;
+    for i in period..tr.len() {
+        atr = atr - atr / pf + tr[i];
+        sp = sp - sp / pf + plus_dm[i];
+        sm = sm - sm / pf + minus_dm[i];
+        dxs.push(dx(atr, sp, sm));
+    }
+    if dxs.len() < period {
+        return None;
+    }
+    let mut adx = dxs[..period].iter().sum::<f64>() / pf;
+    for d in &dxs[period..] {
+        adx = (adx * (pf - 1.0) + d) / pf;
+    }
+    Some(adx)
 }
 
 fn compute_rsi14(candles: &[Candle]) -> Option<f64> {
@@ -696,6 +756,7 @@ fn build_exchange_signal(
         .max(0.0);
     let current_price = snapshot.current_price.max(0.0);
     let atr_14 = compute_atr14(&snapshot.candles);
+    let adx_14 = compute_adx14(&snapshot.candles).unwrap_or(0.0);
     let indicators = compute_indicator_bundle_complete(snapshot.source, symbol, &snapshot.candles)?;
     let trend_score = composite_trend_score(
         last_closed_price,
@@ -711,6 +772,7 @@ fn build_exchange_signal(
         source: snapshot.source,
         current_price,
         atr_14,
+        adx_14,
         volume_24h: snapshot.volume_24h,
         funding_rate: snapshot.funding_rate,
         trend_score,
@@ -1031,6 +1093,7 @@ fn aggregate_signals(
 
     let mut prices: Vec<f64> = signals.iter().map(|s| s.current_price).collect();
     let mut atrs: Vec<f64> = signals.iter().map(|s| s.atr_14).collect();
+    let mut adxs: Vec<f64> = signals.iter().map(|s| s.adx_14).collect();
     let mut spreads: Vec<f64> = signals.iter().map(|s| s.spread_pct).collect();
     let bybit_regime = signals
         .iter()
@@ -1184,6 +1247,7 @@ fn aggregate_signals(
         0.0
     };
     let consensus_atr_14 = median(&mut atrs);
+    let consensus_adx_14 = median(&mut adxs);
     let consensus_spread_pct = median(&mut spreads);
 
     // `current_price` must stay anchored to Bybit so entry/exit logic and the
@@ -1195,6 +1259,9 @@ fn aggregate_signals(
     let atr_14 = bybit_signal
         .map(|s| s.atr_14)
         .unwrap_or_else(|| median(&mut atrs));
+    let adx_14 = bybit_signal
+        .map(|s| s.adx_14)
+        .unwrap_or_else(|| median(&mut adxs));
     let spread_pct = bybit_signal
         .map(|s| s.spread_pct)
         .unwrap_or_else(|| median(&mut spreads));
@@ -1245,11 +1312,13 @@ fn aggregate_signals(
         current_price,
         bybit_price,
         atr_14,
+        adx_14,
         volume_24h,
         funding_rate,
         trend_score,
         spread_pct,
         consensus_atr_14,
+        consensus_adx_14,
         consensus_volume_24h,
         consensus_funding_rate,
         consensus_trend_score,
