@@ -7,6 +7,9 @@ export const endpoints = {
   // Market Data
   marketSignals: '/api/v1/market-signals',
 
+  // Strategy decisions (cockpit): latest decision per symbol + consensus indicators
+  decisions: '/api/v1/decisions',
+
   // Positions
   positions: '/api/v1/positions',
 

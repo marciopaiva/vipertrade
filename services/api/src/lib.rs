@@ -19,9 +19,10 @@ use warp::{Filter, Rejection, Reply};
 use position_config::{default_trailing_profile, load_position_config};
 use state::{
     ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
-    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, EventItem, EventsQuery,
-    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
-    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, DecisionItem,
+    DecisionsQuery, DecisionsResponse, EventItem, EventsQuery, EventsResponse,
+    ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
+    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
     PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
     RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
 };
@@ -765,6 +766,108 @@ async fn build_exchange_trades_response(query: TradesQuery) -> warp::reply::With
             StatusCode::BAD_GATEWAY,
             "exchange_fetch_failed",
             format!("failed to fetch bybit closed pnl: {}", message),
+        ),
+    }
+}
+
+async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl Reply {
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+
+    let limit = clamp_limit(query.limit, 30);
+
+    // Latest decision per symbol, with the consensus indicators from input_data.
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            DateTime<Utc>,
+        ),
+    >(
+        "SELECT * FROM (
+             SELECT DISTINCT ON (input_data->>'symbol')
+                 input_data->>'symbol' AS symbol,
+                 COALESCE(output_data->'decision'->>'action', 'HOLD') AS action,
+                 input_data->'signal'->>'consensus_side' AS consensus_side,
+                 (input_data->'signal'->>'consensus_count')::numeric::int8 AS consensus_count,
+                 (input_data->'signal'->>'exchanges_available')::numeric::int8 AS exchanges_available,
+                 (input_data->'signal'->>'bullish_exchanges')::numeric::int8 AS bullish_exchanges,
+                 (input_data->'signal'->>'bearish_exchanges')::numeric::int8 AS bearish_exchanges,
+                 (input_data->'signal'->>'consensus_rsi_14')::float8 AS consensus_rsi_14,
+                 (input_data->'signal'->>'consensus_bollinger_percent_b')::float8 AS percent_b,
+                 (input_data->'signal'->>'consensus_trend_score')::float8 AS consensus_trend_score,
+                 (input_data->'signal'->>'consensus_macd_histogram')::float8 AS macd_hist,
+                 (input_data->'signal'->>'current_price')::float8 AS current_price,
+                 executed_at
+             FROM tupa_audit_logs
+             WHERE input_data ? 'signal'
+             ORDER BY input_data->>'symbol', executed_at DESC
+         ) latest
+         ORDER BY executed_at DESC
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let items = rows
+                .into_iter()
+                .map(
+                    |(
+                        symbol,
+                        action,
+                        consensus_side,
+                        consensus_count,
+                        exchanges_available,
+                        bullish_exchanges,
+                        bearish_exchanges,
+                        consensus_rsi_14,
+                        consensus_bollinger_percent_b,
+                        consensus_trend_score,
+                        consensus_macd_histogram,
+                        current_price,
+                        executed_at,
+                    )| DecisionItem {
+                        symbol,
+                        action,
+                        consensus_side,
+                        consensus_count,
+                        exchanges_available,
+                        bullish_exchanges,
+                        bearish_exchanges,
+                        consensus_rsi_14,
+                        consensus_bollinger_percent_b,
+                        consensus_trend_score,
+                        consensus_macd_histogram,
+                        current_price,
+                        executed_at,
+                    },
+                )
+                .collect();
+            json_ok(&DecisionsResponse { items })
+        }
+        Err(err) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "query_failed",
+            format!("failed to fetch decisions: {}", err),
         ),
     }
 }
@@ -2152,6 +2255,13 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(daily_trades_summary_handler);
 
+    let decisions = api_v1
+        .and(warp::path("decisions"))
+        .and(warp::path::end())
+        .and(warp::query::<DecisionsQuery>())
+        .and(with_state(state.clone()))
+        .then(decisions_handler);
+
     let events = api_v1
         .and(warp::path("events"))
         .and(warp::path::end())
@@ -2239,6 +2349,7 @@ pub async fn run() {
         .or(positions)
         .or(trades)
         .or(daily_trades_summary)
+        .or(decisions)
         .or(events)
         .or(performance)
         .or(risk_kpis)

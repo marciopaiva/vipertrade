@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
+import { StrategyCockpit } from '@/components/cockpit/StrategyCockpit';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -727,10 +728,14 @@ function ClosedTradesTable({
 }
 
 export default function DashboardPage() {
-   const { data: dashboardData, loading, error } = useDashboard<DashboardData>(
-    '/api/dashboard',
-    { refreshInterval: 5000, enabled: true }
-  );
+  const {
+    data: dashboardData,
+    loading,
+    error,
+  } = useDashboard<DashboardData>('/api/dashboard', {
+    refreshInterval: 5000,
+    enabled: true,
+  });
   const [lastStableMarketSignals, setLastStableMarketSignals] = useState<
     Record<string, any>
   >({});
@@ -744,7 +749,7 @@ export default function DashboardPage() {
       );
     }
     return items as Record<string, any>;
-   }, [dashboardData?.market_signals?.items]);
+  }, [dashboardData?.market_signals?.items]);
 
   useEffect(() => {
     if (Object.keys(liveMarketSignals).length > 0) {
@@ -763,8 +768,8 @@ export default function DashboardPage() {
     const signalsArray = Object.values(signalsObj);
     if (signalsArray.length === 0) return [];
 
-     const events = dashboardData?.events?.items || [];
-     const positions = dashboardData?.positions?.items || [];
+    const events = dashboardData?.events?.items || [];
+    const positions = dashboardData?.positions?.items || [];
 
     const latestExecutorEventBySymbol = new Map<
       string,
@@ -778,10 +783,10 @@ export default function DashboardPage() {
       ) {
         continue;
       }
-       latestExecutorEventBySymbol.set(event.symbol, {
-         action: event.data?.action ? String(event.data.action) : undefined,
-         status: event.data?.status ? String(event.data.status) : undefined,
-       });
+      latestExecutorEventBySymbol.set(event.symbol, {
+        action: event.data?.action ? String(event.data.action) : undefined,
+        status: event.data?.status ? String(event.data.status) : undefined,
+      });
     }
 
     return signalsArray
@@ -875,24 +880,28 @@ export default function DashboardPage() {
           Math.abs(b.trendScore) - Math.abs(a.trendScore)
         );
       });
-   }, [dashboardData?.events?.items, dashboardData?.positions?.items, effectiveMarketSignals]);
+  }, [
+    dashboardData?.events?.items,
+    dashboardData?.positions?.items,
+    effectiveMarketSignals,
+  ]);
 
-   const flowContext = useMemo<FlowContext>(() => {
-     const signalsObj = effectiveMarketSignals;
-     const latestExecutorEvent = (dashboardData?.events?.items || []).find(
-       event => event.event_type === 'executor_event_processed' && event.symbol
-     );
-     const leadToken = latestExecutorEvent?.symbol
-       ? tokenDecisions.find(
-           token => token.symbol === latestExecutorEvent.symbol
-         ) || tokenDecisions[0]
-       : tokenDecisions[0];
-     const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
+  const flowContext = useMemo<FlowContext>(() => {
+    const signalsObj = effectiveMarketSignals;
+    const latestExecutorEvent = (dashboardData?.events?.items || []).find(
+      event => event.event_type === 'executor_event_processed' && event.symbol
+    );
+    const leadToken = latestExecutorEvent?.symbol
+      ? tokenDecisions.find(
+          token => token.symbol === latestExecutorEvent.symbol
+        ) || tokenDecisions[0]
+      : tokenDecisions[0];
+    const leadSignal = leadToken ? signalsObj[leadToken.symbol] : null;
 
-     const openPosition = (dashboardData?.positions?.items || [])[0];
-     const lastClosedTrade = (dashboardData?.trades?.items || []).find(
-       trade => trade.status === 'closed'
-     );
+    const openPosition = (dashboardData?.positions?.items || [])[0];
+    const lastClosedTrade = (dashboardData?.trades?.items || []).find(
+      trade => trade.status === 'closed'
+    );
 
     const strategyState = leadToken ? leadToken.stateLabel : 'scan idle';
     const strategyContext = leadSignal
@@ -905,17 +914,17 @@ export default function DashboardPage() {
       latestExecutorEvent?.symbol ||
       lastClosedTrade?.symbol;
 
-     const executorAction = openPosition
-       ? `open ${openPosition.side.toLowerCase()}`
-       : latestExecutorEvent?.data?.action
-         ? String(latestExecutorEvent.data.action).toLowerCase()
-         : 'idle';
+    const executorAction = openPosition
+      ? `open ${openPosition.side.toLowerCase()}`
+      : latestExecutorEvent?.data?.action
+        ? String(latestExecutorEvent.data.action).toLowerCase()
+        : 'idle';
 
-     const executorContext = openPosition
-       ? `${usd(openPosition.notional_usdt)} live`
-       : latestExecutorEvent?.data?.status
-         ? String(latestExecutorEvent.data.status).replaceAll('_', ' ')
-         : 'awaiting decision';
+    const executorContext = openPosition
+      ? `${usd(openPosition.notional_usdt)} live`
+      : latestExecutorEvent?.data?.status
+        ? String(latestExecutorEvent.data.status).replaceAll('_', ' ')
+        : 'awaiting decision';
 
     return {
       strategySymbol: leadToken?.symbol,
@@ -925,13 +934,13 @@ export default function DashboardPage() {
       executorAction,
       executorContext,
     };
-    }, [
-      dashboardData?.events?.items,
-      dashboardData?.positions?.items,
-      dashboardData?.trades?.items,
-      effectiveMarketSignals,
-      tokenDecisions,
-    ]);
+  }, [
+    dashboardData?.events?.items,
+    dashboardData?.positions?.items,
+    dashboardData?.trades?.items,
+    effectiveMarketSignals,
+    tokenDecisions,
+  ]);
 
   if (loading && !dashboardData) {
     return (
@@ -944,17 +953,20 @@ export default function DashboardPage() {
     );
   }
 
-   const tradingMode =
-     (dashboardData?.status?.trading_mode?.toLowerCase() as
-       | 'paper'
-       | 'testnet'
-       | 'mainnet') || 'paper';
-   const executorEnabled = dashboardData?.status?.executor?.enabled ?? false;
+  const tradingMode =
+    (dashboardData?.status?.trading_mode?.toLowerCase() as
+      | 'paper'
+      | 'testnet'
+      | 'mainnet') || 'paper';
+  const executorEnabled = dashboardData?.status?.executor?.enabled ?? false;
 
   return (
     <div className="min-h-screen bg-background">
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
+        {/* Strategy Cockpit — live consensus & entry-guard state */}
+        <StrategyCockpit />
+
         {/* Wallet Card - Unified */}
         <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
           <CardHeader className="pb-1">
@@ -1028,17 +1040,17 @@ export default function DashboardPage() {
 
               <div className="mt-4 flex flex-wrap items-end gap-x-4 gap-y-3">
                 <div className="text-5xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-6xl">
-                   {usd(dashboardData?.wallet?.total_equity)}
+                  {usd(dashboardData?.wallet?.total_equity)}
                 </div>
                 <div
                   className={cn(
                     'rounded-full border px-3 py-1 text-sm font-semibold',
-                     (dashboardData?.performance?.last_7d?.total_pnl ?? 0) >= 0
+                    (dashboardData?.performance?.last_7d?.total_pnl ?? 0) >= 0
                       ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
                       : 'border-red-500/35 bg-red-500/10 text-red-300'
                   )}
                 >
-                   {usd(dashboardData?.performance?.last_7d?.total_pnl)} · 7d
+                  {usd(dashboardData?.performance?.last_7d?.total_pnl)} · 7d
                 </div>
               </div>
 
@@ -1046,26 +1058,26 @@ export default function DashboardPage() {
                 <div className="text-slate-500">
                   Profile{' '}
                   <span className="font-semibold text-slate-200">
-                     {dashboardData?.status?.trade_profile_label ||
-                       dashboardData?.status?.trading_profile ||
-                       'MEDIUM'}
+                    {dashboardData?.status?.trade_profile_label ||
+                      dashboardData?.status?.trading_profile ||
+                      'MEDIUM'}
                   </span>
                 </div>
                 <div className="text-slate-500">
                   Open{' '}
                   <span className="font-semibold text-violet-300">
-                     {dashboardData?.positions?.items?.length || 0}
+                    {dashboardData?.positions?.items?.length || 0}
                   </span>
                 </div>
                 <div
                   className={cn(
                     'font-medium',
-                     (dashboardData?.wallet?.unrealized_pnl ?? 0) >= 0
+                    (dashboardData?.wallet?.unrealized_pnl ?? 0) >= 0
                       ? 'text-emerald-300'
                       : 'text-red-300'
                   )}
                 >
-                   {usd(dashboardData?.wallet?.unrealized_pnl)} unrealized
+                  {usd(dashboardData?.wallet?.unrealized_pnl)} unrealized
                 </div>
               </div>
             </div>
@@ -1076,12 +1088,12 @@ export default function DashboardPage() {
                   Deposited
                 </div>
                 <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
-                   {usd(dashboardData?.wallet?.wallet_balance)}
+                  {usd(dashboardData?.wallet?.wallet_balance)}
                 </div>
-                 <div className="mt-2 text-xs text-slate-500">
-                   {(dashboardData?.wallet?.margin_balance ?? 0) > 0
-                     ? `${(((dashboardData?.wallet?.initial_margin || 0) / Math.max(1, dashboardData?.wallet?.margin_balance || 1)) * 100).toFixed(0)}% active`
-                     : 'No active margin'}
+                <div className="mt-2 text-xs text-slate-500">
+                  {(dashboardData?.wallet?.margin_balance ?? 0) > 0
+                    ? `${(((dashboardData?.wallet?.initial_margin || 0) / Math.max(1, dashboardData?.wallet?.margin_balance || 1)) * 100).toFixed(0)}% active`
+                    : 'No active margin'}
                 </div>
                 <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full border border-slate-700/70" />
               </div>
@@ -1095,17 +1107,19 @@ export default function DashboardPage() {
                     <div
                       className={cn(
                         'mt-3 text-[2rem] font-semibold tracking-[-0.03em]',
-                         (dashboardData?.performance?.last_24h?.total_pnl ?? 0) >= 0
+                        (dashboardData?.performance?.last_24h?.total_pnl ??
+                          0) >= 0
                           ? 'text-emerald-300'
                           : 'text-red-300'
                       )}
                     >
-                       {usd(dashboardData?.performance?.last_24h?.total_pnl)}
+                      {usd(dashboardData?.performance?.last_24h?.total_pnl)}
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                       {dashboardData?.performance?.last_24h?.win_rate !== undefined
-                         ? `${dashboardData.performance.last_24h.win_rate.toFixed(1)}% win rate`
-                         : '24h performance'}
+                      {dashboardData?.performance?.last_24h?.win_rate !==
+                      undefined
+                        ? `${dashboardData.performance.last_24h.win_rate.toFixed(1)}% win rate`
+                        : '24h performance'}
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">24h</div>
@@ -1118,7 +1132,7 @@ export default function DashboardPage() {
                   Active Trading
                 </div>
                 <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
-                   {usd(dashboardData?.wallet?.margin_balance)}
+                  {usd(dashboardData?.wallet?.margin_balance)}
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-emerald-300">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" />
@@ -1131,7 +1145,7 @@ export default function DashboardPage() {
                   Idle Funds
                 </div>
                 <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-amber-300">
-                   {usd(dashboardData?.wallet?.available_balance)}
+                  {usd(dashboardData?.wallet?.available_balance)}
                 </div>
                 <div className="mt-2 text-xs text-amber-200/80">
                   Ready capital
@@ -1169,11 +1183,11 @@ export default function DashboardPage() {
               flowContext={flowContext}
               activeSignalsCount={Object.keys(effectiveMarketSignals).length}
               openPositionsCount={dashboardData?.positions?.items?.length || 0}
-                closedTradesCount={
-                  (dashboardData?.trades?.items || []).filter(
-                    trade => trade.status === 'closed'
-                  ).length
-                }
+              closedTradesCount={
+                (dashboardData?.trades?.items || []).filter(
+                  trade => trade.status === 'closed'
+                ).length
+              }
             />
           </CardContent>
         </Card>

@@ -20,6 +20,24 @@ export interface MarketSignal {
   bybit_regime?: string;
 }
 
+/** Latest strategy decision per symbol with the multi-exchange consensus
+ *  indicators that drove it. Powers the Strategy Cockpit. */
+export interface DecisionItem {
+  symbol: string;
+  action: string;
+  consensus_side?: string | null;
+  consensus_count?: number | null;
+  exchanges_available?: number | null;
+  bullish_exchanges?: number | null;
+  bearish_exchanges?: number | null;
+  consensus_rsi_14?: number | null;
+  consensus_bollinger_percent_b?: number | null;
+  consensus_trend_score?: number | null;
+  consensus_macd_histogram?: number | null;
+  current_price?: number | null;
+  executed_at: string;
+}
+
 export interface Position {
   trade_id: string;
   symbol: string;
