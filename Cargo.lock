@@ -3083,6 +3083,7 @@ version = "0.9.0"
 dependencies = [
  "bcrypt",
  "chrono",
+ "futures-util",
  "hex",
  "hmac",
  "jsonwebtoken",

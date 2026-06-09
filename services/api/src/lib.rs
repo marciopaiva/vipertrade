@@ -19,9 +19,10 @@ use warp::{Filter, Rejection, Reply};
 use position_config::{default_trailing_profile, load_position_config};
 use state::{
     ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
-    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, EventItem, EventsQuery,
-    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
-    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, DecisionItem,
+    DecisionsQuery, DecisionsResponse, EventItem, EventsQuery, EventsResponse,
+    ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
+    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
     PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
     RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
 };
@@ -765,6 +766,108 @@ async fn build_exchange_trades_response(query: TradesQuery) -> warp::reply::With
             StatusCode::BAD_GATEWAY,
             "exchange_fetch_failed",
             format!("failed to fetch bybit closed pnl: {}", message),
+        ),
+    }
+}
+
+async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl Reply {
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+
+    let limit = clamp_limit(query.limit, 30);
+
+    // Latest decision per symbol, with the consensus indicators from input_data.
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            DateTime<Utc>,
+        ),
+    >(
+        "SELECT * FROM (
+             SELECT DISTINCT ON (input_data->>'symbol')
+                 input_data->>'symbol' AS symbol,
+                 COALESCE(output_data->'decision'->>'action', 'HOLD') AS action,
+                 input_data->'signal'->>'consensus_side' AS consensus_side,
+                 (input_data->'signal'->>'consensus_count')::numeric::int8 AS consensus_count,
+                 (input_data->'signal'->>'exchanges_available')::numeric::int8 AS exchanges_available,
+                 (input_data->'signal'->>'bullish_exchanges')::numeric::int8 AS bullish_exchanges,
+                 (input_data->'signal'->>'bearish_exchanges')::numeric::int8 AS bearish_exchanges,
+                 (input_data->'signal'->>'consensus_rsi_14')::float8 AS consensus_rsi_14,
+                 (input_data->'signal'->>'consensus_bollinger_percent_b')::float8 AS percent_b,
+                 (input_data->'signal'->>'consensus_trend_score')::float8 AS consensus_trend_score,
+                 (input_data->'signal'->>'consensus_macd_histogram')::float8 AS macd_hist,
+                 (input_data->'signal'->>'current_price')::float8 AS current_price,
+                 executed_at
+             FROM tupa_audit_logs
+             WHERE input_data ? 'signal'
+             ORDER BY input_data->>'symbol', executed_at DESC
+         ) latest
+         ORDER BY executed_at DESC
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let items = rows
+                .into_iter()
+                .map(
+                    |(
+                        symbol,
+                        action,
+                        consensus_side,
+                        consensus_count,
+                        exchanges_available,
+                        bullish_exchanges,
+                        bearish_exchanges,
+                        consensus_rsi_14,
+                        consensus_bollinger_percent_b,
+                        consensus_trend_score,
+                        consensus_macd_histogram,
+                        current_price,
+                        executed_at,
+                    )| DecisionItem {
+                        symbol,
+                        action,
+                        consensus_side,
+                        consensus_count,
+                        exchanges_available,
+                        bullish_exchanges,
+                        bearish_exchanges,
+                        consensus_rsi_14,
+                        consensus_bollinger_percent_b,
+                        consensus_trend_score,
+                        consensus_macd_histogram,
+                        current_price,
+                        executed_at,
+                    },
+                )
+                .collect();
+            json_ok(&DecisionsResponse { items })
+        }
+        Err(err) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "query_failed",
+            format!("failed to fetch decisions: {}", err),
         ),
     }
 }
@@ -2068,6 +2171,70 @@ async fn shutdown_signal() {
     }
 }
 
+// ─── Live stream (WebSocket) ────────────────────────────────────────────────
+// Bridges Redis pub/sub (viper:market_data, viper:decisions) to connected
+// browsers so the dashboard updates by push instead of polling.
+
+fn with_broadcast(
+    tx: tokio::sync::broadcast::Sender<String>,
+) -> impl Filter<Extract = (tokio::sync::broadcast::Sender<String>,), Error = std::convert::Infallible>
+       + Clone {
+    warp::any().map(move || tx.clone())
+}
+
+fn resolve_redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| {
+        let host = std::env::var("REDIS_HOST").unwrap_or_else(|_| "redis".to_string());
+        let port = std::env::var("REDIS_PORT").unwrap_or_else(|_| "6379".to_string());
+        format!("redis://{host}:{port}")
+    })
+}
+
+/// Subscribe to the strategy/market Redis channels and fan out every message to
+/// the broadcast channel (consumed by each WS client). Reconnects on error.
+async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
+    use futures_util::StreamExt;
+    let url = resolve_redis_url();
+    loop {
+        let result: redis::RedisResult<()> = async {
+            let client = redis::Client::open(url.as_str())?;
+            let conn = client.get_async_connection().await?;
+            let mut pubsub = conn.into_pubsub();
+            pubsub.subscribe("viper:market_data").await?;
+            pubsub.subscribe("viper:decisions").await?;
+            tracing::info!("WS bridge subscribed to Redis market/decision channels");
+            let mut stream = pubsub.on_message();
+            while let Some(msg) = stream.next().await {
+                if let Ok(payload) = msg.get_payload::<String>() {
+                    let _ = tx.send(payload);
+                }
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "WS Redis subscriber dropped; retrying in 3s");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+}
+
+async fn ws_client(ws: warp::ws::WebSocket, tx: tokio::sync::broadcast::Sender<String>) {
+    use futures_util::{SinkExt, StreamExt};
+    let (mut ws_tx, mut ws_rx) = ws.split();
+    let mut rx = tx.subscribe();
+    let forward = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            if ws_tx.send(warp::ws::Message::text(msg)).await.is_err() {
+                break;
+            }
+        }
+    });
+    // Drain inbound frames (we don't expect any) so we notice the socket closing.
+    while let Some(Ok(_)) = ws_rx.next().await {}
+    forward.abort();
+}
+
 pub async fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -2118,6 +2285,19 @@ pub async fn run() {
         ),
     });
 
+    // Live stream: one Redis subscriber fans out to all WS clients.
+    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(512);
+    tokio::spawn(redis_stream_subscriber(market_tx.clone()));
+
+    let ws_stream = warp::path("ws")
+        .and(warp::ws())
+        .and(with_broadcast(market_tx.clone()))
+        .map(
+            |ws: warp::ws::Ws, tx: tokio::sync::broadcast::Sender<String>| {
+                ws.on_upgrade(move |socket| ws_client(socket, tx))
+            },
+        );
+
     let api_v1 = warp::path("api").and(warp::path("v1"));
 
     let health = api_v1
@@ -2151,6 +2331,13 @@ pub async fn run() {
         .and(warp::path::end())
         .and(with_state(state.clone()))
         .then(daily_trades_summary_handler);
+
+    let decisions = api_v1
+        .and(warp::path("decisions"))
+        .and(warp::path::end())
+        .and(warp::query::<DecisionsQuery>())
+        .and(with_state(state.clone()))
+        .then(decisions_handler);
 
     let events = api_v1
         .and(warp::path("events"))
@@ -2239,6 +2426,7 @@ pub async fn run() {
         .or(positions)
         .or(trades)
         .or(daily_trades_summary)
+        .or(decisions)
         .or(events)
         .or(performance)
         .or(risk_kpis)
@@ -2250,6 +2438,7 @@ pub async fn run() {
         .or(risk_limits_control)
         .or(legacy_root)
         .or(legacy_health)
+        .or(ws_stream)
         .recover(handle_rejection);
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
