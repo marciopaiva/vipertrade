@@ -1087,6 +1087,23 @@ impl StrategyConfig {
             .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", key], default))
     }
 
+    /// Minimum consensus ADX(14) required to enter — filters choppy/no-trend
+    /// markets. Default 0 (neutral: never blocks until configured).
+    fn min_adx(&self, symbol: &str) -> f64 {
+        if let Some(value) = self.mode_f64("min_adx") {
+            return value;
+        }
+        self.pair_cfg(symbol)
+            .map(|v| {
+                cfg_f64(
+                    v,
+                    &["entry_filters", "min_adx"],
+                    cfg_f64(&self.global, &["entry_filters", "min_adx"], 0.0),
+                )
+            })
+            .unwrap_or_else(|| cfg_f64(&self.global, &["entry_filters", "min_adx"], 0.0))
+    }
+
     fn btc_macro_penalty_for_side(
         &self,
         symbol: &str,
@@ -2265,6 +2282,7 @@ fn execute_strategy_step(
             let bollinger_percent_b = get_f64(&state, "bollinger_percent_b", 0.5);
             let consensus_bollinger_percent_b =
                 get_f64(&state, "consensus_bollinger_percent_b", bollinger_percent_b);
+            let consensus_adx_14 = get_f64(&state, "consensus_adx_14", 0.0);
             let bollinger_bandwidth = get_f64(&state, "bollinger_bandwidth", 0.0);
             let consensus_bollinger_bandwidth =
                 get_f64(&state, "consensus_bollinger_bandwidth", bollinger_bandwidth);
@@ -2407,6 +2425,11 @@ fn execute_strategy_step(
                 consensus_bollinger_percent_b <= percent_b_limit
             };
             let directional_ok = directional_ok && percent_b_ok;
+            // ADX entry guard: require a minimum trend strength (skip chop).
+            // Neutral by default (min_adx=0). consensus_adx_14=0 (missing data)
+            // only blocks when min_adx>0, i.e. once ADX is actually populated.
+            let adx_ok = consensus_adx_14 >= cfg.min_adx(&symbol);
+            let directional_ok = directional_ok && adx_ok;
             let max_spread_pct = cfg.max_spread_pct(&symbol);
             let min_volume_24h = cfg.min_volume_24h_usdt(&symbol);
             let max_atr_pct = cfg.max_atr_pct(&symbol);
@@ -5352,11 +5375,13 @@ mod tests {
             current_price: 100.0,
             bybit_price: 100.0,
             atr_14: 1.0,
+            adx_14: 25.0,
             volume_24h: 100_000_000,
             funding_rate: 0.0,
             trend_score: 0.0,
             spread_pct: 0.0,
             consensus_atr_14: 1.0,
+            consensus_adx_14: 25.0,
             consensus_volume_24h: 100_000_000,
             consensus_funding_rate: 0.0,
             consensus_trend_score: 0.0,
