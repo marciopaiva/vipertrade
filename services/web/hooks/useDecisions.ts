@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchApi, endpoints } from '@/lib/api/endpoints';
 import type { DecisionItem } from '@/types/trading';
 
@@ -33,38 +33,39 @@ export function useDecisions() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Initial load + slow safety poll.
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const data = await fetchApi<{ items: DecisionItem[] }>(
-          endpoints.decisions
-        );
-        if (!active) return;
-        setBySymbol((prev) => {
-          const next = { ...prev };
-          for (const it of data?.items ?? []) next[it.symbol] = it;
-          return next;
-        });
-        setUpdatedAt(Date.now());
-        setError(null);
-      } catch (err) {
-        if (active)
-          setError(
-            err instanceof Error ? err.message : 'Failed to fetch decisions'
-          );
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    load();
-    const id = setInterval(load, 30000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
+  const load = useCallback(async () => {
+    try {
+      const data = await fetchApi<{ items: DecisionItem[] }>(
+        endpoints.decisions
+      );
+      setBySymbol((prev) => {
+        const next = { ...prev };
+        for (const it of data?.items ?? []) next[it.symbol] = it;
+        return next;
+      });
+      setUpdatedAt(Date.now());
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to fetch decisions'
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Initial snapshot over REST (once).
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Fallback poll: ONLY while the WebSocket is down — once it's live, updates
+  // are 100% push (no periodic refresh).
+  useEffect(() => {
+    if (live) return;
+    const id = setInterval(() => void load(), 15000);
+    return () => clearInterval(id);
+  }, [live, load]);
 
   // WebSocket push.
   useEffect(() => {
