@@ -102,7 +102,7 @@ export function PositionTable({
   if (positions.length === 0) {
     return (
       <Card
-        className={cn('border-0 bg-transparent shadow-none', className)}
+        className={cn('border-0 bg-transparent shadow-none [&>*]:px-0', className)}
       >
         <CardHeader className="pb-2">
           <CardTitle className="text-lg text-foreground">
