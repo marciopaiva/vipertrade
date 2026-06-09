@@ -1,10 +1,11 @@
 'use client';
 
+import { cn } from '@/lib/utils';
 import { useDecisions } from '@/hooks/useDecisions';
 import { ConsensusCard } from './ConsensusCard';
 
 export function StrategyCockpit() {
-  const { decisions, loading, error, updatedAt } = useDecisions(4000);
+  const { decisions, loading, error, updatedAt, live } = useDecisions();
 
   const entries = decisions.filter(d => d.action.startsWith('ENTER')).length;
 
@@ -14,10 +15,27 @@ export function StrategyCockpit() {
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent" />
+              {live && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+              )}
+              <span
+                className={cn(
+                  'relative inline-flex h-2.5 w-2.5 rounded-full',
+                  live ? 'bg-accent' : 'bg-muted-foreground'
+                )}
+              />
             </span>
             Strategy Cockpit
+            <span
+              className={cn(
+                'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                live
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-secondary text-muted-foreground'
+              )}
+            >
+              {live ? 'live' : 'polling'}
+            </span>
           </h2>
           <p className="text-xs text-muted-foreground">
             Live multi-exchange consensus &amp; entry-guard state per symbol

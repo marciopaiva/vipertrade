@@ -2171,6 +2171,70 @@ async fn shutdown_signal() {
     }
 }
 
+// ─── Live stream (WebSocket) ────────────────────────────────────────────────
+// Bridges Redis pub/sub (viper:market_data, viper:decisions) to connected
+// browsers so the dashboard updates by push instead of polling.
+
+fn with_broadcast(
+    tx: tokio::sync::broadcast::Sender<String>,
+) -> impl Filter<Extract = (tokio::sync::broadcast::Sender<String>,), Error = std::convert::Infallible>
+       + Clone {
+    warp::any().map(move || tx.clone())
+}
+
+fn resolve_redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| {
+        let host = std::env::var("REDIS_HOST").unwrap_or_else(|_| "redis".to_string());
+        let port = std::env::var("REDIS_PORT").unwrap_or_else(|_| "6379".to_string());
+        format!("redis://{host}:{port}")
+    })
+}
+
+/// Subscribe to the strategy/market Redis channels and fan out every message to
+/// the broadcast channel (consumed by each WS client). Reconnects on error.
+async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
+    use futures_util::StreamExt;
+    let url = resolve_redis_url();
+    loop {
+        let result: redis::RedisResult<()> = async {
+            let client = redis::Client::open(url.as_str())?;
+            let conn = client.get_async_connection().await?;
+            let mut pubsub = conn.into_pubsub();
+            pubsub.subscribe("viper:market_data").await?;
+            pubsub.subscribe("viper:decisions").await?;
+            tracing::info!("WS bridge subscribed to Redis market/decision channels");
+            let mut stream = pubsub.on_message();
+            while let Some(msg) = stream.next().await {
+                if let Ok(payload) = msg.get_payload::<String>() {
+                    let _ = tx.send(payload);
+                }
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "WS Redis subscriber dropped; retrying in 3s");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+}
+
+async fn ws_client(ws: warp::ws::WebSocket, tx: tokio::sync::broadcast::Sender<String>) {
+    use futures_util::{SinkExt, StreamExt};
+    let (mut ws_tx, mut ws_rx) = ws.split();
+    let mut rx = tx.subscribe();
+    let forward = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            if ws_tx.send(warp::ws::Message::text(msg)).await.is_err() {
+                break;
+            }
+        }
+    });
+    // Drain inbound frames (we don't expect any) so we notice the socket closing.
+    while let Some(Ok(_)) = ws_rx.next().await {}
+    forward.abort();
+}
+
 pub async fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -2220,6 +2284,19 @@ pub async fn run() {
                 .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string()),
         ),
     });
+
+    // Live stream: one Redis subscriber fans out to all WS clients.
+    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(512);
+    tokio::spawn(redis_stream_subscriber(market_tx.clone()));
+
+    let ws_stream = warp::path("ws")
+        .and(warp::ws())
+        .and(with_broadcast(market_tx.clone()))
+        .map(
+            |ws: warp::ws::Ws, tx: tokio::sync::broadcast::Sender<String>| {
+                ws.on_upgrade(move |socket| ws_client(socket, tx))
+            },
+        );
 
     let api_v1 = warp::path("api").and(warp::path("v1"));
 
@@ -2361,6 +2438,7 @@ pub async fn run() {
         .or(risk_limits_control)
         .or(legacy_root)
         .or(legacy_health)
+        .or(ws_stream)
         .recover(handle_rejection);
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
