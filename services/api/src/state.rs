@@ -133,6 +133,35 @@ pub struct TradesResponse {
     pub items: Vec<TradeItem>,
 }
 
+#[derive(Deserialize)]
+pub struct DecisionsQuery {
+    pub limit: Option<u32>,
+}
+
+/// Latest strategy decision per symbol, with the multi-exchange consensus
+/// indicators that drove it — powers the web "Strategy Cockpit".
+#[derive(Serialize)]
+pub struct DecisionItem {
+    pub symbol: String,
+    pub action: String,
+    pub consensus_side: Option<String>,
+    pub consensus_count: Option<i64>,
+    pub exchanges_available: Option<i64>,
+    pub bullish_exchanges: Option<i64>,
+    pub bearish_exchanges: Option<i64>,
+    pub consensus_rsi_14: Option<f64>,
+    pub consensus_bollinger_percent_b: Option<f64>,
+    pub consensus_trend_score: Option<f64>,
+    pub consensus_macd_histogram: Option<f64>,
+    pub current_price: Option<f64>,
+    pub executed_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+pub struct DecisionsResponse {
+    pub items: Vec<DecisionItem>,
+}
+
 #[derive(Serialize)]
 pub struct EventsResponse {
     pub items: Vec<EventItem>,

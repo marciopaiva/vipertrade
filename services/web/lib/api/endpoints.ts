@@ -1,4 +1,8 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+// Empty by default => relative URLs (e.g. /api/v1/...), so client-side fetches
+// stay same-origin and are proxied to the backend by the Next rewrite. An
+// absolute base would cause CORS in dev (:3000) and be unreachable in-cluster
+// (the browser can't resolve `api:8080`). Matches useDashboard.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export const endpoints = {
   // Dashboard
@@ -6,6 +10,9 @@ export const endpoints = {
 
   // Market Data
   marketSignals: '/api/v1/market-signals',
+
+  // Strategy decisions (cockpit): latest decision per symbol + consensus indicators
+  decisions: '/api/v1/decisions',
 
   // Positions
   positions: '/api/v1/positions',
