@@ -103,7 +103,7 @@ export function PositionTable({
     return (
       <Card
         className={cn(
-          'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-border',
+          'bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border',
           className
         )}
       >
@@ -246,7 +246,7 @@ export function PositionTable({
   return (
     <Card
       className={cn(
-        'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-border',
+        'bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border',
         className
       )}
     >
@@ -420,8 +420,8 @@ export function PositionTable({
                             position.trailing_stop_activated
                               ? 'bg-accent shadow-[0_0_12px_rgba(52,211,153,0.55)]'
                               : position.trailingArmedByPrice
-                                ? 'bg-amber-300'
-                                : 'bg-slate-500'
+                                ? 'bg-primary'
+                                : 'bg-secondary'
                           )}
                           style={{
                             width: `${

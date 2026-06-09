@@ -194,19 +194,19 @@ function titleCase(value: string | null | undefined) {
 function toneClasses(severity?: string) {
   if (severity === 'fail') {
     return {
-      badge: 'border-red-500/35 bg-red-500/10 text-red-300',
-      text: 'text-red-300',
+      badge: 'border-destructive/35 bg-destructive/10 text-destructive',
+      text: 'text-destructive',
     };
   }
   if (severity === 'warn') {
     return {
-      badge: 'border-amber-500/35 bg-amber-500/10 text-amber-300',
-      text: 'text-amber-300',
+      badge: 'border-primary/35 bg-primary/10 text-primary',
+      text: 'text-primary',
     };
   }
   return {
-    badge: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300',
-    text: 'text-emerald-300',
+    badge: 'border-accent/35 bg-accent/10 text-accent',
+    text: 'text-accent',
   };
 }
 
@@ -241,53 +241,53 @@ function BreakdownTable({
             items.map(item => (
               <div
                 key={item.name}
-                className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
+                className="rounded-xl border border-border/60 bg-card/50 p-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
                       {nameLabel}
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-slate-100">
+                    <div className="mt-1 text-sm font-semibold text-foreground">
                       {titleCase(item.name)}
                     </div>
                   </div>
                   <div
                     className={cn(
                       'text-sm font-semibold',
-                      item.pnl_usdt >= 0 ? 'text-emerald-300' : 'text-red-300'
+                      item.pnl_usdt >= 0 ? 'text-accent' : 'text-destructive'
                     )}
                   >
                     {usd(item.pnl_usdt)}
                   </div>
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-400">
+                <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-muted-foreground">
                   <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">
+                    <div className="uppercase tracking-[0.16em] text-muted-foreground">
                       Trades
                     </div>
-                    <div className="mt-1 text-slate-200">{item.trades}</div>
+                    <div className="mt-1 text-foreground">{item.trades}</div>
                   </div>
                   <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">
+                    <div className="uppercase tracking-[0.16em] text-muted-foreground">
                       Avg PnL
                     </div>
                     <div
                       className={cn(
                         'mt-1',
                         item.avg_pnl_pct >= 0
-                          ? 'text-emerald-300'
-                          : 'text-red-300'
+                          ? 'text-accent'
+                          : 'text-destructive'
                       )}
                     >
                       {num(item.avg_pnl_pct)}%
                     </div>
                   </div>
                   <div>
-                    <div className="uppercase tracking-[0.16em] text-slate-500">
+                    <div className="uppercase tracking-[0.16em] text-muted-foreground">
                       Avg Duration
                     </div>
-                    <div className="mt-1 text-slate-200">
+                    <div className="mt-1 text-foreground">
                       {num(item.avg_duration_s, 0)}s
                     </div>
                   </div>
@@ -349,20 +349,20 @@ export default function AnalysisPage() {
        <AppHeader />
 
        <main className="container mx-auto px-4 py-4 space-y-4">
-        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+        <Card className="bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border/50">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-base text-slate-200">
+              <CardTitle className="text-base text-foreground">
                 Analysis Overview
               </CardTitle>
               <div className="flex items-center gap-2">
                 {analyst?.lookback_hours ? (
-                  <Badge className="border-slate-600/70 bg-slate-900/60 text-[10px] tracking-[0.16em] text-slate-300">
+                  <Badge className="border-border/70 bg-card/60 text-[10px] tracking-[0.16em] text-foreground">
                     {analyst.lookback_hours}H WINDOW
                   </Badge>
                 ) : null}
                 {analyst?.generated_at ? (
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[11px] text-muted-foreground">
                     {new Date(analyst.generated_at).toLocaleString()}
                   </div>
                 ) : null}
@@ -371,56 +371,56 @@ export default function AnalysisPage() {
           </CardHeader>
           <CardContent className="pt-0 space-y-4">
             {loading && !payload ? (
-              <div className="text-sm text-slate-400">Loading analysis...</div>
+              <div className="text-sm text-muted-foreground">Loading analysis...</div>
             ) : null}
             {error ? (
-              <div className="text-sm text-red-300">
+              <div className="text-sm text-destructive">
                 Failed to load analysis: {error}
               </div>
             ) : null}
             {payload?.warnings?.length ? (
-              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              <div className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-primary">
                 {payload.warnings.join(' · ')}
               </div>
             ) : null}
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              <div className="rounded-[20px] border border-border/60 bg-card/70 p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                   Current Window
                 </div>
-                <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-slate-100">
+                <div className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-foreground">
                   {analyst?.summary?.closed_trades ?? 0}
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs text-muted-foreground">
                   {usd(analyst?.summary?.total_pnl_usdt)} ·{' '}
                   {num(analyst?.summary?.win_rate_pct)}% win rate
                 </div>
               </div>
 
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              <div className="rounded-[20px] border border-border/60 bg-card/70 p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                   Expectancy
                 </div>
                 <div
                   className={cn(
                     'mt-3 text-3xl font-semibold tracking-[-0.03em]',
                     (analyst?.expectancy?.expectancy_pct ?? 0) >= 0
-                      ? 'text-emerald-300'
-                      : 'text-red-300'
+                      ? 'text-accent'
+                      : 'text-destructive'
                   )}
                 >
                   {num(analyst?.expectancy?.expectancy_pct)}%
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs text-muted-foreground">
                   payoff {num(analyst?.expectancy?.payoff_ratio)} ·{' '}
                   {usd(analyst?.expectancy?.expectancy_usdt)} / trade
                 </div>
               </div>
 
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+              <div className="rounded-[20px] border border-border/60 bg-card/70 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                     Current Regime
                   </div>
                   <Badge
@@ -442,7 +442,7 @@ export default function AnalysisPage() {
                     (regime?.regime || 'balanced_mixed').replaceAll('_', ' ')
                   )}
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs text-muted-foreground">
                   {titleCase(
                     (regime?.directional_bias || 'neutral').replaceAll('_', ' ')
                   )}{' '}
@@ -450,9 +450,9 @@ export default function AnalysisPage() {
                 </div>
               </div>
 
-              <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+              <div className="rounded-[20px] border border-border/60 bg-card/70 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                     Execution Advice
                   </div>
                   <Badge
@@ -466,14 +466,14 @@ export default function AnalysisPage() {
                     )}
                   </Badge>
                 </div>
-                <div className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-100">
+                <div className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-foreground">
                   {titleCase(
                     (
                       executionAdvice?.entry_action || 'only_best_setups'
                     ).replaceAll('_', ' ')
                   )}
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs text-muted-foreground">
                   exit{' '}
                   {titleCase(
                     (
@@ -492,18 +492,18 @@ export default function AnalysisPage() {
               </div>
             </div>
 
-            <div className="rounded-[20px] border border-slate-700/60 bg-slate-900/60 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+            <div className="rounded-[20px] border border-border/60 bg-card/60 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 What Matters Now
               </div>
-              <div className="mt-2 text-sm leading-6 text-slate-300">
+              <div className="mt-2 text-sm leading-6 text-foreground">
                 {executionAdvice?.summary ||
                   analyst?.llm_summary ||
                   analyst?.heuristic_summary ||
                   'No analyst summary available yet.'}
               </div>
               {analyst?.tupa_error ? (
-                <div className="mt-3 text-xs text-red-300">
+                <div className="mt-3 text-xs text-destructive">
                   Tupa evaluation fallback: {analyst.tupa_error}
                 </div>
               ) : null}
@@ -518,8 +518,8 @@ export default function AnalysisPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Priority Actions
                   </div>
                   <div className="mt-3 space-y-2">
@@ -528,7 +528,7 @@ export default function AnalysisPage() {
                       .map(item => (
                         <div
                           key={item}
-                          className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2 text-sm text-slate-300"
+                          className="rounded-lg border border-border/40 bg-card/50 px-3 py-2 text-sm text-foreground"
                         >
                           {item}
                         </div>
@@ -536,8 +536,8 @@ export default function AnalysisPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Top Recommendations
                   </div>
                   <div className="mt-3 space-y-2">
@@ -546,10 +546,10 @@ export default function AnalysisPage() {
                       return (
                         <div
                           key={item.recommendation_id}
-                          className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2"
+                          className="rounded-lg border border-border/40 bg-card/50 px-3 py-2"
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium text-slate-100">
+                            <div className="text-sm font-medium text-foreground">
                               {titleCase(
                                 (
                                   item.recommendation || 'observe_more_sample'
@@ -565,7 +565,7 @@ export default function AnalysisPage() {
                               {item.confidence || item.severity || 'info'}
                             </Badge>
                           </div>
-                          <div className="mt-1 text-xs text-slate-500">
+                          <div className="mt-1 text-xs text-muted-foreground">
                             {item.evidence}
                           </div>
                         </div>
@@ -583,9 +583,9 @@ export default function AnalysisPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                       Comparative Status
                     </div>
                     <Badge
@@ -611,7 +611,7 @@ export default function AnalysisPage() {
                     {(comparative?.reasons || []).map(reason => (
                       <Badge
                         key={reason}
-                        className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300"
+                        className="border-border/70 bg-card/50 text-[10px] tracking-[0.12em] text-foreground"
                       >
                         {titleCase(reason.replaceAll('_', ' '))}
                       </Badge>
@@ -619,13 +619,13 @@ export default function AnalysisPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Core Metrics
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Thesis
                       </div>
                       <div className={cn('mt-1', exitTone.text)}>
@@ -637,10 +637,10 @@ export default function AnalysisPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Trailing
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {num(
                           analyst?.tupa_evaluation?.exit_pressure
                             ?.trailing_stop_pct
@@ -649,10 +649,10 @@ export default function AnalysisPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Entry Gate
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {titleCase(
                           analyst?.tupa_evaluation?.entry_pressure
                             ?.dominant_gate || 'unknown'
@@ -660,7 +660,7 @@ export default function AnalysisPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Risk Symbol
                       </div>
                       <div className={cn('mt-1', symbolTone.text)}>
@@ -671,40 +671,40 @@ export default function AnalysisPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Change Vs Previous Window
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Expectancy Δ
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {num(comparative?.expectancy_pct?.delta)}%
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Thesis Δ
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {num(comparative?.thesis_invalidated_pct?.delta)}%
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Trailing Δ
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {num(comparative?.trailing_stop_pct?.delta)}%
                       </div>
                     </div>
                     <div>
-                      <div className="uppercase tracking-[0.16em] text-slate-500">
+                      <div className="uppercase tracking-[0.16em] text-muted-foreground">
                         Short Avg Δ
                       </div>
-                      <div className="mt-1 text-slate-200">
+                      <div className="mt-1 text-foreground">
                         {num(comparative?.short_avg_pnl_pct?.delta)}%
                       </div>
                     </div>
@@ -722,8 +722,8 @@ export default function AnalysisPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Fragile Symbols
                   </div>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -734,10 +734,10 @@ export default function AnalysisPage() {
                         return (
                           <div
                             key={item.symbol}
-                            className="rounded-lg border border-slate-700/40 bg-slate-950/50 p-3"
+                            className="rounded-lg border border-border/40 bg-card/50 p-3"
                           >
                             <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-semibold text-slate-100">
+                              <div className="text-sm font-semibold text-foreground">
                                 {item.symbol}
                               </div>
                               <Badge
@@ -753,13 +753,13 @@ export default function AnalysisPage() {
                               className={cn(
                                 'mt-2 text-sm font-medium',
                                 (item.avg_pnl_pct ?? 0) >= 0
-                                  ? 'text-emerald-300'
-                                  : 'text-red-300'
+                                  ? 'text-accent'
+                                  : 'text-destructive'
                               )}
                             >
                               {num(item.avg_pnl_pct)}%
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">
+                            <div className="mt-1 text-xs text-muted-foreground">
                               {titleCase(
                                 (
                                   item.recommendation || 'observe_more_sample'
@@ -772,20 +772,20 @@ export default function AnalysisPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                <div className="rounded-xl border border-border/60 bg-card/50 p-4">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                     Current Hypothesis
                   </div>
                   {(analyst?.hypotheses || []).slice(0, 1).map(item => (
                     <div key={item.hypothesis_id} className="mt-3 space-y-2">
-                      <div className="text-sm font-semibold text-slate-100">
+                      <div className="text-sm font-semibold text-foreground">
                         {item.hypothesis}
                       </div>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-muted-foreground">
                         {item.evidence}
                       </div>
-                      <div className="rounded-lg border border-slate-700/40 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
-                        <span className="font-semibold text-slate-100">
+                      <div className="rounded-lg border border-border/40 bg-card/50 px-3 py-2 text-xs text-foreground">
+                        <span className="font-semibold text-foreground">
                           Observe:
                         </span>{' '}
                         {item.observe}
@@ -820,14 +820,14 @@ export default function AnalysisPage() {
                   return (
                     <div
                       key={`${item.symbol}-${item.side}`}
-                      className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4"
+                      className="rounded-xl border border-border/60 bg-card/50 p-4"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-sm font-semibold text-slate-100">
+                          <div className="text-sm font-semibold text-foreground">
                             {item.symbol}
                           </div>
-                          <div className="text-xs text-slate-500">
+                          <div className="text-xs text-muted-foreground">
                             {item.side} · {item.duration_minutes ?? 0} min open
                           </div>
                         </div>
@@ -846,13 +846,13 @@ export default function AnalysisPage() {
                         className={cn(
                           'mt-3 text-lg font-semibold',
                           (item.pnl_pct_estimate ?? 0) >= 0
-                            ? 'text-emerald-300'
-                            : 'text-red-300'
+                            ? 'text-accent'
+                            : 'text-destructive'
                         )}
                       >
                         {num(item.pnl_pct_estimate)}%
                       </div>
-                      <div className="mt-2 text-sm text-slate-300">
+                      <div className="mt-2 text-sm text-foreground">
                         {item.summary}
                       </div>
                       {(item.risk_flags || []).length > 0 ? (
@@ -860,7 +860,7 @@ export default function AnalysisPage() {
                           {(item.risk_flags || []).slice(0, 4).map(flag => (
                             <Badge
                               key={flag}
-                              className="border-slate-600/70 bg-slate-900/50 text-[10px] tracking-[0.12em] text-slate-300"
+                              className="border-border/70 bg-card/50 text-[10px] tracking-[0.12em] text-foreground"
                             >
                               {titleCase(flag.replaceAll('_', ' '))}
                             </Badge>
@@ -868,7 +868,7 @@ export default function AnalysisPage() {
                         </div>
                       ) : null}
                       {(item.evidence || []).length > 0 ? (
-                        <div className="mt-3 space-y-1 text-xs text-slate-500">
+                        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                           {(item.evidence || []).slice(0, 3).map(evidence => (
                             <div key={evidence}>{evidence}</div>
                           ))}
@@ -882,8 +882,8 @@ export default function AnalysisPage() {
           </CardContent>
         </Card>
 
-        <details className="rounded-2xl border border-slate-700/60 bg-slate-900/40 p-4">
-          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-100">
+        <details className="rounded-2xl border border-border/60 bg-card/40 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-foreground">
             Deep Details
           </summary>
           <div className="mt-4 space-y-4">
@@ -914,13 +914,13 @@ export default function AnalysisPage() {
                       .map(item => (
                         <div
                           key={item.reason}
-                          className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
+                          className="rounded-xl border border-border/60 bg-card/50 p-3"
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold text-slate-100">
+                            <div className="text-sm font-semibold text-foreground">
                               {titleCase(item.reason)}
                             </div>
-                            <div className="text-sm text-amber-300">
+                            <div className="text-sm text-primary">
                               {item.total}
                             </div>
                           </div>
@@ -943,13 +943,13 @@ export default function AnalysisPage() {
                       .map(item => (
                         <div
                           key={item.reason}
-                          className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
+                          className="rounded-xl border border-border/60 bg-card/50 p-3"
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold text-slate-100 break-all">
+                            <div className="text-sm font-semibold text-foreground break-all">
                               {item.reason}
                             </div>
-                            <div className="text-sm text-amber-300">
+                            <div className="text-sm text-primary">
                               {item.total}
                             </div>
                           </div>
