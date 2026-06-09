@@ -275,19 +275,19 @@ function titleCase(value: string | null | undefined) {
 function toneClasses(severity?: string) {
   if (severity === 'fail') {
     return {
-      badge: 'border-red-500/35 bg-red-500/10 text-red-300',
-      text: 'text-red-300',
+      badge: 'border-destructive/35 bg-destructive/10 text-destructive',
+      text: 'text-destructive',
     };
   }
   if (severity === 'warn') {
     return {
-      badge: 'border-amber-500/35 bg-amber-500/10 text-amber-300',
-      text: 'text-amber-300',
+      badge: 'border-amber-500/35 bg-amber-500/10 text-primary',
+      text: 'text-primary',
     };
   }
   return {
-    badge: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300',
-    text: 'text-emerald-300',
+    badge: 'border-accent/35 bg-accent/10 text-accent',
+    text: 'text-accent',
   };
 }
 
@@ -311,7 +311,7 @@ function WalletCard({
   accent?: string;
 }) {
   return (
-    <Card className="bg-panel/50 border-border">
+    <Card className="bg-card border-border">
       <CardContent className="pt-6">
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
           {label}
@@ -339,7 +339,7 @@ function MetricCard({
   helper?: string;
 }) {
   return (
-    <Card className="bg-panel/50 border-border">
+    <Card className="bg-card border-border">
       <CardContent className="pt-6">
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
           {label}
@@ -376,7 +376,7 @@ function ServicesGrid({
   });
 
   return (
-    <Card className="bg-panel/50 border-border">
+    <Card className="bg-card border-border">
       <CardHeader>
         <CardTitle className="text-lg">Services Flow</CardTitle>
       </CardHeader>
@@ -389,7 +389,7 @@ function ServicesGrid({
                 'p-3 rounded-lg border text-center',
                 service.ok
                   ? 'border-green-500/30 bg-green-500/10'
-                  : 'border-red-500/30 bg-red-500/10'
+                  : 'border-red-500/30 bg-destructive/10'
               )}
             >
               <div className="text-xs text-muted-foreground capitalize truncate">
@@ -398,7 +398,7 @@ function ServicesGrid({
               <div
                 className={cn(
                   'text-sm font-semibold mt-1',
-                  service.ok ? 'text-green-400' : 'text-red-400'
+                  service.ok ? 'text-green-400' : 'text-destructive'
                 )}
               >
                 {service.ok ? '✓' : '✗'}
@@ -512,14 +512,14 @@ function ClosedTradesTable({
 
   if (closedTrades.length === 0) {
     return (
-      <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+      <Card className="bg-card border-border">
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-slate-200">
+          <CardTitle className="text-lg text-foreground">
             Recent Closed Trades
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="text-center text-slate-500 py-8">
+          <div className="text-center text-muted-foreground py-8">
             No closed trades in the last 7 days
           </div>
         </CardContent>
@@ -528,15 +528,15 @@ function ClosedTradesTable({
   }
 
   return (
-    <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+    <Card className="bg-card border-border">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg text-slate-200">
+          <CardTitle className="text-lg text-foreground">
             Recent Closed Trades
           </CardTitle>
           <Badge
             variant="outline"
-            className="text-xs border-slate-600 text-slate-400"
+            className="text-xs border-slate-600 text-muted-foreground"
           >
             Last 7 days
           </Badge>
@@ -563,7 +563,7 @@ function ClosedTradesTable({
           </div>
         )}
 
-        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           <div>Asset</div>
           <div>Side</div>
           <div className="text-right">PnL</div>
@@ -600,11 +600,11 @@ function ClosedTradesTable({
             return (
               <div
                 key={trade.trade_id}
-                className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3"
+                className="bg-slate-800/50 rounded-lg border border-border p-3"
               >
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] xl:items-center">
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-200">
+                    <div className="text-sm font-bold text-foreground">
                       {trade.symbol}
                     </div>
                   </div>
@@ -662,7 +662,7 @@ function ClosedTradesTable({
                           ${trade.exit_price.toFixed(6)}
                         </Badge>
                       ) : (
-                        <div className="flex h-6 items-center justify-center text-slate-300">
+                        <div className="flex h-6 items-center justify-center text-muted-foreground">
                           -
                         </div>
                       )}
@@ -670,20 +670,20 @@ function ClosedTradesTable({
                   </div>
 
                   <div>
-                    <div className="text-xs text-slate-200">
+                    <div className="text-xs text-foreground">
                       {closedDateLabel}
                     </div>
-                    <div className="text-[11px] text-slate-400">
+                    <div className="text-[11px] text-muted-foreground">
                       {closedTimeLabel}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs">
-                    <span className="text-slate-200">{reasonLabel}</span>
+                    <span className="text-foreground">{reasonLabel}</span>
                     {durationLabel !== '-' && (
                       <>
-                        <span className="text-slate-600">·</span>
-                        <span className="text-slate-400">{durationLabel}</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="text-muted-foreground">{durationLabel}</span>
                       </>
                     )}
                   </div>
@@ -696,7 +696,7 @@ function ClosedTradesTable({
         {/* Pagination - compact */}
         {activeGroup && activeGroup.items.length > pageSize && (
           <div className="flex items-center justify-between mt-3">
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-muted-foreground">
               {activeGroup.label} · {activeGroup.items.length} trades · p.
               {page + 1}/{totalPages}
             </div>
@@ -968,16 +968,16 @@ export default function DashboardPage() {
         <StrategyCockpit />
 
         {/* Wallet Card - Unified */}
-        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+        <Card className="bg-card border-border">
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base text-slate-200">
+              <CardTitle className="text-base text-foreground">
                 Wallet Overview
               </CardTitle>
             </div>
           </CardHeader>
           <CardContent className="pt-0 space-y-4">
-            <div className="relative overflow-hidden rounded-[28px] border border-slate-700/60 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.74),rgba(15,23,42,0.42))] px-6 py-5">
+            <div className="relative overflow-hidden rounded-[28px] border border-border bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.74),rgba(15,23,42,0.42))] px-6 py-5">
               <div className="absolute right-4 top-4 hidden sm:block">
                 <svg
                   width="120"
@@ -1030,24 +1030,24 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-[11px] uppercase tracking-[0.32em] text-slate-500">
+                <div className="text-[11px] uppercase tracking-[0.32em] text-muted-foreground">
                   Portfolio
                 </div>
-                <Badge className="border-emerald-500/40 bg-emerald-500/10 text-[10px] tracking-[0.18em] text-emerald-300">
+                <Badge className="border-accent/40 bg-accent/10 text-[10px] tracking-[0.18em] text-accent">
                   Live
                 </Badge>
               </div>
 
               <div className="mt-4 flex flex-wrap items-end gap-x-4 gap-y-3">
-                <div className="text-5xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-6xl">
+                <div className="text-5xl font-semibold tracking-[-0.04em] text-foreground sm:text-6xl">
                   {usd(dashboardData?.wallet?.total_equity)}
                 </div>
                 <div
                   className={cn(
                     'rounded-full border px-3 py-1 text-sm font-semibold',
                     (dashboardData?.performance?.last_7d?.total_pnl ?? 0) >= 0
-                      ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-                      : 'border-red-500/35 bg-red-500/10 text-red-300'
+                      ? 'border-accent/35 bg-accent/10 text-accent'
+                      : 'border-destructive/35 bg-destructive/10 text-destructive'
                   )}
                 >
                   {usd(dashboardData?.performance?.last_7d?.total_pnl)} · 7d
@@ -1055,15 +1055,15 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-                <div className="text-slate-500">
+                <div className="text-muted-foreground">
                   Profile{' '}
-                  <span className="font-semibold text-slate-200">
+                  <span className="font-semibold text-foreground">
                     {dashboardData?.status?.trade_profile_label ||
                       dashboardData?.status?.trading_profile ||
                       'MEDIUM'}
                   </span>
                 </div>
-                <div className="text-slate-500">
+                <div className="text-muted-foreground">
                   Open{' '}
                   <span className="font-semibold text-violet-300">
                     {dashboardData?.positions?.items?.length || 0}
@@ -1073,8 +1073,8 @@ export default function DashboardPage() {
                   className={cn(
                     'font-medium',
                     (dashboardData?.wallet?.unrealized_pnl ?? 0) >= 0
-                      ? 'text-emerald-300'
-                      : 'text-red-300'
+                      ? 'text-accent'
+                      : 'text-destructive'
                   )}
                 >
                   {usd(dashboardData?.wallet?.unrealized_pnl)} unrealized
@@ -1083,25 +1083,25 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              <div className="relative overflow-hidden rounded-[20px] border border-border bg-secondary/40 p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                   Deposited
                 </div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-foreground">
                   {usd(dashboardData?.wallet?.wallet_balance)}
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs text-muted-foreground">
                   {(dashboardData?.wallet?.margin_balance ?? 0) > 0
                     ? `${(((dashboardData?.wallet?.initial_margin || 0) / Math.max(1, dashboardData?.wallet?.margin_balance || 1)) * 100).toFixed(0)}% active`
                     : 'No active margin'}
                 </div>
-                <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full border border-slate-700/70" />
+                <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full border border-border" />
               </div>
 
-              <div className="relative overflow-hidden rounded-[20px] border border-slate-700/60 bg-slate-900/70 p-4">
+              <div className="relative overflow-hidden rounded-[20px] border border-border bg-secondary/40 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                       Earnings
                     </div>
                     <div
@@ -1109,45 +1109,45 @@ export default function DashboardPage() {
                         'mt-3 text-[2rem] font-semibold tracking-[-0.03em]',
                         (dashboardData?.performance?.last_24h?.total_pnl ??
                           0) >= 0
-                          ? 'text-emerald-300'
-                          : 'text-red-300'
+                          ? 'text-accent'
+                          : 'text-destructive'
                       )}
                     >
                       {usd(dashboardData?.performance?.last_24h?.total_pnl)}
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">
+                    <div className="mt-2 text-xs text-muted-foreground">
                       {dashboardData?.performance?.last_24h?.win_rate !==
                       undefined
                         ? `${dashboardData.performance.last_24h.win_rate.toFixed(1)}% win rate`
                         : '24h performance'}
                     </div>
                   </div>
-                  <div className="text-xs text-slate-500">24h</div>
+                  <div className="text-xs text-muted-foreground">24h</div>
                 </div>
                 <div className="absolute bottom-0 right-0 h-14 w-20 rounded-tl-2xl bg-[linear-gradient(135deg,rgba(15,23,42,0)_0%,rgba(59,130,246,0.14)_100%)]" />
               </div>
 
-              <div className="rounded-[20px] border border-emerald-500/20 bg-emerald-500/[0.08] p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              <div className="rounded-[20px] border border-accent/20 bg-accent/[0.08] p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                   Active Trading
                 </div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-slate-100">
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-foreground">
                   {usd(dashboardData?.wallet?.margin_balance)}
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-xs text-emerald-300">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                <div className="mt-2 flex items-center gap-2 text-xs text-accent">
+                  <span className="h-2 w-2 rounded-full bg-accent" />
                   Working for you
                 </div>
               </div>
 
-              <div className="rounded-[20px] border border-amber-500/20 bg-amber-500/[0.06] p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+              <div className="rounded-[20px] border border-primary/20 bg-primary/[0.06] p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                   Idle Funds
                 </div>
-                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-amber-300">
+                <div className="mt-3 text-[2rem] font-semibold tracking-[-0.03em] text-primary">
                   {usd(dashboardData?.wallet?.available_balance)}
                 </div>
-                <div className="mt-2 text-xs text-amber-200/80">
+                <div className="mt-2 text-xs text-primary/80">
                   Ready capital
                 </div>
               </div>
@@ -1169,9 +1169,9 @@ export default function DashboardPage() {
         <ClosedTradesTable trades={dashboardData?.trades?.items || []} />
 
         {/* Architecture Flow */}
-        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50">
+        <Card className="bg-card border-border">
           <CardHeader className="pb-1">
-            <CardTitle className="text-base text-slate-200">
+            <CardTitle className="text-base text-foreground">
               Architecture Flow
             </CardTitle>
           </CardHeader>

@@ -103,17 +103,17 @@ export function PositionTable({
     return (
       <Card
         className={cn(
-          'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50',
+          'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-border',
           className
         )}
       >
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-slate-200">
+          <CardTitle className="text-lg text-foreground">
             Open Positions
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="text-center text-slate-500 py-8">
+          <div className="text-center text-muted-foreground py-8">
             No open positions
           </div>
         </CardContent>
@@ -246,17 +246,17 @@ export function PositionTable({
   return (
     <Card
       className={cn(
-        'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-slate-700/50',
+        'bg-gradient-to-br from-slate-900/90 via-slate-800/80 to-slate-900/90 border-border',
         className
       )}
     >
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg text-slate-200">
+        <CardTitle className="text-lg text-foreground">
           Open Positions ({positions.length})
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_105px_105px_105px_105px_110px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+        <div className="hidden xl:grid xl:grid-cols-[220px_70px_110px_105px_105px_105px_105px_110px_1fr] gap-4 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           <div>Asset</div>
           <div>Side</div>
           <div className="text-right">PnL</div>
@@ -277,11 +277,11 @@ export function PositionTable({
             return (
               <div
                 key={position.trade_id}
-                className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3"
+                className="bg-secondary/40 rounded-lg border border-border p-3"
               >
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_105px_105px_105px_105px_110px_1fr] xl:items-center">
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-200">
+                    <div className="text-sm font-bold text-foreground">
                       {position.symbol}
                     </div>
                   </div>
@@ -338,7 +338,7 @@ export function PositionTable({
                         ${position.markPrice.toFixed(6)}
                       </Badge>
                     ) : (
-                      <div className="flex h-6 items-center justify-center text-slate-300">
+                      <div className="flex h-6 items-center justify-center text-muted-foreground">
                         -
                       </div>
                     )}
@@ -369,7 +369,7 @@ export function PositionTable({
                         ${position.trailingDisplayPrice.toFixed(6)}
                       </Badge>
                     ) : (
-                      <div className="flex h-6 items-center justify-center text-slate-300">
+                      <div className="flex h-6 items-center justify-center text-muted-foreground">
                         -
                       </div>
                     )}
@@ -385,14 +385,14 @@ export function PositionTable({
                         ${position.stop_loss_price.toFixed(6)}
                       </Badge>
                     ) : (
-                      <div className="flex h-6 items-center justify-center text-slate-300">
+                      <div className="flex h-6 items-center justify-center text-muted-foreground">
                         -
                       </div>
                     )}
                   </div>
 
                   <div>
-                    <div className="min-w-[112px] rounded-md border border-slate-700/70 bg-slate-900/60 px-2 py-1.5">
+                    <div className="min-w-[112px] rounded-md border border-border bg-secondary/40 px-2 py-1.5">
                       <div className="flex items-center justify-between gap-2 text-[10px] font-medium">
                         <span
                           style={{
@@ -405,7 +405,7 @@ export function PositionTable({
                         >
                           {position.trailingState.label}
                         </span>
-                        <span className="text-[9px] text-slate-500">
+                        <span className="text-[9px] text-muted-foreground">
                           {position.trailing_stop_activated
                             ? 'Trail on'
                             : position.trailingArmedByPrice
@@ -413,12 +413,12 @@ export function PositionTable({
                               : `${((position.distanceToArmPct ?? 0) * 100).toFixed(2)}%`}
                         </span>
                       </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
                         <div
                           className={cn(
                             'h-full rounded-full transition-all duration-500',
                             position.trailing_stop_activated
-                              ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.55)]'
+                              ? 'bg-accent shadow-[0_0_12px_rgba(52,211,153,0.55)]'
                               : position.trailingArmedByPrice
                                 ? 'bg-amber-300'
                                 : 'bg-slate-500'
