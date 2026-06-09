@@ -116,7 +116,7 @@ function StageCard({
   return (
     <div
       className={[
-        'relative overflow-hidden rounded-2xl border backdrop-blur-sm',
+        'relative flex h-full flex-col overflow-hidden rounded-2xl border backdrop-blur-sm',
         hero ? 'min-h-[128px] px-4 py-4' : 'min-h-[112px] px-4 py-3',
         color.border,
         color.panel,
@@ -172,7 +172,7 @@ function StageCard({
       </div>
 
       {(statusLine || detailLine) && (
-        <div className="mt-4 border-t border-white/5 pt-3">
+        <div className="mt-auto border-t border-white/5 pt-3">
           {statusLine && (
             <div className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
               {statusLine}
@@ -202,7 +202,7 @@ function SourcePill({
 
   return (
     <div
-      className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sources.pill} ${tone.ring}`}
+      className={`flex flex-1 flex-col justify-center rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sources.pill} ${tone.ring}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -232,7 +232,7 @@ function SidecarPill({
 
   return (
     <div
-      className={`rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sidecars.pill} ${tone.ring}`}
+      className={`flex h-full flex-col justify-center rounded-2xl border px-3 py-2.5 ${STAGE_COLORS.sidecars.pill} ${tone.ring}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -387,7 +387,7 @@ export default function ServiceFlowDiagram({
           }
         }
       `}</style>
-      <div className="rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
+      <div className="flex h-full flex-col rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -402,7 +402,7 @@ export default function ServiceFlowDiagram({
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="flex flex-1 flex-col gap-3">
           {showMultiSource && (
             <SourcePill
               label="BINANCE"
@@ -502,7 +502,7 @@ export default function ServiceFlowDiagram({
         dotClass={executorTone.dot}
       />
 
-      <div className="rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
+      <div className="flex h-full flex-col rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -517,7 +517,7 @@ export default function ServiceFlowDiagram({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="grid flex-1 auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-1">
           <SidecarPill
             label="API"
             latency={serviceState.api?.latency_ms}
