@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function Header() {
   return (
-    <header className="border-b border-slate-700/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
+    <header className="border-b border-border/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
@@ -12,7 +12,7 @@ export default function Header() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-viper-cyan">ViperTrade</h1>
-              <p className="text-xs text-slate-400">Lead Trader Bot</p>
+              <p className="text-xs text-muted-foreground">Lead Trader Bot</p>
             </div>
           </div>
 
@@ -20,25 +20,25 @@ export default function Header() {
           <nav className="flex items-center gap-6">
             <Link
               href="/"
-              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+              className="text-sm text-muted-foreground hover:text-viper-cyan transition-colors"
             >
               Dashboard
             </Link>
             <Link
               href="/trades"
-              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+              className="text-sm text-muted-foreground hover:text-viper-cyan transition-colors"
             >
               Trades
             </Link>
             <Link
               href="/positions"
-              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+              className="text-sm text-muted-foreground hover:text-viper-cyan transition-colors"
             >
               Positions
             </Link>
             <Link
               href="/settings"
-              className="text-sm text-slate-400 hover:text-viper-cyan transition-colors"
+              className="text-sm text-muted-foreground hover:text-viper-cyan transition-colors"
             >
               Settings
             </Link>
@@ -47,7 +47,7 @@ export default function Header() {
           {/* Status Indicator */}
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-viper-green animate-pulse" />
-            <span className="text-xs text-slate-400">Live</span>
+            <span className="text-xs text-muted-foreground">Live</span>
           </div>
         </div>
       </div>

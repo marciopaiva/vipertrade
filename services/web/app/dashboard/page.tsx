@@ -281,7 +281,7 @@ function toneClasses(severity?: string) {
   }
   if (severity === 'warn') {
     return {
-      badge: 'border-amber-500/35 bg-amber-500/10 text-primary',
+      badge: 'border-primary/35 bg-primary/10 text-primary',
       text: 'text-primary',
     };
   }
@@ -388,8 +388,8 @@ function ServicesGrid({
               className={cn(
                 'p-3 rounded-lg border text-center',
                 service.ok
-                  ? 'border-green-500/30 bg-green-500/10'
-                  : 'border-red-500/30 bg-destructive/10'
+                  ? 'border-accent/30 bg-accent/10'
+                  : 'border-destructive/30 bg-destructive/10'
               )}
             >
               <div className="text-xs text-muted-foreground capitalize truncate">
@@ -398,7 +398,7 @@ function ServicesGrid({
               <div
                 className={cn(
                   'text-sm font-semibold mt-1',
-                  service.ok ? 'text-green-400' : 'text-destructive'
+                  service.ok ? 'text-accent' : 'text-destructive'
                 )}
               >
                 {service.ok ? '✓' : '✗'}
@@ -536,7 +536,7 @@ function ClosedTradesTable({
           </CardTitle>
           <Badge
             variant="outline"
-            className="text-xs border-slate-600 text-muted-foreground"
+            className="text-xs border-border text-muted-foreground"
           >
             Last 7 days
           </Badge>
@@ -600,7 +600,7 @@ function ClosedTradesTable({
             return (
               <div
                 key={trade.trade_id}
-                className="bg-slate-800/50 rounded-lg border border-border p-3"
+                className="bg-secondary/50 rounded-lg border border-border p-3"
               >
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_70px_110px_110px_110px_120px_1fr] xl:items-center">
                   <div className="min-w-0">

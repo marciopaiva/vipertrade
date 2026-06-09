@@ -22,16 +22,16 @@ interface ServiceFlowDiagramProps {
 const STAGE_COLORS = {
   sources: {
     border: 'border-border',
-    panel: 'bg-slate-950/45',
+    panel: 'bg-card/45',
     pill: 'border-border bg-secondary/40 text-foreground',
   },
   marketData: {
-    border: 'border-sky-400/55',
-    panel: 'bg-sky-500/[0.06]',
+    border: 'border-primary/55',
+    panel: 'bg-primary/[0.06]',
     glow: 'shadow-[0_0_0_1px_rgba(56,189,248,0.14),0_14px_30px_rgba(14,165,233,0.10)]',
-    accent: 'text-sky-300',
-    dot: 'bg-sky-400',
-    rail: 'from-sky-400/35 via-sky-400/10 to-transparent',
+    accent: 'text-primary',
+    dot: 'bg-primary',
+    rail: 'from-primary/35 via-primary/10 to-transparent',
   },
   strategy: {
     border: 'border-violet-400/55',
@@ -42,16 +42,16 @@ const STAGE_COLORS = {
     rail: 'from-violet-400/35 via-violet-400/10 to-transparent',
   },
   executor: {
-    border: 'border-emerald-400/65',
-    panel: 'bg-emerald-500/[0.07]',
+    border: 'border-accent/65',
+    panel: 'bg-accent/[0.07]',
     glow: 'shadow-[0_0_0_1px_rgba(52,211,153,0.18),0_0_38px_rgba(16,185,129,0.14)]',
     accent: 'text-accent',
     dot: 'bg-accent',
-    rail: 'from-emerald-400/40 via-emerald-400/12 to-transparent',
+    rail: 'from-accent/40 via-accent/12 to-transparent',
   },
   sidecars: {
     border: 'border-border',
-    panel: 'bg-slate-950/45',
+    panel: 'bg-card/45',
     pill: 'border-border bg-secondary/40 text-foreground',
   },
 };
@@ -70,23 +70,23 @@ function getService(
 function getStatusTone(ok: boolean | undefined, latency: number | undefined) {
   if (ok === false) {
     return {
-      ring: 'ring-1 ring-red-400/45',
-      badge: 'text-destructive border-red-400/40 bg-red-500/10',
-      dot: 'bg-red-400',
+      ring: 'ring-1 ring-destructive/45',
+      badge: 'text-destructive border-destructive/40 bg-destructive/10',
+      dot: 'bg-destructive',
       label: 'down',
     };
   }
   if ((latency ?? 0) > 500) {
     return {
-      ring: 'ring-1 ring-amber-400/40',
-      badge: 'text-primary border-amber-400/35 bg-amber-500/10',
-      dot: 'bg-amber-400',
+      ring: 'ring-1 ring-primary/40',
+      badge: 'text-primary border-primary/35 bg-primary/10',
+      dot: 'bg-primary',
       label: 'slow',
     };
   }
   return {
-    ring: 'ring-1 ring-emerald-400/35',
-    badge: 'text-accent border-emerald-400/30 bg-accent/10',
+    ring: 'ring-1 ring-accent/35',
+    badge: 'text-accent border-accent/30 bg-accent/10',
     dot: 'bg-accent',
     label: 'live',
   };
@@ -387,7 +387,7 @@ export default function ServiceFlowDiagram({
           }
         }
       `}</style>
-      <div className="rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
+      <div className="rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -407,21 +407,21 @@ export default function ServiceFlowDiagram({
             <SourcePill
               label="BINANCE"
               latency={serviceState.binance?.latency_ms}
-              accent="bg-slate-100"
+              accent="bg-secondary"
               ok={serviceState.binance?.ok}
             />
           )}
           <SourcePill
             label="BYBIT"
             latency={serviceState.bybit?.latency_ms}
-            accent="bg-amber-400"
+            accent="bg-primary"
             ok={serviceState.bybit?.ok}
           />
           {showMultiSource && (
             <SourcePill
               label="OKX"
               latency={serviceState.okx?.latency_ms}
-              accent="bg-slate-300"
+              accent="bg-secondary"
               ok={serviceState.okx?.ok}
             />
           )}
@@ -429,13 +429,13 @@ export default function ServiceFlowDiagram({
       </div>
 
       <BlockConnector
-        from="from-slate-300/15 via-sky-400/55"
+        from="from-secondary/15 via-primary/55"
         to="to-violet-400/35"
         mobileLabel="market flow"
         dotClass={strategyTone.dot}
       />
 
-      <div className="relative overflow-hidden rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
+      <div className="relative overflow-hidden rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -450,7 +450,7 @@ export default function ServiceFlowDiagram({
           </div>
         </div>
 
-        <div className="pointer-events-none absolute left-8 right-8 top-[74px] hidden h-px bg-gradient-to-r from-sky-400/20 via-violet-400/20 to-emerald-400/20 lg:block" />
+        <div className="pointer-events-none absolute left-8 right-8 top-[74px] hidden h-px bg-gradient-to-r from-primary/20 via-violet-400/20 to-accent/20 lg:block" />
 
         <div className="grid gap-3 lg:grid-cols-3">
           <StageCard
@@ -496,13 +496,13 @@ export default function ServiceFlowDiagram({
       </div>
 
       <BlockConnector
-        from="from-violet-400/35 via-emerald-400/55"
-        to="to-blue-400/25"
+        from="from-violet-400/35 via-accent/55"
+        to="to-primary/25"
         mobileLabel="execution fan-out"
         dotClass={executorTone.dot}
       />
 
-      <div className="rounded-[28px] border border-border bg-slate-950/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
+      <div className="rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">

@@ -21,8 +21,8 @@ interface PnLChartProps {
 export function PnLChart({ data }: PnLChartProps) {
   if (!data || data.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 bg-slate-800/50 rounded-lg">
-        <p className="text-slate-400">No data available</p>
+      <div className="flex items-center justify-center h-64 bg-secondary/50 rounded-lg">
+        <p className="text-muted-foreground">No data available</p>
       </div>
     );
   }
