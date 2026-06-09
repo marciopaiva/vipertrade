@@ -30,13 +30,14 @@ global:
         # trail captures more of the trailing edge. net -0.3034 -> -0.2310.
         activate_after_profit_pct: 0.0015
         initial_trail_pct: 0.0006
+        # Ratchets must only tighten (<= initial_trail_pct) as profit grows.
         ratchet_levels:
           - at_profit_pct: 0.003
-            trail_pct: 0.0007
-          - at_profit_pct: 0.0045
-            trail_pct: 0.0006
-          - at_profit_pct: 0.006
             trail_pct: 0.0005
+          - at_profit_pct: 0.0045
+            trail_pct: 0.0004
+          - at_profit_pct: 0.006
+            trail_pct: 0.0003
         move_to_break_even_at: 0.0016
       # Aumentado de 180 para 300 segundos - evita saídas prematuras
       min_hold_seconds: 300
