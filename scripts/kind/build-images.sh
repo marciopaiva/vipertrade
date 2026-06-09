@@ -41,7 +41,10 @@ vt_container build -t "$KIND_REGISTRY/vipertrade:$IMAGE_TAG" -f services/viper/D
 vt_step "Pushing $KIND_REGISTRY/vipertrade:$IMAGE_TAG"
 vt_container push "$KIND_REGISTRY/vipertrade:$IMAGE_TAG"
 
-build_image web services/web services/web/Dockerfile --build-arg NODE_VERSION=20 --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://api:8080}" --build-arg NEXT_PUBLIC_TRADING_MODE="${NEXT_PUBLIC_TRADING_MODE:-paper}"
+# NEXT_PUBLIC_API_URL is intentionally empty: client fetches use relative
+# /api/... paths proxied by the Next rewrite (NEXT_REWRITE_API_URL -> api:8080).
+# An absolute base would break in the browser (can't resolve `api:8080`) / CORS.
+build_image web services/web services/web/Dockerfile --build-arg NODE_VERSION=20 --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-}" --build-arg NEXT_PUBLIC_TRADING_MODE="${NEXT_PUBLIC_TRADING_MODE:-paper}"
 
 vt_ok "All images built and pushed to $KIND_REGISTRY"
 
