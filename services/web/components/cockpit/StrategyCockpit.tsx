@@ -5,7 +5,7 @@ import { useDecisions } from '@/hooks/useDecisions';
 import { ConsensusCard } from './ConsensusCard';
 
 export function StrategyCockpit() {
-  const { decisions, loading, error, updatedAt, live } = useDecisions();
+  const { decisions, loading, error, live } = useDecisions();
 
   const entries = decisions.filter(d => d.action.startsWith('ENTER')).length;
 
@@ -49,9 +49,6 @@ export function StrategyCockpit() {
             symbols · <span className="font-mono text-accent">{entries}</span>{' '}
             entering
           </div>
-          {updatedAt && (
-            <div>updated {new Date(updatedAt).toLocaleTimeString()}</div>
-          )}
         </div>
       </header>
 
