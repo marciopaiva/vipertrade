@@ -13,12 +13,16 @@ pub struct MarketSignal {
     #[serde(default)]
     pub bybit_price: f64,
     pub atr_14: f64,
+    #[serde(default)]
+    pub adx_14: f64,
     pub volume_24h: i64,
     pub funding_rate: f64,
     pub trend_score: f64,
     pub spread_pct: f64,
     #[serde(default)]
     pub consensus_atr_14: f64,
+    #[serde(default)]
+    pub consensus_adx_14: f64,
     #[serde(default)]
     pub consensus_volume_24h: i64,
     #[serde(default)]
@@ -384,11 +388,13 @@ mod tests {
             current_price: 0.17,
             bybit_price: 0.17,
             atr_14: 0.01,
+            adx_14: 25.0,
             volume_24h: 100_000_000,
             funding_rate: 0.001,
             trend_score: 0.7,
             spread_pct: 0.0005,
             consensus_atr_14: 0.01,
+            consensus_adx_14: 25.0,
             consensus_volume_24h: 100_000_000,
             consensus_funding_rate: 0.001,
             consensus_trend_score: 0.72,
