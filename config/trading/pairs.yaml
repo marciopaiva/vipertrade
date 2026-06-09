@@ -12,7 +12,7 @@ global:
     # PAPER MODE - OTIMIZADO (2026-04-01)
     # Mudanças: thesis invalidation menos sensível, filtros mais rigorosos
     # ═══════════════════════════════════════════════════════════
-    PAPER:
+    PAPER: &paper_profile
       name: "standard_guarded_v2"
       permissive_entry: false
       require_multi_exchange_consensus: true
@@ -105,61 +105,11 @@ global:
       stop_loss_cooldown_minutes_long: 0
       stop_loss_cooldown_minutes_short: 0
     # ═══════════════════════════════════════════════════════════
-    # MAINNET MODE - OTIMIZADO (2026-04-01)
-    # Mudanças: thesis invalidation menos sensível, filtros mais rigorosos
+    # MAINNET MODE — kept identical to PAPER via YAML anchor.
+    # Tune PAPER (&paper_profile); MAINNET inherits it. Don't duplicate keys
+    # here or the two profiles would diverge.
     # ═══════════════════════════════════════════════════════════
-    MAINNET:
-      name: "standard_guarded_v2"
-      permissive_entry: false
-      require_multi_exchange_consensus: true
-      require_btc_macro_alignment: true
-      prefer_bybit_for_decisions: false
-      min_volume_24h_usdt: 18000000
-      max_spread_pct: 0.0008
-      max_atr_pct: 0.035
-      max_funding_rate_pct: 0.01
-      stop_loss_pct: 0.012
-      fixed_take_profit_enabled: false
-      trailing_enabled: true
-      trailing_stop:
-        activate_after_profit_pct: 0.0045
-        initial_trail_pct: 0.0012
-        ratchet_levels:
-          - at_profit_pct: 0.006
-            trail_pct: 0.001
-          - at_profit_pct: 0.0075
-            trail_pct: 0.0008
-          - at_profit_pct: 0.009
-            trail_pct: 0.0006
-        move_to_break_even_at: 0.005
-      # Aumentado de 180 para 300 segundos - evita saídas prematuras
-      min_hold_seconds: 300
-      # Aumentado para filtrar entradas marginais
-      min_trend_score_long: 0.40
-      min_trend_score_short: 0.45
-      # Reduzida assimetria Long/Short
-      min_signal_confirmation_ticks_long: 4
-      min_signal_confirmation_ticks_short: 5
-      # BTC Macro mais rigoroso
-      btc_macro_min_trend_score_long: 0.15
-      btc_macro_min_trend_score_short: 0.20
-      btc_macro_min_consensus_count_long: 2
-      btc_macro_min_consensus_count_short: 3
-      btc_macro_neutral_penalty: 0.05
-      min_volume_ratio_long: 0.25
-      min_volume_ratio_short: 0.25
-      rsi_long_min: 52
-      rsi_long_max: 75
-      rsi_short_min: 28
-      rsi_short_max: 48
-      stop_loss_cooldown_minutes_long: 5
-      stop_loss_cooldown_minutes_short: 8
-      entry_filters:
-        # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
-        thesis_invalidation_confirmation_ticks: 4
-        # Aumentado cooldown para evitar reentrada imediata após perda
-        thesis_invalidation_cooldown_minutes_long: 8
-        thesis_invalidation_cooldown_minutes_short: 10
+    MAINNET: *paper_profile
 
   # Smart Copy constraints
   smart_copy:
