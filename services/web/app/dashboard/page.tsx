@@ -376,7 +376,7 @@ function ServicesGrid({
   });
 
   return (
-    <Card className="border-0 bg-transparent shadow-none">
+    <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
       <CardHeader>
         <CardTitle className="text-lg">Services Flow</CardTitle>
       </CardHeader>
@@ -512,7 +512,7 @@ function ClosedTradesTable({
 
   if (closedTrades.length === 0) {
     return (
-      <Card className="border-0 bg-transparent shadow-none">
+      <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
         <CardHeader className="pb-2">
           <CardTitle className="text-lg text-foreground">
             Recent Closed Trades
@@ -528,7 +528,7 @@ function ClosedTradesTable({
   }
 
   return (
-    <Card className="border-0 bg-transparent shadow-none">
+    <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg text-foreground">
@@ -965,7 +965,7 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
         {/* Wallet Card - Unified */}
-        <Card className="border-0 bg-transparent shadow-none">
+        <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
           <CardHeader className="pb-1">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base text-foreground">
@@ -1169,7 +1169,7 @@ export default function DashboardPage() {
         <ClosedTradesTable trades={dashboardData?.trades?.items || []} />
 
         {/* Architecture Flow */}
-        <Card className="border-0 bg-transparent shadow-none">
+        <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
           <CardHeader className="pb-1">
             <CardTitle className="text-base text-foreground">
               Architecture Flow
