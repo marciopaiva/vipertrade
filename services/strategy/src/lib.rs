@@ -5551,7 +5551,7 @@ mod tests {
         signal.consensus_macd_histogram = -0.01;
         signal.consensus_bollinger_percent_b = 0.40;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "valid");
         assert!(evaluation.reason.starts_with("thesis_valid_"));
@@ -5572,7 +5572,7 @@ mod tests {
         signal.consensus_ema_slow = 99.0;
         signal.consensus_bollinger_percent_b = 0.10;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "invalidated");
         assert!(evaluation
@@ -5595,7 +5595,7 @@ mod tests {
         signal.consensus_bollinger_percent_b = 0.20;
         signal.consensus_macd_histogram = -1.0;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_soft");
         assert!(evaluation
@@ -5618,7 +5618,7 @@ mod tests {
         signal.consensus_ema_slow = 99.0;
         signal.consensus_bollinger_percent_b = 0.20;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_hard");
         assert!(evaluation
@@ -5641,7 +5641,7 @@ mod tests {
         signal.consensus_ema_slow = 101.0;
         signal.consensus_bollinger_percent_b = 0.35;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_hard");
         assert!(evaluation
