@@ -102,10 +102,7 @@ export function PositionTable({
   if (positions.length === 0) {
     return (
       <Card
-        className={cn(
-          'bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border',
-          className
-        )}
+        className={cn('border-0 bg-transparent shadow-none', className)}
       >
         <CardHeader className="pb-2">
           <CardTitle className="text-lg text-foreground">
