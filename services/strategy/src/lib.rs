@@ -4093,40 +4093,114 @@ fn thesis_degrading_confirmation_reason(
     )
 }
 
+/// Thesis health-score thresholds, configurable per mode profile under
+/// `thesis_health` (defaults reproduce the previously hard-coded values, so
+/// behavior is unchanged until tuned).
+#[derive(Debug, Clone)]
+struct ThesisHealthCfg {
+    long_invalidate: i32,
+    long_invalidate_confirmed: i32,
+    long_no_alignment: i32,
+    long_degrading_hard: i32,
+    long_degrading_hard_unaligned: i32,
+    long_degrading_soft: i32,
+    long_degrading_soft_unaligned: i32,
+    short_invalidate: i32,
+    short_no_alignment: i32,
+    short_degrading_hard: i32,
+    short_degrading_hard_unaligned: i32,
+    short_degrading_soft: i32,
+    short_degrading_soft_unaligned: i32,
+    in_profit_pct: f64,
+    required_components_in_profit: i32,
+    required_components: i32,
+}
+
+impl StrategyConfig {
+    fn thesis_health(&self) -> ThesisHealthCfg {
+        let n = |key: &str, def: i32| -> i32 {
+            self.mode_cfg()
+                .and_then(|m| cfg_get(m, &["thesis_health", key]))
+                .and_then(Value::as_i64)
+                .or_else(|| cfg_get(&self.global, &["thesis_health", key]).and_then(Value::as_i64))
+                .map(|v| v as i32)
+                .unwrap_or(def)
+        };
+        let in_profit_pct = self
+            .mode_cfg()
+            .and_then(|m| cfg_get(m, &["thesis_health", "in_profit_pct"]))
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                cfg_get(&self.global, &["thesis_health", "in_profit_pct"]).and_then(Value::as_f64)
+            })
+            .unwrap_or(0.002);
+        ThesisHealthCfg {
+            long_invalidate: n("long_invalidate", -60),
+            long_invalidate_confirmed: n("long_invalidate_confirmed", -50),
+            long_no_alignment: n("long_no_alignment", -35),
+            long_degrading_hard: n("long_degrading_hard", -35),
+            long_degrading_hard_unaligned: n("long_degrading_hard_unaligned", -20),
+            long_degrading_soft: n("long_degrading_soft", -20),
+            long_degrading_soft_unaligned: n("long_degrading_soft_unaligned", -12),
+            short_invalidate: n("short_invalidate", 55),
+            short_no_alignment: n("short_no_alignment", 35),
+            short_degrading_hard: n("short_degrading_hard", 40),
+            short_degrading_hard_unaligned: n("short_degrading_hard_unaligned", 25),
+            short_degrading_soft: n("short_degrading_soft", 25),
+            short_degrading_soft_unaligned: n("short_degrading_soft_unaligned", 15),
+            in_profit_pct,
+            required_components_in_profit: n("required_components_in_profit", 3),
+            required_components: n("required_components", 2),
+        }
+    }
+}
+
 fn evaluate_thesis_invalidation(
     signal: &MarketSignal,
     open: &OpenTradeSnapshot,
+    cfg: &StrategyConfig,
 ) -> ThesisInvalidationEvaluation {
     let breakdown = position_health_breakdown(signal, open);
     let health_score = breakdown.clamped_score;
+    let th = cfg.thesis_health();
 
     if open.side.eq_ignore_ascii_case("Long") {
         let profit_pct = current_profit_pct(&open.side, open.entry_price, signal.current_price);
-        let in_profit = profit_pct > 0.002;
+        let in_profit = profit_pct > th.in_profit_pct;
         let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bearish")
             || signal.bybit_regime.eq_ignore_ascii_case("bearish");
         let both_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bullish");
         let adverse_components = adverse_long_thesis_components(&breakdown);
-        let required_invalid_components = if in_profit { 3 } else { 2 };
+        let required_invalid_components = (if in_profit {
+            th.required_components_in_profit
+        } else {
+            th.required_components
+        })
+        .max(0) as usize;
 
         let (stage, reason) = if opposite_side {
             ("invalidated", "thesis_invalidated_opposite_side")
-        } else if health_score <= -60
-            || (health_score <= -50 && adverse_components >= required_invalid_components)
+        } else if health_score <= th.long_invalidate
+            || (health_score <= th.long_invalidate_confirmed
+                && adverse_components >= required_invalid_components)
         {
             ("invalidated", "thesis_invalidated_health_threshold")
         } else if both_not_bullish
-            && health_score <= -35
+            && health_score <= th.long_no_alignment
             && adverse_components >= required_invalid_components
         {
             ("invalidated", "thesis_invalidated_no_bullish_alignment")
-        } else if (health_score <= -35 && adverse_components >= 2)
-            || (both_not_bullish && health_score <= -20 && adverse_components >= 2)
+        } else if (health_score <= th.long_degrading_hard && adverse_components >= 2)
+            || (both_not_bullish
+                && health_score <= th.long_degrading_hard_unaligned
+                && adverse_components >= 2)
         {
             ("degrading_hard", "thesis_degrading_hard_long_alignment")
-        } else if health_score <= -20
-            || (both_not_bullish && health_score <= -12 && adverse_components >= 1)
+        } else if health_score <= th.long_degrading_soft
+            || (both_not_bullish
+                && health_score <= th.long_degrading_soft_unaligned
+                && adverse_components >= 1)
         {
             ("degrading_soft", "thesis_degrading_soft_long_alignment")
         } else {
@@ -4146,13 +4220,17 @@ fn evaluate_thesis_invalidation(
 
         let (stage, reason) = if opposite_side {
             ("invalidated", "thesis_invalidated_opposite_side")
-        } else if health_score >= 55 {
+        } else if health_score >= th.short_invalidate {
             ("invalidated", "thesis_invalidated_health_threshold")
-        } else if both_not_bearish && health_score >= 35 {
+        } else if both_not_bearish && health_score >= th.short_no_alignment {
             ("invalidated", "thesis_invalidated_no_bearish_alignment")
-        } else if health_score >= 40 || (both_not_bearish && health_score >= 25) {
+        } else if health_score >= th.short_degrading_hard
+            || (both_not_bearish && health_score >= th.short_degrading_hard_unaligned)
+        {
             ("degrading_hard", "thesis_degrading_hard_short_alignment")
-        } else if health_score >= 25 || (both_not_bearish && health_score >= 15) {
+        } else if health_score >= th.short_degrading_soft
+            || (both_not_bearish && health_score >= th.short_degrading_soft_unaligned)
+        {
             ("degrading_soft", "thesis_degrading_soft_short_alignment")
         } else {
             ("valid", "thesis_valid")
@@ -4284,7 +4362,7 @@ fn enforce_open_position_thesis_guard(
         return None;
     }
 
-    let evaluation = evaluate_thesis_invalidation(signal, open);
+    let evaluation = evaluate_thesis_invalidation(signal, open, cfg);
 
     if evaluation.stage == "valid" {
         thesis_invalidations.remove(symbol);
@@ -5473,7 +5551,7 @@ mod tests {
         signal.consensus_macd_histogram = -0.01;
         signal.consensus_bollinger_percent_b = 0.40;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "valid");
         assert!(evaluation.reason.starts_with("thesis_valid_"));
@@ -5494,7 +5572,7 @@ mod tests {
         signal.consensus_ema_slow = 99.0;
         signal.consensus_bollinger_percent_b = 0.10;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "invalidated");
         assert!(evaluation
@@ -5517,7 +5595,7 @@ mod tests {
         signal.consensus_bollinger_percent_b = 0.20;
         signal.consensus_macd_histogram = -1.0;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_soft");
         assert!(evaluation
@@ -5540,7 +5618,7 @@ mod tests {
         signal.consensus_ema_slow = 99.0;
         signal.consensus_bollinger_percent_b = 0.20;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_hard");
         assert!(evaluation
@@ -5563,7 +5641,7 @@ mod tests {
         signal.consensus_ema_slow = 101.0;
         signal.consensus_bollinger_percent_b = 0.35;
 
-        let evaluation = evaluate_thesis_invalidation(&signal, &open);
+        let evaluation = evaluate_thesis_invalidation(&signal, &open, &sample_cfg());
 
         assert_eq!(evaluation.stage, "degrading_hard");
         assert!(evaluation
