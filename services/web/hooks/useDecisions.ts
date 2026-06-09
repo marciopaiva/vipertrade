@@ -158,8 +158,9 @@ export function useDecisions() {
     };
   }, []);
 
+  // Stable alphabetical order by symbol so live WS updates don't reshuffle cards.
   const decisions = Object.values(bySymbol).sort((a, b) =>
-    (b.executed_at ?? '').localeCompare(a.executed_at ?? '')
+    a.symbol.localeCompare(b.symbol)
   );
 
   return { decisions, loading, error, updatedAt, live };
