@@ -964,9 +964,6 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background">
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
-        {/* Strategy Cockpit — live consensus & entry-guard state */}
-        <StrategyCockpit />
-
         {/* Wallet Card - Unified */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-1">
@@ -1154,6 +1151,9 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Strategy Cockpit — live consensus & entry-guard state */}
+        <StrategyCockpit />
 
         {/* Positions */}
         <PositionTable
