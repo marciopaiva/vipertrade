@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
@@ -751,11 +751,17 @@ export default function DashboardPage() {
     return items as Record<string, any>;
   }, [dashboardData?.market_signals?.items]);
 
-  useEffect(() => {
-    if (Object.keys(liveMarketSignals).length > 0) {
-      setLastStableMarketSignals(liveMarketSignals);
-    }
-  }, [liveMarketSignals]);
+  // Cache the last non-empty snapshot so the cockpit doesn't flicker when a
+  // refresh momentarily returns no signals. Adjusting state during render
+  // (guarded so it can't loop) is React's recommended alternative to a
+  // setState-in-effect — liveMarketSignals is a stable memoized reference, so
+  // once it equals the cache the guard stops firing.
+  if (
+    Object.keys(liveMarketSignals).length > 0 &&
+    liveMarketSignals !== lastStableMarketSignals
+  ) {
+    setLastStableMarketSignals(liveMarketSignals);
+  }
 
   const effectiveMarketSignals = useMemo<Record<string, any>>(() => {
     if (Object.keys(liveMarketSignals).length > 0) return liveMarketSignals;
