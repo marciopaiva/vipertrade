@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { ViperTradeLogo } from './ViperTradeLogo';
 import { HealthPill } from './HealthPill';
 import LogoutButton from './auth/LogoutButton';
+import { DensityToggle } from './console/DensityToggle';
 import { cn } from '@/lib/utils';
 
 // Only real destinations live in the nav; the Trades/System screens join as they
@@ -56,6 +57,7 @@ export function AppHeader() {
             >
               ⌘K
             </button>
+            <DensityToggle />
             <HealthPill className="ml-1" />
             <LogoutButton />
           </nav>

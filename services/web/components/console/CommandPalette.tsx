@@ -23,6 +23,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const gAt = useRef(0);
 
   const commands = useMemo<Command[]>(
     () => [
@@ -47,14 +48,46 @@ export function CommandPalette() {
     setActive(0);
   }, []);
 
-  // Global hotkey: ⌘K / Ctrl-K toggles; Esc closes.
+  // Global hotkeys: ⌘K / Ctrl-K toggles; Esc closes; `g` then c/s/t/a/y jumps
+  // between sections (the hints shown in the list). Sequence keys are ignored
+  // while typing in a field (incl. the open palette).
   useEffect(() => {
+    const GOTO: Record<string, string> = {
+      c: '/console',
+      s: '/strategy',
+      t: '/trades',
+      a: '/analysis',
+      y: '/system',
+    };
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setOpen(o => !o);
-      } else if (e.key === 'Escape') {
+        return;
+      }
+      if (e.key === 'Escape') {
         setOpen(false);
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable);
+      if (typing) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'g') {
+        gAt.current = Date.now();
+        return;
+      }
+      if (Date.now() - gAt.current < 800 && GOTO[key]) {
+        e.preventDefault();
+        gAt.current = 0;
+        router.push(GOTO[key]);
       }
     };
     const onOpen = () => setOpen(true);
@@ -64,7 +97,7 @@ export function CommandPalette() {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('command-palette:open', onOpen);
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
