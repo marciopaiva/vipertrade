@@ -35,12 +35,15 @@ interface PositionTableProps {
   positions: Position[];
   marketSignals?: MarketSignal[];
   className?: string;
+  /** Setups currently held back by an entry guard — surfaced in the flat state. */
+  guardedSetups?: number;
 }
 
 export function PositionTable({
   positions,
   marketSignals = [],
   className,
+  guardedSetups,
 }: PositionTableProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -111,7 +114,11 @@ export function PositionTable({
         </CardHeader>
         <CardContent className="pt-0">
           <div className="text-center py-8">
-            <p className="text-foreground/80 font-medium">Flat — no open positions</p>
+            <p className="text-foreground/80 font-medium">
+              {guardedSetups && guardedSetups > 0
+                ? `Flat — guards holding ${guardedSetups} setup${guardedSetups === 1 ? '' : 's'}`
+                : 'Flat — no open positions'}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
               The strategy is monitoring the market; entries open when exchange
               consensus and the entry guards align.
