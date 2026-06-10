@@ -797,6 +797,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
             Option<f64>,
             Option<f64>,
             Option<f64>,
+            Option<f64>,
             DateTime<Utc>,
         ),
     >(
@@ -814,6 +815,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                  (input_data->'signal'->>'consensus_trend_score')::float8 AS consensus_trend_score,
                  (input_data->'signal'->>'consensus_macd_histogram')::float8 AS macd_hist,
                  (input_data->'signal'->>'current_price')::float8 AS current_price,
+                 (input_data->'signal'->>'consensus_adx_14')::float8 AS consensus_adx_14,
                  executed_at
              FROM tupa_audit_logs
              WHERE input_data ? 'signal'
@@ -844,6 +846,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                         consensus_trend_score,
                         consensus_macd_histogram,
                         current_price,
+                        consensus_adx_14,
                         executed_at,
                     )| DecisionItem {
                         symbol,
@@ -858,6 +861,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                         consensus_trend_score,
                         consensus_macd_histogram,
                         current_price,
+                        consensus_adx_14,
                         executed_at,
                     },
                 )
