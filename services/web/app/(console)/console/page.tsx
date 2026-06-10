@@ -2,9 +2,12 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
+import { useDecisions } from '@/hooks/useDecisions';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
 import { StrategyCockpit } from '@/components/cockpit/StrategyCockpit';
+import { KpiStrip } from '@/components/console/KpiStrip';
+import { RecentFills } from '@/components/console/RecentFills';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -727,7 +730,7 @@ function ClosedTradesTable({
   );
 }
 
-export default function DashboardPage() {
+export default function ConsolePage() {
   const {
     data: dashboardData,
     loading,
@@ -736,6 +739,9 @@ export default function DashboardPage() {
     refreshInterval: 5000,
     enabled: true,
   });
+  // Live decisions power the "guards holding N setups" empty state — same %B
+  // gate the /strategy screen surfaces.
+  const { decisions } = useDecisions();
   const [lastStableMarketSignals, setLastStableMarketSignals] = useState<
     Record<string, any>
   >({});
@@ -966,10 +972,31 @@ export default function DashboardPage() {
       | 'mainnet') || 'paper';
   const executorEnabled = dashboardData?.status?.executor?.enabled ?? false;
 
+  const openPositions = dashboardData?.positions?.items || [];
+  const closedTrades = dashboardData?.trades?.items || [];
+  const guardedSetups = decisions.filter(d => {
+    const pb = d.consensus_bollinger_percent_b;
+    return typeof pb === 'number' && (pb > 0.85 || pb < 0.15);
+  }).length;
+  const todayCount =
+    dashboardData?.daily_trades_summary?.count ??
+    dashboardData?.performance?.last_24h?.total_trades ??
+    0;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Main Content */}
       <main className="container mx-auto px-4 py-4 space-y-4">
+        {/* At-a-glance KPI strip */}
+        <KpiStrip
+          equity={dashboardData?.wallet?.total_equity}
+          pnl24h={dashboardData?.performance?.last_24h?.total_pnl}
+          winRate24h={dashboardData?.performance?.last_24h?.win_rate}
+          openCount={openPositions.length}
+          todayCount={todayCount}
+          trades={closedTrades}
+        />
+
         {/* Wallet Card - Unified */}
         <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
           <CardHeader className="pb-1">
@@ -1163,7 +1190,8 @@ export default function DashboardPage() {
 
         {/* Positions */}
         <PositionTable
-          positions={dashboardData?.positions?.items || []}
+          positions={openPositions}
+          guardedSetups={guardedSetups}
           marketSignals={
             dashboardData?.market_signals?.items
               ? Object.values(dashboardData.market_signals.items as any)
@@ -1171,8 +1199,11 @@ export default function DashboardPage() {
           }
         />
 
+        {/* Recent fills — live feed */}
+        <RecentFills trades={closedTrades} />
+
         {/* Closed Trades */}
-        <ClosedTradesTable trades={dashboardData?.trades?.items || []} />
+        <ClosedTradesTable trades={closedTrades} />
 
         {/* Architecture Flow */}
         <Card className="border-0 bg-transparent shadow-none [&>*]:px-0">
