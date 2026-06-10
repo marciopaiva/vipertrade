@@ -34,6 +34,15 @@ export default function RootLayout({
       lang="en"
       className={`${display.variable} ${mono.variable} ${sans.variable}`}
     >
+      <head>
+        {/* Apply the saved density before paint so there's no flash and no
+            hydration mismatch (runs outside React). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var d=localStorage.getItem('viper-density');if(d==='cockpit')document.documentElement.dataset.density=d;}catch(e){}`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
