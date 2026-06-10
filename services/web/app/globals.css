@@ -51,6 +51,36 @@
       radial-gradient(circle at 82% 12%, rgba(0, 229, 168, 0.14), transparent 34%),
       linear-gradient(180deg, #0a1325 0%, #060b17 100%);
   }
+
+  /* Density modes (§4.4). Tailwind sizing is rem-based, so nudging the root
+     font-size scales spacing + type proportionally — Comfortable (default) vs
+     Cockpit (more on screen). Persisted per operator; set pre-hydration by an
+     inline script in the root layout to avoid a flash. */
+  html {
+    font-size: 16px;
+  }
+  html[data-density='cockpit'] {
+    font-size: 14px;
+  }
+
+  /* Keyboard users get a clear focus ring; mouse clicks don't. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+/* Accessibility: honor the OS "reduce motion" setting — kill the ambient
+   pings/flows/glows so motion is reserved for those who want it (§10). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Trading numerics: monospaced figures align to the digit so columns of
