@@ -1,4 +1,5 @@
 import { AppHeader } from '@/components/AppHeader';
+import { CommandPalette } from '@/components/console/CommandPalette';
 
 /**
  * Shared shell for the operator console (dashboard, analysis, and the screens
@@ -16,6 +17,7 @@ export default function ConsoleLayout({
     <div className="min-h-screen bg-background">
       <AppHeader />
       <main className="container mx-auto px-4 py-6">{children}</main>
+      <CommandPalette />
     </div>
   );
 }
