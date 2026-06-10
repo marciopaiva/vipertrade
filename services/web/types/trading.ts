@@ -34,6 +34,7 @@ export interface DecisionItem {
   consensus_bollinger_percent_b?: number | null;
   consensus_trend_score?: number | null;
   consensus_macd_histogram?: number | null;
+  consensus_adx_14?: number | null;
   current_price?: number | null;
   executed_at: string;
 }

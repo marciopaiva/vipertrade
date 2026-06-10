@@ -32,19 +32,12 @@
   --ring: 187 87% 50%;
   
   --radius: 0.5rem;
-  
-  /* Legacy vars for compatibility */
-  --bg: #070e1c;
-  --bg-soft: #0f1b33;
-  --panel: rgba(11, 24, 46, 0.82);
-  --panel-strong: rgba(8, 16, 32, 0.88);
-  --line: rgba(95, 137, 203, 0.25);
-  --text: #d7e4ff;
-  --muted: #8da7d7;
-  --accent-old: #11c4ff;
-  --accent-2: #00e5a8;
-  --danger: #ff6478;
-  --warn: #f7b500;
+
+  /* Amber for .text-warn / .bg-warn and the tailwind `warn` color (HSL so
+     `hsl(var(--warn))` is valid). Single token system — the old hex/rgba
+     `--bg/--panel/--accent-*` set was unused and a duplicate `--muted`
+     shadowed the one above, so they were removed. */
+  --warn: 44 100% 48%;
 }
 
 @layer base {
