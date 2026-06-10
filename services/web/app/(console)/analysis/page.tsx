@@ -1,9 +1,6 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ViperTradeLogo } from '@/components/ViperTradeLogo';
-import { AppHeader } from '@/components/AppHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -344,11 +341,8 @@ export default function AnalysisPage() {
         ? 'improved'
         : 'mixed'
   );
-   return (
-     <div className="min-h-screen bg-background">
-       <AppHeader />
-
-       <main className="container mx-auto px-4 py-4 space-y-4">
+  return (
+    <div className="space-y-4">
         <Card className="bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border/50">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -961,7 +955,6 @@ export default function AnalysisPage() {
             </div>
           </div>
         </details>
-      </main>
     </div>
   );
 }
