@@ -110,8 +110,12 @@ export function PositionTable({
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="text-center text-muted-foreground py-8">
-            No open positions
+          <div className="text-center py-8">
+            <p className="text-foreground/80 font-medium">Flat — no open positions</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The strategy is monitoring the market; entries open when exchange
+              consensus and the entry guards align.
+            </p>
           </div>
         </CardContent>
       </Card>

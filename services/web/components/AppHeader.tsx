@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { ViperTradeLogo } from './ViperTradeLogo';
+import { HealthPill } from './HealthPill';
 import LogoutButton from './auth/LogoutButton';
 
 export function AppHeader() {
@@ -13,21 +14,16 @@ export function AppHeader() {
             <ViperTradeLogo size="md" showText={true} />
           </Link>
           <nav className="flex items-center gap-4">
+            {/* Only real destinations live in the nav; the Trades/Positions/
+                Settings stubs were demoted until they ship (see
+                docs/design/web-experience-proposal.md). */}
             <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-viper-cyan">
               Dashboard
             </Link>
             <Link href="/analysis" className="text-sm text-muted-foreground hover:text-viper-cyan">
               Analysis
             </Link>
-            <Link href="/dashboard/trades" className="text-sm text-muted-foreground hover:text-viper-cyan">
-              Trades
-            </Link>
-            <Link href="/dashboard/positions" className="text-sm text-muted-foreground hover:text-viper-cyan">
-              Positions
-            </Link>
-            <Link href="/dashboard/settings" className="text-sm text-muted-foreground hover:text-viper-cyan">
-              Settings
-            </Link>
+            <HealthPill className="ml-1" />
             <LogoutButton />
           </nav>
         </div>
