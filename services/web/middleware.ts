@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // Auth is opt-in. Running locally we keep it off (the default) so the
-// dashboard is directly accessible; set WEB_AUTH_ENABLED=true to enforce the
+// console is directly accessible; set WEB_AUTH_ENABLED=true to enforce the
 // session-cookie gate. Proper auth (hashed creds + signed token) is tracked
 // in #32 — the current cookie check is presence-only and not a real guard.
 const AUTH_ENABLED = process.env.WEB_AUTH_ENABLED === 'true';
