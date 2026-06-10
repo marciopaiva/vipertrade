@@ -1730,3 +1730,265 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod indicator_tests {
+    //! Deterministic unit tests for the pure indicator math. Every expected value
+    //! is either hand-derivable from the input or a documented edge-case branch.
+    use super::*;
+
+    /// Candle where high == low == close (price-only series).
+    fn c(close: f64) -> Candle {
+        Candle {
+            open_time_ms: 0,
+            high: close,
+            low: close,
+            close,
+            volume_quote: 1.0,
+        }
+    }
+    /// Candle with explicit high/low/close (for ATR/ADX which use the range).
+    fn chl(high: f64, low: f64, close: f64) -> Candle {
+        Candle {
+            open_time_ms: 0,
+            high,
+            low,
+            close,
+            volume_quote: 1.0,
+        }
+    }
+    /// Price-only candle carrying a specific quote volume (for volume_ratio).
+    fn cv(close: f64, vol: f64) -> Candle {
+        Candle {
+            open_time_ms: 0,
+            high: close,
+            low: close,
+            close,
+            volume_quote: vol,
+        }
+    }
+    fn series(closes: &[f64]) -> Vec<Candle> {
+        closes.iter().map(|&x| c(x)).collect()
+    }
+    /// n candles starting at `start`, each `step` above the previous close.
+    fn ramp(n: usize, start: f64, step: f64) -> Vec<Candle> {
+        (0..n).map(|i| c(start + step * i as f64)).collect()
+    }
+    fn approx(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol
+    }
+
+    // ── median ────────────────────────────────────────────────────────────
+    #[test]
+    fn median_odd_even_empty_and_unsorted() {
+        assert_eq!(median(&mut [3.0, 1.0, 2.0]), 2.0); // unsorted, odd
+        assert_eq!(median(&mut [4.0, 1.0, 3.0, 2.0]), 2.5); // unsorted, even
+        assert_eq!(median(&mut []), 0.0); // empty guard
+        assert_eq!(median(&mut [7.0]), 7.0); // single
+    }
+
+    // ── EMA ───────────────────────────────────────────────────────────────
+    #[test]
+    fn ema_guards_and_constant_series() {
+        assert_eq!(compute_ema(&[], 10), None);
+        assert_eq!(compute_ema(&series(&[5.0; 10]), 0), None);
+        // EMA of a constant series is that constant.
+        let v = compute_ema(&series(&[100.0; 20]), 10).unwrap();
+        assert!(approx(v, 100.0, 1e-9), "ema={v}");
+    }
+
+    #[test]
+    fn ema_period_one_is_last_close() {
+        // alpha = 2/(1+1) = 1 => EMA collapses to the latest close.
+        let v = compute_ema(&series(&[1.0, 2.0, 3.0]), 1).unwrap();
+        assert!(approx(v, 3.0, 1e-12), "ema={v}");
+    }
+
+    // ── Bollinger / %B ────────────────────────────────────────────────────
+    #[test]
+    fn bollinger_needs_full_period() {
+        assert!(compute_bollinger(&series(&[1.0, 2.0, 3.0]), 4).is_none());
+    }
+
+    #[test]
+    fn bollinger_constant_series_is_neutral() {
+        // Zero variance => bands collapse, %B falls back to 0.5, bandwidth 0.
+        let (upper, mean, lower, bw, pb) = compute_bollinger(&series(&[50.0; 20]), 20).unwrap();
+        assert!(approx(mean, 50.0, 1e-9));
+        assert!(approx(upper, 50.0, 1e-9));
+        assert!(approx(lower, 50.0, 1e-9));
+        assert!(approx(bw, 0.0, 1e-9));
+        assert!(approx(pb, 0.5, 1e-12));
+    }
+
+    #[test]
+    fn bollinger_known_window() {
+        // closes [1,2,3,4], period 4: mean 2.5, var 1.25, std sqrt(1.25)=1.118034.
+        let (upper, mean, lower, bw, pb) =
+            compute_bollinger(&series(&[1.0, 2.0, 3.0, 4.0]), 4).unwrap();
+        let std = 1.25_f64.sqrt();
+        assert!(approx(mean, 2.5, 1e-12));
+        assert!(approx(upper, 2.5 + 2.0 * std, 1e-9));
+        assert!(approx(lower, 2.5 - 2.0 * std, 1e-9));
+        // %B = (last - lower)/(upper - lower) = (4 - lower)/(4*std)
+        let pb_expected = (4.0 - (2.5 - 2.0 * std)) / (4.0 * std);
+        assert!(approx(pb, pb_expected, 1e-12), "pb={pb}");
+        // bandwidth = (upper - lower)/mean = 4*std/2.5
+        assert!(approx(bw, 4.0 * std / 2.5, 1e-9));
+    }
+
+    // ── RSI ───────────────────────────────────────────────────────────────
+    #[test]
+    fn rsi_needs_15_candles() {
+        assert!(compute_rsi14(&series(&[1.0; 14])).is_none());
+    }
+
+    #[test]
+    fn rsi_monotonic_extremes() {
+        // All gains (or flat, avg_loss==0) => 100; all losses => 0.
+        assert!(approx(
+            compute_rsi14(&ramp(20, 1.0, 1.0)).unwrap(),
+            100.0,
+            1e-9
+        ));
+        assert!(approx(
+            compute_rsi14(&ramp(20, 100.0, -1.0)).unwrap(),
+            0.0,
+            1e-9
+        ));
+        // Flat series hits the avg_loss==0 short-circuit => 100.
+        assert!(approx(
+            compute_rsi14(&series(&[42.0; 20])).unwrap(),
+            100.0,
+            1e-9
+        ));
+    }
+
+    // ── ATR ───────────────────────────────────────────────────────────────
+    #[test]
+    fn atr_guard_and_known_value() {
+        assert_eq!(compute_atr14(&[c(10.0)]), 0.0); // < 2 candles
+                                                    // TR1 = max(12-9,|12-10|,|9-10|)=3 ; TR2 = max(13-10,|13-11|,|10-11|)=3 ; ATR=3.
+        let candles = vec![
+            chl(10.0, 10.0, 10.0),
+            chl(12.0, 9.0, 11.0),
+            chl(13.0, 10.0, 12.0),
+        ];
+        assert!(approx(compute_atr14(&candles), 3.0, 1e-12));
+    }
+
+    // ── ADX ───────────────────────────────────────────────────────────────
+    #[test]
+    fn adx_needs_29_candles() {
+        assert!(compute_adx14(&ramp(28, 100.0, 0.5)).is_none());
+    }
+
+    #[test]
+    fn adx_flat_is_zero_trend_is_max() {
+        // Flat: no directional movement, no true range => ADX 0.
+        assert!(approx(
+            compute_adx14(&series(&[100.0; 40])).unwrap(),
+            0.0,
+            1e-9
+        ));
+        // Pure monotonic uptrend: +DI saturates, -DI=0 => DX=100 throughout => ADX 100.
+        let adx = compute_adx14(&ramp(40, 100.0, 0.5)).unwrap();
+        assert!(approx(adx, 100.0, 1e-6), "adx={adx}");
+        assert!((0.0..=100.0).contains(&adx));
+    }
+
+    // ── MACD ──────────────────────────────────────────────────────────────
+    #[test]
+    fn macd_needs_35_and_is_flat_on_constant() {
+        assert!(compute_macd(&series(&[1.0; 34])).is_none());
+        let (line, signal, hist) = compute_macd(&series(&[100.0; 40])).unwrap();
+        assert!(approx(line, 0.0, 1e-9));
+        assert!(approx(signal, 0.0, 1e-9));
+        assert!(approx(hist, 0.0, 1e-9));
+    }
+
+    // ── volume ratio ──────────────────────────────────────────────────────
+    #[test]
+    fn volume_ratio_guard_constant_and_doubled() {
+        assert!(compute_volume_ratio(&series(&[1.0; 3]), 4).is_none()); // < lookback+1
+        let constant: Vec<Candle> = (0..6).map(|_| cv(1.0, 100.0)).collect();
+        assert!(approx(
+            compute_volume_ratio(&constant, 4).unwrap(),
+            1.0,
+            1e-12
+        ));
+        // baseline avg 1.0 over 4 candles, last = 2.0 => ratio 2.0.
+        let spike = vec![
+            cv(1.0, 1.0),
+            cv(1.0, 1.0),
+            cv(1.0, 1.0),
+            cv(1.0, 1.0),
+            cv(1.0, 2.0),
+        ];
+        assert!(approx(compute_volume_ratio(&spike, 4).unwrap(), 2.0, 1e-12));
+    }
+
+    // ── composite trend score ─────────────────────────────────────────────
+    #[test]
+    fn composite_trend_score_neutral_bull_bear() {
+        // Neutral inputs => 0.
+        assert!(approx(
+            composite_trend_score(100.0, 50.0, 50.0, 50.0, 0.0, 1.0),
+            0.0,
+            1e-12
+        ));
+        // Saturated bullish: each clamped component at +1, volume at +1 =>
+        // (0.4+0.25+0.25)*(0.8+0.2) = 0.9.
+        assert!(approx(
+            composite_trend_score(100.0, 51.0, 50.0, 65.0, 0.5, 2.0),
+            0.9,
+            1e-9
+        ));
+        // Saturated bearish, neutral volume => (-0.9)*(0.8) = -0.72.
+        assert!(approx(
+            composite_trend_score(100.0, 49.0, 50.0, 35.0, -0.5, 1.0),
+            -0.72,
+            1e-9
+        ));
+    }
+
+    // ── regime classification ─────────────────────────────────────────────
+    #[test]
+    fn classify_regime_short_series_is_neutral() {
+        let (r, slope) = classify_regime(&ramp(54, 100.0, 0.1), 0.5);
+        assert_eq!(r, "neutral");
+        assert_eq!(slope, 0.0);
+    }
+
+    #[test]
+    fn classify_regime_uptrend_is_bullish_flat_is_neutral() {
+        let (r, slope) = classify_regime(&ramp(60, 100.0, 0.5), 0.5);
+        assert_eq!(r, "bullish");
+        assert!(slope > 0.0);
+        let (r2, _) = classify_regime(&series(&[100.0; 60]), 0.0);
+        assert_eq!(r2, "neutral");
+    }
+
+    // ── full bundle (integration of the pure math) ────────────────────────
+    #[test]
+    fn bundle_rejects_short_history() {
+        let err =
+            compute_indicator_bundle_complete("test", "BTCUSDT", &series(&[1.0; 50])).unwrap_err();
+        assert!(err.contains("incomplete"), "err={err}");
+    }
+
+    #[test]
+    fn bundle_on_constant_history_is_neutral() {
+        let candles: Vec<Candle> = (0..REQUIRED_CANDLE_COUNT)
+            .map(|_| cv(100.0, 1000.0))
+            .collect();
+        let b = compute_indicator_bundle_complete("test", "BTCUSDT", &candles).unwrap();
+        assert!(approx(b.ema_fast, 100.0, 1e-6));
+        assert!(approx(b.ema_slow, 100.0, 1e-6));
+        assert!(approx(b.bollinger_percent_b, 0.5, 1e-9));
+        assert!(approx(b.bollinger_bandwidth, 0.0, 1e-9));
+        assert!(approx(b.rsi_14, 100.0, 1e-9)); // flat => avg_loss 0 branch
+        assert!(approx(b.macd_histogram, 0.0, 1e-9));
+        assert!(approx(b.volume_ratio, 1.0, 1e-9));
+    }
+}
