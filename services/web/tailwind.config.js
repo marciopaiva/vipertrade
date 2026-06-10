@@ -67,10 +67,11 @@ module.exports = {
         },
       },
 
-      // Custom Fonts
+      // Custom Fonts (loaded via next/font, wired through CSS variables)
       fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'], // Trading numbers
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'Space Grotesk', 'sans-serif'], // Headings / UI
+        mono: ['var(--font-mono)', 'JetBrains Mono', 'monospace'], // Trading numbers
+        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'], // Body
       },
 
       // Custom Shadows (Glow Effects)

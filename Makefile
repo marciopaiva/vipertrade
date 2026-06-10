@@ -9,21 +9,33 @@ KIND_NODE        := $(KIND_CLUSTER)-control-plane
 REGISTRY_CTR     ?= kind-registry
 CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
+KUBE_NAMESPACE   ?= vipertrade
+
 .DEFAULT_GOAL := help
-.PHONY: help build deploy start stop
+.PHONY: help build build-web deploy start stop
 
 ## Show the lifecycle targets
 help:
 	@printf "ViperTrade — Kind lifecycle\n\n"
-	@printf "  make build   Build all service images and push to the local registry\n"
-	@printf "  make deploy  Apply the Kubernetes manifests to the Kind cluster\n"
-	@printf "  make start   Start the Kind cluster and local registry\n"
-	@printf "  make stop    Stop the Kind cluster and local registry\n"
+	@printf "  make build      Build all service images and push to the local registry\n"
+	@printf "  make build-web  Rebuild ONLY the web image and restart its rollout (fast UI iteration)\n"
+	@printf "  make deploy     Apply the Kubernetes manifests to the Kind cluster\n"
+	@printf "  make start      Start the Kind cluster and local registry\n"
+	@printf "  make stop       Stop the Kind cluster and local registry\n"
 
 ## Build all service images (web first) and push them to the local Kind registry
 build:
 	@cd services/web && yarn build
 	@./scripts/kind/build-images.sh
+
+## Rebuild only the web image and roll the web deployment so the new image is
+## pulled (the :dev tag is mutable, so a restart is required). Avoids the slow
+## Rust rebuild that `make build` triggers on any repo change.
+build-web:
+	@cd services/web && yarn build
+	@./scripts/kind/build-images.sh web
+	@kubectl rollout restart deployment web -n $(KUBE_NAMESPACE)
+	@kubectl rollout status deployment web -n $(KUBE_NAMESPACE) --timeout=120s
 
 ## Apply the Kubernetes manifests to the Kind cluster
 deploy:
