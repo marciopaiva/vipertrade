@@ -17,6 +17,11 @@ const nextConfig = {
     NEXT_PUBLIC_TRADING_MODE: process.env.NEXT_PUBLIC_TRADING_MODE || 'paper',
   },
 
+  // Back-compat: the dashboard was reframed as the operator Console.
+  async redirects() {
+    return [{ source: '/dashboard', destination: '/console', permanent: false }];
+  },
+
   // Rewrites for API backend
   async rewrites() {
     return [

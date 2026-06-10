@@ -98,7 +98,9 @@ export default function StrategyPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {decisions.map(d => (
-            <DecisionCard key={d.symbol} d={d} />
+            <div key={d.symbol} id={`sym-${d.symbol}`} className="scroll-mt-24">
+              <DecisionCard d={d} />
+            </div>
           ))}
         </div>
       )}
