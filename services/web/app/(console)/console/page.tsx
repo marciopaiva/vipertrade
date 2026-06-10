@@ -5,9 +5,9 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { PositionTable } from '@/components/dashboard/PositionTable';
-import { StrategyCockpit } from '@/components/cockpit/StrategyCockpit';
 import { KpiStrip } from '@/components/console/KpiStrip';
 import { RecentFills } from '@/components/console/RecentFills';
+import { StrategyPulse } from '@/components/console/StrategyPulse';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -741,7 +741,11 @@ export default function ConsolePage() {
   });
   // Live decisions power the "guards holding N setups" empty state — same %B
   // gate the /strategy screen surfaces.
-  const { decisions } = useDecisions();
+  const {
+    decisions,
+    live: decisionsLive,
+    loading: decisionsLoading,
+  } = useDecisions();
   const [lastStableMarketSignals, setLastStableMarketSignals] = useState<
     Record<string, any>
   >({});
@@ -1185,8 +1189,12 @@ export default function ConsolePage() {
           </CardContent>
         </Card>
 
-        {/* Strategy Cockpit — live consensus & entry-guard state */}
-        <StrategyCockpit />
+        {/* Strategy Pulse — compact consensus heatmap; full detail on /strategy */}
+        <StrategyPulse
+          decisions={decisions}
+          live={decisionsLive}
+          loading={decisionsLoading}
+        />
 
         {/* Positions */}
         <PositionTable
