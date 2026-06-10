@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { EquityCurve } from '@/components/analysis/EquityCurve';
 
 type BreakdownItem = {
   name: string;
@@ -343,6 +344,9 @@ export default function AnalysisPage() {
   );
   return (
     <div className="space-y-4">
+        {/* Equity curve — realized PnL with a marker per fill */}
+        <EquityCurve />
+
         <Card className="bg-gradient-to-br from-card/90 via-secondary/80 to-card/90 border-border/50">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
