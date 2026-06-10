@@ -153,6 +153,7 @@ pub struct DecisionItem {
     pub consensus_bollinger_percent_b: Option<f64>,
     pub consensus_trend_score: Option<f64>,
     pub consensus_macd_histogram: Option<f64>,
+    pub consensus_adx_14: Option<f64>,
     pub current_price: Option<f64>,
     pub executed_at: DateTime<Utc>,
 }
