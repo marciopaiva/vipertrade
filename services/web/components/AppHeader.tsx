@@ -14,6 +14,7 @@ const NAV = [
   { href: '/strategy', label: 'Strategy' },
   { href: '/trades', label: 'Trades' },
   { href: '/analysis', label: 'Analysis' },
+  { href: '/system', label: 'System' },
 ];
 
 export function AppHeader() {
@@ -45,6 +46,16 @@ export function AppHeader() {
                 </Link>
               );
             })}
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new Event('command-palette:open'))
+              }
+              title="Command palette"
+              className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+            >
+              ⌘K
+            </button>
             <HealthPill className="ml-1" />
             <LogoutButton />
           </nav>
