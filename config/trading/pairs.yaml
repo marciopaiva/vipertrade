@@ -63,6 +63,12 @@ global:
       # bottoms. Backtest (#37): net -0.3488 -> +0.0030, thesis bleed 37 -> 17.
       max_percent_b_long: 0.85
       min_percent_b_short: 0.15
+      # ADX(14) entry gate: skip entries in chop (weak trend). Backtest on the
+      # ADX-era corpus (16.3k ticks): net -1.0129 -> -0.5287 (+0.48), win 44.7% ->
+      # 47.7%, cutting 8 low-ADX entries that bled via thesis/stop_loss. Gain
+      # plateaus 18-22; >=25 over-cuts (win rate drops below baseline). Read as a
+      # DIRECT child of the mode profile by mode_f64("min_adx").
+      min_adx: 18
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
       entry_filters:

@@ -223,18 +223,44 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(5000);
 
+    // Optional `BACKTEST_SINCE` (RFC3339) restricts the replay to rows at/after a
+    // timestamp — used to isolate a corpus window (e.g. the ADX-plumbed era) so a
+    // gate comparison is apples-to-apples instead of mixing in ticks that predate
+    // the field and would block on missing data.
+    let since: Option<DateTime<Utc>> = std::env::var("BACKTEST_SINCE").ok().and_then(|raw| {
+        match DateTime::parse_from_rfc3339(&raw) {
+            Ok(ts) => Some(ts.with_timezone(&Utc)),
+            Err(e) => {
+                eprintln!("BACKTEST_SINCE='{raw}' is not valid RFC3339 ({e}); ignoring");
+                None
+            }
+        }
+    });
+
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
         .await?;
 
     // input_data fetched as text (sqlx here has no `json` feature).
-    let rows: Vec<(DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at ASC LIMIT $1",
-    )
-    .bind(limit)
-    .fetch_all(&pool)
-    .await?;
+    let rows: Vec<(DateTime<Utc>, String)> = if let Some(since) = since {
+        println!("Replaying rows at/after {since}");
+        sqlx::query_as(
+            "SELECT executed_at, input_data::text FROM tupa_audit_logs \
+             WHERE executed_at >= $1 ORDER BY executed_at ASC LIMIT $2",
+        )
+        .bind(since)
+        .bind(limit)
+        .fetch_all(&pool)
+        .await?
+    } else {
+        sqlx::query_as(
+            "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at ASC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&pool)
+        .await?
+    };
 
     let ticks: Vec<Tick> = rows
         .into_iter()
