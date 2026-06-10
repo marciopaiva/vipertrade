@@ -73,7 +73,7 @@ strategy-purple) — but consolidate and add restraint.
 
 ### 4.1 Color — semantic, not decorative
 
-```
+```text
 SURFACE          ACCENT / STATE
 bg/abyss   #070e1c   cyan/strike   #00d4ff   ← primary action, live
 bg/deep    #0a1120   green/profit  #00ff88   ← long, win, healthy
@@ -118,7 +118,7 @@ live in Cockpit.
 
 Collapse the dead-end sprawl into **5 real destinations**, each earning its place.
 
-```
+```text
 ┌─ ViperTrade ─────────────────────────────────────────────  ●LIVE  ⌘K  [PAPER ▾]  ⏻ ┐
 │  Console   ·   Strategy   ·   Trades   ·   Analysis   ·   System                     │
 └──────────────────────────────────────────────────────────────────────────────────┘
@@ -136,6 +136,7 @@ Removed from nav: standalone **Settings** stub (folds into **System** + an opera
 menu). Removed from code: `layout/Header.tsx`, `layout/Footer.tsx` (orphans).
 
 **Global affordances** (top bar, every page):
+
 - **`●LIVE` health pill** — WS connection + data freshness, one glance.
 - **`⌘K` command palette** — jump to any symbol, page, or action; toggle the flag;
   trip the kill-switch. The operator's superpower.
@@ -149,7 +150,7 @@ menu). Removed from code: `layout/Header.tsx`, `layout/Footer.tsx` (orphans).
 
 ### 6.1 Console (`/console`)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  EQUITY  $99.91   ▾ -0.29 (24h)        WIN RATE 54%   OPEN 0   TODAY 12 trades │  ← KPI strip (mono, tabular)
 │  ┌──────────────── equity sparkline (24h) ──────────────────────────────┐   │
@@ -173,7 +174,7 @@ setups" turns a blank into evidence the strategy is working as designed.
 
 Each symbol is a **decision card** that answers *"why is this trading or not?"*:
 
-```
+```text
 ┌ SUIUSDT ───────────────────────────────── consensus: bybit·binance·okx ──┐
 │  ACTION  ⟶  HOLD            trend ADX 18 (weak)   min_adx 20 ✗            │
 │  RSI  ────●────────  41     %B ──────────●──  0.62                        │
@@ -201,7 +202,7 @@ the live delta — closing the "does config tuning match reality?" loop.
 
 ### 6.5 System (`/system`) — controls with consequences
 
-```
+```text
 ┌ RUNTIME ───────────────────────────────────────────────────────────────┐
 │  STRATEGY_REAL_DECISIONS   ● ON   (runtime patch, not in git)   [toggle] │
 │  MODE   PAPER   testnet   mainnet                                        │
