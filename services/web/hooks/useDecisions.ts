@@ -112,6 +112,8 @@ export function useDecisions() {
               consensus_macd_histogram:
                 num(sig.consensus_macd_histogram) ??
                 cur.consensus_macd_histogram,
+              consensus_adx_14:
+                num(sig.consensus_adx_14) ?? cur.consensus_adx_14,
               current_price: num(sig.current_price) ?? cur.current_price,
               executed_at: new Date().toISOString(),
             },
