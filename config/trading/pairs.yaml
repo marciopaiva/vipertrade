@@ -71,6 +71,31 @@ global:
       min_adx: 18
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
+      # Thesis health-score invalidation DISABLED (analysis 2026-06-11). The
+      # health-score exit tiers were micro-cutting winners that would have
+      # trailed to profit. Deterministic backtest (ADX-era corpus, 91 trades):
+      # pushing every tier past the [-100,100] health clamp lifts net
+      # -0.5950 -> -0.0263 (+0.57), win 47.3% -> 70.8%; thesis closes 61 -> 15
+      # (opposite_side regime-flip only), trailing 25 -> 67, stop_loss 5 -> 7.
+      # Per-trade trailing edge unchanged (+0.024) so it is migration, not luck.
+      # PARTIAL tuning backfires (tier interaction → degrading-path cascade), so
+      # this is all-or-nothing. opposite_side (consensus flip) + stop_loss +
+      # trailing remain the exit set. Read as DIRECT children of this mode
+      # profile by StrategyConfig::thesis_health(); values past ±100 never fire.
+      thesis_health:
+        long_invalidate: -200
+        long_invalidate_confirmed: -200
+        long_no_alignment: -200
+        long_degrading_hard: -200
+        long_degrading_hard_unaligned: -200
+        long_degrading_soft: -200
+        long_degrading_soft_unaligned: -200
+        short_invalidate: 200
+        short_no_alignment: 200
+        short_degrading_hard: 200
+        short_degrading_hard_unaligned: 200
+        short_degrading_soft: 200
+        short_degrading_soft_unaligned: 200
       entry_filters:
         # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
         thesis_invalidation_confirmation_ticks: 4
