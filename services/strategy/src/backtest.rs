@@ -38,6 +38,9 @@ pub struct BacktestReport {
     pub losses: usize,
     /// close_reason -> (count, net pnl)
     pub by_reason: BTreeMap<String, (usize, f64)>,
+    /// symbol -> (count, net pnl, wins) — to spot symbols that bleed under the
+    /// current config (the stop-loss tail is concentrated by symbol).
+    pub by_symbol: BTreeMap<String, (usize, f64, usize)>,
 }
 
 /// Absolute realized PnL — price move over the full position quantity (no
@@ -121,6 +124,12 @@ pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
                 let entry = rep.by_reason.entry(reason).or_default();
                 entry.0 += 1;
                 entry.1 += pnl;
+                let sym = rep.by_symbol.entry(symbol.clone()).or_default();
+                sym.0 += 1;
+                sym.1 += pnl;
+                if pnl > 0.0 {
+                    sym.2 += 1;
+                }
                 open.remove(&symbol);
                 thesis_state.remove(&symbol);
             } else if let Some(tr) = eval.trailing {
@@ -280,6 +289,22 @@ fn print_report(rep: &BacktestReport, cfg_label: &str) {
     println!("  by close_reason:");
     for (reason, (n, pnl)) in &rep.by_reason {
         println!("    {reason:<20} n={n:<4} net={pnl:.4}");
+    }
+    // Per-symbol, worst net first — surfaces which symbols bleed under this config.
+    let mut syms: Vec<(&String, &(usize, f64, usize))> = rep.by_symbol.iter().collect();
+    syms.sort_by(|a, b| {
+        a.1 .1
+            .partial_cmp(&b.1 .1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    println!("  by symbol (worst net first):");
+    for (sym, (n, pnl, wins)) in syms {
+        let win = if *n > 0 {
+            100.0 * *wins as f64 / *n as f64
+        } else {
+            0.0
+        };
+        println!("    {sym:<12} n={n:<4} net={pnl:+.4} win={win:.0}%");
     }
 }
 
