@@ -14,6 +14,7 @@ use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
+mod agent;
 mod trade_diagnostics;
 
 #[derive(Clone)]
@@ -390,9 +391,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .and_then(handle_sweep);
 
+    let investigate = warp::path!("investigate")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(agent::handle_investigate);
+
     let routes = health
         .or(analyze_recent)
         .or(sweep)
+        .or(investigate)
         .recover(handle_rejection)
         .with(warp::cors().allow_any_origin());
 
@@ -451,7 +459,22 @@ async fn handle_recent_analysis(
 /// requested variants over a corpus window. Gives the analyst the same
 /// counterfactual "what if I change X?" power used for manual tuning: the real
 /// decision + exit logic replayed on the recorded `tupa_audit_logs` corpus.
-async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+/// A sweep failure split into the HTTP status it maps to: bad input (400) vs
+/// an internal failure (500). Shared by the `/sweep` endpoint and the agent's
+/// `run_backtest_sweep` tool.
+pub(crate) enum SweepCoreError {
+    BadRequest(String),
+    Internal(String),
+}
+
+/// Core of `/sweep`, factored out so both the HTTP endpoint and the agent loop
+/// (agent.rs `run_backtest_sweep` tool) drive the deterministic backtest the
+/// same way: load the baked config, load the corpus window, run baseline +
+/// variants.
+pub(crate) async fn run_sweep_core(
+    state: &AppState,
+    req: &SweepRequest,
+) -> Result<SweepResponse, SweepCoreError> {
     use viper_strategy::backtest;
 
     // The same config the strategy/backtest role uses (baked into the image).
@@ -462,55 +485,26 @@ async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Re
     let trading_profile = env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
-    let cfg = match viper_strategy::StrategyConfig::from_files(
+    let cfg = viper_strategy::StrategyConfig::from_files(
         &strategy_config,
         &profile_config,
         &trading_profile,
         &trading_mode,
-    ) {
-        Ok(cfg) => cfg,
-        Err(err) => {
-            error!("sweep config load failed: {err}");
-            return Ok(warp::reply::with_status(
-                warp::reply::json(&ApiError {
-                    error: "config_load_failed",
-                    message: err.to_string(),
-                }),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ));
-        }
-    };
+    )
+    .map_err(|e| SweepCoreError::Internal(format!("config load failed: {e}")))?;
 
     let since = match req.since.as_deref() {
-        Some(raw) => match chrono::DateTime::parse_from_rfc3339(raw) {
-            Ok(ts) => Some(ts.with_timezone(&chrono::Utc)),
-            Err(err) => {
-                return Ok(warp::reply::with_status(
-                    warp::reply::json(&ApiError {
-                        error: "invalid_since",
-                        message: format!("'since' must be RFC3339: {err}"),
-                    }),
-                    StatusCode::BAD_REQUEST,
-                ));
-            }
-        },
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map_err(|e| SweepCoreError::BadRequest(format!("'since' must be RFC3339: {e}")))?
+                .with_timezone(&chrono::Utc),
+        ),
         None => None,
     };
 
-    let ticks =
-        match backtest::load_corpus(&state.db_pool, since, req.limit.unwrap_or(5000)).await {
-            Ok(ticks) => ticks,
-            Err(err) => {
-                error!("sweep corpus load failed: {err}");
-                return Ok(warp::reply::with_status(
-                    warp::reply::json(&ApiError {
-                        error: "corpus_load_failed",
-                        message: err.to_string(),
-                    }),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-            }
-        };
+    let ticks = backtest::load_corpus(&state.db_pool, since, req.limit.unwrap_or(5000))
+        .await
+        .map_err(|e| SweepCoreError::Internal(format!("corpus load failed: {e}")))?;
 
     let variant_overrides: Vec<Vec<(String, String)>> = req
         .variants
@@ -526,13 +520,36 @@ async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Re
 
     let corpus_ticks = ticks.len();
     let result = backtest::run_sweep(&ticks, &cfg, &variant_overrides);
-    Ok(warp::reply::with_status(
-        warp::reply::json(&SweepResponse {
-            corpus_ticks,
-            result,
-        }),
-        StatusCode::OK,
-    ))
+    Ok(SweepResponse {
+        corpus_ticks,
+        result,
+    })
+}
+
+async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+    match run_sweep_core(&state, &req).await {
+        Ok(resp) => Ok(warp::reply::with_status(
+            warp::reply::json(&resp),
+            StatusCode::OK,
+        )),
+        Err(SweepCoreError::BadRequest(message)) => Ok(warp::reply::with_status(
+            warp::reply::json(&ApiError {
+                error: "invalid_request",
+                message,
+            }),
+            StatusCode::BAD_REQUEST,
+        )),
+        Err(SweepCoreError::Internal(message)) => {
+            error!("sweep failed: {message}");
+            Ok(warp::reply::with_status(
+                warp::reply::json(&ApiError {
+                    error: "sweep_failed",
+                    message,
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
 }
 
 async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {
