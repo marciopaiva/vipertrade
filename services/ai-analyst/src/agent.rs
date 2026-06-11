@@ -173,7 +173,10 @@ so the comparison is deterministic and trustworthy. Read each variant's \
 delta_net_pnl.
 4. Iterate: if the delta is small or negative, try a different lever or value.
 5. When you have a change with a clear positive delta_net_pnl backed by a sweep, \
-call propose_config_change with the exact overrides and the measured effect.
+call propose_config_change with the exact overrides. NOTE: the engine RE-RUNS \
+your proposed override and only accepts it if the measured delta_net_pnl is \
+positive — a no-op (delta 0) or worsening change is REJECTED and you must try \
+again. Do not invent an effect; propose only what a sweep actually showed.
 
 CRITICAL config-path rule: tunable params live under the mode profile. Use the \
 full path 'mode_profiles.PAPER.<param>'. A bare path, or a param name that does \
@@ -236,6 +239,9 @@ pub async fn handle_investigate(
     let mut final_message: Option<String> = None;
     let mut sweeps_run = 0usize;
     let mut iterations = 0usize;
+    // Corpus window of the agent's most recent sweep, reused to ground the
+    // propose_config_change verification on the same data.
+    let mut last_window: Option<(Option<String>, i64)> = None;
 
     for _ in 0..cfg.max_iters {
         iterations += 1;
@@ -291,6 +297,7 @@ pub async fn handle_investigate(
                         default_hours,
                         &mut recommendation,
                         &mut sweeps_run,
+                        &mut last_window,
                     )
                     .await;
                     messages.push(ChatMessage {
@@ -404,6 +411,7 @@ async fn dispatch_tool(
     default_hours: i64,
     recommendation: &mut Option<Value>,
     sweeps_run: &mut usize,
+    last_window: &mut Option<(Option<String>, i64)>,
 ) -> String {
     let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
     info!(tool = %call.function.name, "agent tool call");
@@ -428,6 +436,9 @@ async fn dispatch_tool(
                     .to_string()
                 }
             };
+            // Remember the corpus window so propose_config_change grounds its
+            // verification on the same data the agent reasoned over.
+            *last_window = Some((req.since.clone(), req.limit.unwrap_or(5000)));
             *sweeps_run += 1;
             match run_sweep_core(state, &req).await {
                 Ok(resp) => {
@@ -452,8 +463,71 @@ async fn dispatch_tool(
             }
         }
         "propose_config_change" => {
-            *recommendation = Some(args.clone());
-            json!({"status": "recorded"}).to_string()
+            // GUARDRAIL: don't trust the model's prose effect — re-run the
+            // proposed override through the deterministic backtest and accept it
+            // ONLY if the engine confirms a positive measured delta. A fabricated
+            // or no-op/worsening change is rejected with the real numbers so the
+            // model must find a genuine improvement.
+            let overrides = args
+                .get("overrides")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            if !overrides.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+                return json!({
+                    "status": "rejected",
+                    "reason": "propose_config_change needs a non-empty 'overrides' array of {path,value}."
+                })
+                .to_string();
+            }
+
+            let (since, limit) = last_window.clone().unwrap_or((None, 5000));
+            let body = json!({"since": since, "limit": limit, "variants": [{"overrides": overrides}]});
+            let req: SweepRequest = match serde_json::from_value(body) {
+                Ok(r) => r,
+                Err(e) => {
+                    return json!({"status": "rejected", "reason": format!("could not validate overrides: {e}")})
+                        .to_string()
+                }
+            };
+
+            *sweeps_run += 1;
+            match run_sweep_core(state, &req).await {
+                Ok(resp) => {
+                    let base = resp.result.baseline.net_pnl;
+                    let delta = resp
+                        .result
+                        .variants
+                        .first()
+                        .map(|v| v.delta_net_pnl)
+                        .unwrap_or(0.0);
+                    let measured = json!({
+                        "baseline_net_pnl": base,
+                        "variant_net_pnl": base + delta,
+                        "delta_net_pnl": delta,
+                        "corpus_ticks": resp.corpus_ticks,
+                    });
+                    if delta > 1e-9 {
+                        // Accept: overwrite any model-claimed effect with the truth.
+                        let mut rec = args.clone();
+                        if let Value::Object(map) = &mut rec {
+                            map.insert("measured".to_string(), measured.clone());
+                            map.insert("verdict".to_string(), json!("accepted"));
+                        }
+                        *recommendation = Some(rec);
+                        json!({"status": "accepted", "measured": measured}).to_string()
+                    } else {
+                        json!({
+                            "status": "rejected",
+                            "reason": "Engine re-ran your override: measured delta_net_pnl is NOT positive, so this change does not improve net PnL. Do not propose it again. Try a different param/value — e.g. to disable an exit tier you must push EVERY thesis_health.long_* past -100 and short_* past +100 in one variant, not a single threshold.",
+                            "measured": measured
+                        })
+                        .to_string()
+                    }
+                }
+                Err(SweepCoreError::BadRequest(m)) | Err(SweepCoreError::Internal(m)) => {
+                    json!({"status": "rejected", "reason": m}).to_string()
+                }
+            }
         }
         other => json!({"error": format!("unknown tool: {other}")}).to_string(),
     }
