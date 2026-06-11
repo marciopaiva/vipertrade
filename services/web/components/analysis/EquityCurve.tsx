@@ -88,7 +88,7 @@ export function EquityCurve() {
     { refreshInterval: 15000 }
   );
 
-  const { points, net, peak } = useMemo(() => {
+  const { points, net, peak, low } = useMemo(() => {
     const closed = (data?.items ?? [])
       .filter(t => t.status === 'closed')
       .sort(
@@ -99,10 +99,12 @@ export function EquityCurve() {
     const pts: Point[] = [];
     let cum = 0;
     let hi = 0;
+    let lo = 0;
     for (let i = 0; i < closed.length; i++) {
       const t = closed[i];
       cum += t.pnl ?? 0;
       hi = Math.max(hi, cum);
+      lo = Math.min(lo, cum);
       const d = new Date(t.closed_at || t.opened_at);
       pts.push({
         i,
@@ -121,8 +123,15 @@ export function EquityCurve() {
             }),
       });
     }
-    return { points: pts, net: cum, peak: hi };
+    return { points: pts, net: cum, peak: hi, low: lo };
   }, [data]);
+
+  // Fraction of the chart height where $0 sits, so the fill/stroke can switch
+  // green (above) → red (below) exactly at the zero line — a net-negative curve
+  // reads red instead of pooling cyan near the top.
+  const top = Math.max(peak, 0);
+  const bottom = Math.min(low, 0);
+  const zeroOffset = top - bottom > 0 ? top / (top - bottom) : 1;
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
@@ -168,9 +177,25 @@ export function EquityCurve() {
               margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
             >
               <defs>
+                {/* Fill: green above the zero line, red below it. */}
                 <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#00d4ff" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="#00d4ff" stopOpacity={0} />
+                  <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
+                  <stop
+                    offset={zeroOffset}
+                    stopColor="#10b981"
+                    stopOpacity={0.04}
+                  />
+                  <stop
+                    offset={zeroOffset}
+                    stopColor="#ef4444"
+                    stopOpacity={0.04}
+                  />
+                  <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
+                </linearGradient>
+                {/* Stroke: the line itself turns red while underwater. */}
+                <linearGradient id="equityStroke" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={zeroOffset} stopColor="#10b981" />
+                  <stop offset={zeroOffset} stopColor="#ef4444" />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -192,7 +217,8 @@ export function EquityCurve() {
               <Area
                 type="monotone"
                 dataKey="cum"
-                stroke="#00d4ff"
+                baseValue={0}
+                stroke="url(#equityStroke)"
                 strokeWidth={2}
                 fill="url(#equityFill)"
                 dot={<FillDot />}
