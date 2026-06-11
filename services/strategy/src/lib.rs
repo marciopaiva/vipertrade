@@ -4137,6 +4137,10 @@ struct ThesisHealthCfg {
     in_profit_pct: f64,
     required_components_in_profit: i32,
     required_components: i32,
+    // How the regime-flip exit fires: "any" (OR of consensus_side / bybit_regime
+    // flipped against us — the original behavior), "both" (require both), or
+    // "off" (never cut on regime flip; let SL/trailing decide).
+    opposite_side_exit: String,
 }
 
 impl StrategyConfig {
@@ -4157,6 +4161,16 @@ impl StrategyConfig {
                 cfg_get(&self.global, &["thesis_health", "in_profit_pct"]).and_then(Value::as_f64)
             })
             .unwrap_or(0.002);
+        let opposite_side_exit = self
+            .mode_cfg()
+            .and_then(|m| cfg_get(m, &["thesis_health", "opposite_side_exit"]))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                cfg_get(&self.global, &["thesis_health", "opposite_side_exit"])
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or("any")
+            .to_string();
         ThesisHealthCfg {
             long_invalidate: n("long_invalidate", -60),
             long_invalidate_confirmed: n("long_invalidate_confirmed", -50),
@@ -4174,6 +4188,7 @@ impl StrategyConfig {
             in_profit_pct,
             required_components_in_profit: n("required_components_in_profit", 3),
             required_components: n("required_components", 2),
+            opposite_side_exit,
         }
     }
 }
@@ -4190,8 +4205,17 @@ fn evaluate_thesis_invalidation(
     if open.side.eq_ignore_ascii_case("Long") {
         let profit_pct = current_profit_pct(&open.side, open.entry_price, signal.current_price);
         let in_profit = profit_pct > th.in_profit_pct;
-        let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bearish")
-            || signal.bybit_regime.eq_ignore_ascii_case("bearish");
+        let opposite_side = match th.opposite_side_exit.as_str() {
+            "off" => false,
+            "both" => {
+                signal.consensus_side.eq_ignore_ascii_case("bearish")
+                    && signal.bybit_regime.eq_ignore_ascii_case("bearish")
+            }
+            _ => {
+                signal.consensus_side.eq_ignore_ascii_case("bearish")
+                    || signal.bybit_regime.eq_ignore_ascii_case("bearish")
+            }
+        };
         let both_not_bullish = !signal.consensus_side.eq_ignore_ascii_case("bullish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bullish");
         let adverse_components = adverse_long_thesis_components(&breakdown);
@@ -4236,8 +4260,17 @@ fn evaluate_thesis_invalidation(
             health_score,
         }
     } else if open.side.eq_ignore_ascii_case("Short") {
-        let opposite_side = signal.consensus_side.eq_ignore_ascii_case("bullish")
-            || signal.bybit_regime.eq_ignore_ascii_case("bullish");
+        let opposite_side = match th.opposite_side_exit.as_str() {
+            "off" => false,
+            "both" => {
+                signal.consensus_side.eq_ignore_ascii_case("bullish")
+                    && signal.bybit_regime.eq_ignore_ascii_case("bullish")
+            }
+            _ => {
+                signal.consensus_side.eq_ignore_ascii_case("bullish")
+                    || signal.bybit_regime.eq_ignore_ascii_case("bullish")
+            }
+        };
         let both_not_bearish = !signal.consensus_side.eq_ignore_ascii_case("bearish")
             && !signal.bybit_regime.eq_ignore_ascii_case("bearish");
 
