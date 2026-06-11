@@ -51,9 +51,7 @@ impl LlmConfig {
                 .unwrap_or_else(|_| default_base.to_string()),
             model: std::env::var("AI_ANALYST_LLM_MODEL")
                 .unwrap_or_else(|_| default_model.to_string()),
-            api_key: std::env::var("AI_ANALYST_LLM_API_KEY")
-                .ok()
-                .or(default_key),
+            api_key: std::env::var("AI_ANALYST_LLM_API_KEY").ok().or(default_key),
             max_iters: std::env::var("AI_ANALYST_LLM_MAX_ITERS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -424,7 +422,10 @@ async fn dispatch_tool(
 
     match call.function.name.as_str() {
         "get_trade_diagnostics" => {
-            let hours = args.get("hours").and_then(Value::as_i64).unwrap_or(default_hours);
+            let hours = args
+                .get("hours")
+                .and_then(Value::as_i64)
+                .unwrap_or(default_hours);
             match fetch_close_reason_summary(state, hours).await {
                 Ok(rows) => json!({"hours": hours, "by_close_reason": rows}).to_string(),
                 Err(e) => json!({"error": format!("diagnostics query failed: {e}")}).to_string(),
@@ -432,16 +433,15 @@ async fn dispatch_tool(
         }
         "run_backtest_sweep" => {
             // run_sweep_core clamps the corpus limit and caps the variant count.
-            let req: SweepRequest = match serde_json::from_value(args) {
-                Ok(r) => r,
-                Err(e) => {
-                    return json!({
+            let req: SweepRequest =
+                match serde_json::from_value(args) {
+                    Ok(r) => r,
+                    Err(e) => return json!({
                         "error": format!("invalid arguments: {e}"),
                         "expected_schema": "{since?, limit?, variants:[{overrides:[{path,value}]}]}"
                     })
-                    .to_string()
-                }
-            };
+                    .to_string(),
+                };
             // Capture the FIRST sweep's window as the analysis window; the
             // proposal is later verified on this same corpus rather than on
             // whatever a subsequent exploratory sweep happened to use.
@@ -456,7 +456,11 @@ async fn dispatch_tool(
                     let mut v = compact_sweep(&resp);
                     // Nudge weak models: if every variant moved net PnL by ~0, the
                     // overrides did nothing — flag it so they don't repeat it.
-                    let all_zero = resp.result.variants.iter().all(|x| x.delta_net_pnl.abs() < 1e-9);
+                    let all_zero = resp
+                        .result
+                        .variants
+                        .iter()
+                        .all(|x| x.delta_net_pnl.abs() < 1e-9);
                     if !resp.result.variants.is_empty() && all_zero {
                         if let Value::Object(map) = &mut v {
                             map.insert("_hint".to_string(), json!(
@@ -479,10 +483,7 @@ async fn dispatch_tool(
             // ONLY if the engine confirms a positive measured delta. A fabricated
             // or no-op/worsening change is rejected with the real numbers so the
             // model must find a genuine improvement.
-            let overrides = args
-                .get("overrides")
-                .cloned()
-                .unwrap_or_else(|| json!([]));
+            let overrides = args.get("overrides").cloned().unwrap_or_else(|| json!([]));
             if !overrides.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
                 return json!({
                     "status": "rejected",
@@ -492,7 +493,8 @@ async fn dispatch_tool(
             }
 
             let (since, limit) = analysis_window.clone().unwrap_or((None, 5000));
-            let body = json!({"since": since, "limit": limit, "variants": [{"overrides": overrides}]});
+            let body =
+                json!({"since": since, "limit": limit, "variants": [{"overrides": overrides}]});
             let req: SweepRequest = match serde_json::from_value(body) {
                 Ok(r) => r,
                 Err(e) => {
