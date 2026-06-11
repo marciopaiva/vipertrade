@@ -10,6 +10,57 @@ import type { Trade } from '@/types/trading';
 type SideFilter = 'all' | 'long' | 'short';
 type StatusFilter = 'all' | 'closed' | 'open';
 
+// Module scope: these read the wall clock (impure), so they live outside the
+// component body — the react-hooks purity rule forbids Date.now() during render.
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const daysAgoISO = (days: number) =>
+  new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+
+/**
+ * Keep a trade if its timestamp (closed_at, else opened_at) falls within the
+ * inclusive [from, to] day range. Empty bound = open-ended. Client-side, on the
+ * loaded window (API caps at 200 trades; a server-side `since`/`until` param is
+ * the follow-up once history outgrows that).
+ */
+function inDateRange(t: Trade, from: string, to: string): boolean {
+  const ts = Date.parse(t.closed_at || t.opened_at);
+  if (Number.isNaN(ts)) return true;
+  if (from) {
+    const f = Date.parse(`${from}T00:00:00`);
+    if (!Number.isNaN(f) && ts < f) return false;
+  }
+  if (to) {
+    const e = Date.parse(`${to}T23:59:59.999`);
+    if (!Number.isNaN(e) && ts > e) return false;
+  }
+  return true;
+}
+
+function DateField({
+  label,
+  value,
+  onChange,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  max?: string;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="uppercase tracking-wide">{label}</span>
+      <input
+        type="date"
+        value={value}
+        max={max}
+        onChange={e => onChange(e.target.value)}
+        className="rounded-md border border-border bg-card px-2 py-1 text-foreground outline-none transition-colors [color-scheme:dark] focus:border-primary/50"
+      />
+    </label>
+  );
+}
+
 function Select({
   label,
   value,
@@ -50,6 +101,13 @@ export default function TradesPage() {
   const [side, setSide] = useState<SideFilter>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [reason, setReason] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const today = todayISO();
+  const setRange = (days: number) => {
+    setDateTo(today);
+    setDateFrom(days === 0 ? today : daysAgoISO(days));
+  };
 
   const symbols = useMemo(
     () => [...new Set(trades.map(t => t.symbol))].sort(),
@@ -63,9 +121,10 @@ export default function TradesPage() {
       trades.filter(t => {
         if (symbol !== 'all' && t.symbol !== symbol) return false;
         if (side !== 'all' && t.side.toLowerCase() !== side) return false;
+        if (!inDateRange(t, dateFrom, dateTo)) return false;
         return true;
       }),
-    [trades, symbol, side]
+    [trades, symbol, side, dateFrom, dateTo]
   );
 
   const tableRows = useMemo(
@@ -147,6 +206,41 @@ export default function TradesPage() {
             { value: 'open', label: 'Open' },
           ]}
         />
+        <DateField
+          label="From"
+          value={dateFrom}
+          onChange={setDateFrom}
+          max={dateTo || today}
+        />
+        <DateField label="To" value={dateTo} onChange={setDateTo} max={today} />
+        <div className="flex items-center gap-1">
+          {[
+            { label: 'Today', days: 0 },
+            { label: '7d', days: 7 },
+            { label: '30d', days: 30 },
+          ].map(p => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => setRange(p.days)}
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              {p.label}
+            </button>
+          ))}
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom('');
+                setDateTo('');
+              }}
+              className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
+            >
+              clear dates ✕
+            </button>
+          )}
+        </div>
         {reason && (
           <button
             type="button"
