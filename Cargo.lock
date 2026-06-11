@@ -3057,6 +3057,7 @@ dependencies = [
  "tupa-core",
  "tupa-engine",
  "viper-domain",
+ "viper-strategy",
  "warp",
 ]
 

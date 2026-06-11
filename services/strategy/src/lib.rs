@@ -312,7 +312,7 @@ pipeline! {
 }
 
 #[derive(Debug, Clone)]
-struct StrategyConfig {
+pub struct StrategyConfig {
     profile: String,
     trading_mode: String,
     global: Value,
@@ -625,7 +625,7 @@ impl StrategyConfig {
 }
 
 impl StrategyConfig {
-    fn from_files(
+    pub fn from_files(
         pairs_path: &str,
         profiles_path: &str,
         profile: &str,

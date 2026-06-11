@@ -14,6 +14,7 @@ use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
+mod agent;
 mod trade_diagnostics;
 
 #[derive(Clone)]
@@ -30,6 +31,43 @@ struct AppState {
 #[derive(Debug, Deserialize)]
 struct AnalysisQuery {
     hours: Option<i64>,
+}
+
+/// One config override in a sweep variant: a dotted config path and its value
+/// (e.g. `{"path": "thesis_health.long_invalidate", "value": "-200"}`).
+#[derive(Debug, Deserialize)]
+struct SweepOverride {
+    path: String,
+    value: String,
+}
+
+/// One config variant to backtest: a set of overrides applied to the baseline.
+#[derive(Debug, Deserialize)]
+struct SweepVariantRequest {
+    #[serde(default)]
+    overrides: Vec<SweepOverride>,
+}
+
+/// `POST /sweep` body: replay a corpus window through the baseline config plus
+/// one variant per `variants` entry, returning a deterministic comparison.
+#[derive(Debug, Deserialize)]
+struct SweepRequest {
+    /// Optional RFC3339 timestamp; restricts the corpus to rows at/after it.
+    since: Option<String>,
+    /// Max audit rows to replay (default 5000).
+    limit: Option<i64>,
+    /// One config variant per entry; an empty list runs the baseline only.
+    #[serde(default)]
+    variants: Vec<SweepVariantRequest>,
+}
+
+/// `POST /sweep` response: the deterministic backtest comparison plus the size
+/// of the replayed corpus.
+#[derive(Debug, Serialize)]
+struct SweepResponse {
+    corpus_ticks: usize,
+    #[serde(flatten)]
+    result: viper_strategy::backtest::SweepResult,
 }
 
 #[derive(Debug, Serialize)]
@@ -347,8 +385,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .and_then(handle_recent_analysis);
 
+    let sweep = warp::path!("sweep")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(handle_sweep);
+
+    let investigate = warp::path!("investigate")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(agent::handle_investigate);
+
     let routes = health
         .or(analyze_recent)
+        .or(sweep)
+        .or(investigate)
         .recover(handle_rejection)
         .with(warp::cors().allow_any_origin());
 
@@ -396,6 +448,115 @@ async fn handle_recent_analysis(
                 warp::reply::json(&ApiError {
                     error: "analysis_failed",
                     message: err.to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+/// How a sweep failure maps to an HTTP status: bad input (400) vs an internal
+/// failure (500). Shared by the `/sweep` endpoint and the agent's
+/// `run_backtest_sweep` tool.
+pub(crate) enum SweepCoreError {
+    BadRequest(String),
+    Internal(String),
+}
+
+/// Safety bounds on a sweep request (caller- and LLM-controlled): the corpus
+/// `limit` is clamped to this range, and at most this many variants run per
+/// call, so one request can't trigger an unbounded backtest.
+const MAX_SWEEP_LIMIT: i64 = 60_000;
+const MAX_SWEEP_VARIANTS: usize = 8;
+
+/// Core of `/sweep`, factored out so both the HTTP endpoint and the agent loop
+/// (agent.rs `run_backtest_sweep` tool) drive the deterministic backtest the
+/// same way: load the baked config, load the corpus window, run baseline +
+/// variants.
+pub(crate) async fn run_sweep_core(
+    state: &AppState,
+    req: &SweepRequest,
+) -> Result<SweepResponse, SweepCoreError> {
+    use viper_strategy::backtest;
+
+    // The same config the strategy/backtest role uses (baked into the image).
+    let strategy_config =
+        env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
+    let profile_config =
+        env::var("PROFILE_CONFIG").unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
+    let trading_profile = env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
+    let trading_mode = env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+
+    let cfg = viper_strategy::StrategyConfig::from_files(
+        &strategy_config,
+        &profile_config,
+        &trading_profile,
+        &trading_mode,
+    )
+    .map_err(|e| SweepCoreError::Internal(format!("config load failed: {e}")))?;
+
+    let since = match req.since.as_deref() {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map_err(|e| SweepCoreError::BadRequest(format!("'since' must be RFC3339: {e}")))?
+                .with_timezone(&chrono::Utc),
+        ),
+        None => None,
+    };
+
+    // Clamp the corpus size: a negative limit errors in Postgres and a huge one
+    // would load the whole audit table into memory.
+    let limit = req.limit.unwrap_or(5000).clamp(1, MAX_SWEEP_LIMIT);
+    let ticks = backtest::load_corpus(&state.db_pool, since, limit)
+        .await
+        .map_err(|e| SweepCoreError::Internal(format!("corpus load failed: {e}")))?;
+
+    // Cap the number of variants: each is a full simulate over the corpus, so an
+    // unbounded list (the variants are caller-/LLM-controlled) is a cost risk.
+    let variant_overrides: Vec<Vec<(String, String)>> = req
+        .variants
+        .iter()
+        .take(MAX_SWEEP_VARIANTS)
+        .map(|variant| {
+            variant
+                .overrides
+                .iter()
+                .map(|o| (o.path.clone(), o.value.clone()))
+                .collect()
+        })
+        .collect();
+
+    let corpus_ticks = ticks.len();
+    let result = backtest::run_sweep(&ticks, &cfg, &variant_overrides);
+    Ok(SweepResponse {
+        corpus_ticks,
+        result,
+    })
+}
+
+/// `POST /sweep` — run a deterministic backtest of the baseline config plus
+/// requested variants over a corpus window. Gives the analyst the same
+/// counterfactual "what if I change X?" power used for manual tuning: the real
+/// decision + exit logic replayed on the recorded `tupa_audit_logs` corpus.
+async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+    match run_sweep_core(&state, &req).await {
+        Ok(resp) => Ok(warp::reply::with_status(
+            warp::reply::json(&resp),
+            StatusCode::OK,
+        )),
+        Err(SweepCoreError::BadRequest(message)) => Ok(warp::reply::with_status(
+            warp::reply::json(&ApiError {
+                error: "invalid_request",
+                message,
+            }),
+            StatusCode::BAD_REQUEST,
+        )),
+        Err(SweepCoreError::Internal(message)) => {
+            error!("sweep failed: {message}");
+            Ok(warp::reply::with_status(
+                warp::reply::json(&ApiError {
+                    error: "sweep_failed",
+                    message,
                 }),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))
