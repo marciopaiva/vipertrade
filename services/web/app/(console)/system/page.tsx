@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { ConfirmAction } from '@/components/system/ConfirmAction';
+import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { cn } from '@/lib/utils';
 
 interface ControlActor {
@@ -227,7 +228,7 @@ export default function SystemPage() {
         </pre>
       </section>
 
-      {/* service health */}
+      {/* service health — the architecture-flow pipeline (moved from /console) */}
       <section className="rounded-xl border border-border bg-card p-5">
         <h2 className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           Service health
@@ -237,36 +238,11 @@ export default function SystemPage() {
             No service health reported.
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {services.map(s => (
-              <div
-                key={s.name}
-                className={cn(
-                  'flex items-center justify-between rounded-lg border px-3 py-2',
-                  s.ok
-                    ? 'border-border bg-secondary/30'
-                    : 'border-destructive/40 bg-destructive/10'
-                )}
-              >
-                <span className="truncate text-sm capitalize text-foreground">
-                  {s.name}
-                </span>
-                <span className="flex items-center gap-2">
-                  {s.latency_ms > 0 && (
-                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                      {s.latency_ms}ms
-                    </span>
-                  )}
-                  <span
-                    className={cn(
-                      'h-2 w-2 rounded-full',
-                      s.ok ? 'bg-accent' : 'bg-destructive'
-                    )}
-                  />
-                </span>
-              </div>
-            ))}
-          </div>
+          <ServiceFlowDiagram
+            services={services}
+            executionMode={mode as 'paper' | 'testnet' | 'mainnet'}
+            executorState={executorOn ? 'running' : 'down'}
+          />
         )}
       </section>
     </div>
