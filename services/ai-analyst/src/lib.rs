@@ -32,6 +32,43 @@ struct AnalysisQuery {
     hours: Option<i64>,
 }
 
+/// One config override in a sweep variant: a dotted config path and its value
+/// (e.g. `{"path": "thesis_health.long_invalidate", "value": "-200"}`).
+#[derive(Debug, Deserialize)]
+struct SweepOverride {
+    path: String,
+    value: String,
+}
+
+/// One config variant to backtest: a set of overrides applied to the baseline.
+#[derive(Debug, Deserialize)]
+struct SweepVariantRequest {
+    #[serde(default)]
+    overrides: Vec<SweepOverride>,
+}
+
+/// `POST /sweep` body: replay a corpus window through the baseline config plus
+/// one variant per `variants` entry, returning a deterministic comparison.
+#[derive(Debug, Deserialize)]
+struct SweepRequest {
+    /// Optional RFC3339 timestamp; restricts the corpus to rows at/after it.
+    since: Option<String>,
+    /// Max audit rows to replay (default 5000).
+    limit: Option<i64>,
+    /// One config variant per entry; an empty list runs the baseline only.
+    #[serde(default)]
+    variants: Vec<SweepVariantRequest>,
+}
+
+/// `POST /sweep` response: the deterministic backtest comparison plus the size
+/// of the replayed corpus.
+#[derive(Debug, Serialize)]
+struct SweepResponse {
+    corpus_ticks: usize,
+    #[serde(flatten)]
+    result: viper_strategy::backtest::SweepResult,
+}
+
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -347,8 +384,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .and_then(handle_recent_analysis);
 
+    let sweep = warp::path!("sweep")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(handle_sweep);
+
     let routes = health
         .or(analyze_recent)
+        .or(sweep)
         .recover(handle_rejection)
         .with(warp::cors().allow_any_origin());
 
@@ -401,6 +445,94 @@ async fn handle_recent_analysis(
             ))
         }
     }
+}
+
+/// `POST /sweep` — run a deterministic backtest of the baseline config plus
+/// requested variants over a corpus window. Gives the analyst the same
+/// counterfactual "what if I change X?" power used for manual tuning: the real
+/// decision + exit logic replayed on the recorded `tupa_audit_logs` corpus.
+async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+    use viper_strategy::backtest;
+
+    // The same config the strategy/backtest role uses (baked into the image).
+    let strategy_config =
+        env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
+    let profile_config =
+        env::var("PROFILE_CONFIG").unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
+    let trading_profile = env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
+    let trading_mode = env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+
+    let cfg = match viper_strategy::StrategyConfig::from_files(
+        &strategy_config,
+        &profile_config,
+        &trading_profile,
+        &trading_mode,
+    ) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            error!("sweep config load failed: {err}");
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&ApiError {
+                    error: "config_load_failed",
+                    message: err.to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let since = match req.since.as_deref() {
+        Some(raw) => match chrono::DateTime::parse_from_rfc3339(raw) {
+            Ok(ts) => Some(ts.with_timezone(&chrono::Utc)),
+            Err(err) => {
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&ApiError {
+                        error: "invalid_since",
+                        message: format!("'since' must be RFC3339: {err}"),
+                    }),
+                    StatusCode::BAD_REQUEST,
+                ));
+            }
+        },
+        None => None,
+    };
+
+    let ticks =
+        match backtest::load_corpus(&state.db_pool, since, req.limit.unwrap_or(5000)).await {
+            Ok(ticks) => ticks,
+            Err(err) => {
+                error!("sweep corpus load failed: {err}");
+                return Ok(warp::reply::with_status(
+                    warp::reply::json(&ApiError {
+                        error: "corpus_load_failed",
+                        message: err.to_string(),
+                    }),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        };
+
+    let variant_overrides: Vec<Vec<(String, String)>> = req
+        .variants
+        .iter()
+        .map(|variant| {
+            variant
+                .overrides
+                .iter()
+                .map(|o| (o.path.clone(), o.value.clone()))
+                .collect()
+        })
+        .collect();
+
+    let corpus_ticks = ticks.len();
+    let result = backtest::run_sweep(&ticks, &cfg, &variant_overrides);
+    Ok(warp::reply::with_status(
+        warp::reply::json(&SweepResponse {
+            corpus_ticks,
+            result,
+        }),
+        StatusCode::OK,
+    ))
 }
 
 async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {

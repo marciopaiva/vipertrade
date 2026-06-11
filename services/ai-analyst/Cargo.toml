@@ -18,3 +18,4 @@ tupa-core = { workspace = true }
 tupa-engine = { workspace = true }
 warp = "0.3"
 viper-domain = { workspace = true }
+viper-strategy = { path = "../strategy" }
