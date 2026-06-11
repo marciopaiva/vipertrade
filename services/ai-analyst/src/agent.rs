@@ -31,16 +31,20 @@ struct LlmConfig {
 
 impl LlmConfig {
     fn from_env() -> Self {
+        // Groq (free hosted tier) is the default: it emits clean structured tool
+        // calls and reasons well enough to converge. Set AI_ANALYST_LLM_PROVIDER=
+        // ollama to use a local model instead.
         let provider =
-            std::env::var("AI_ANALYST_LLM_PROVIDER").unwrap_or_else(|_| "ollama".to_string());
+            std::env::var("AI_ANALYST_LLM_PROVIDER").unwrap_or_else(|_| "groq".to_string());
         let (default_base, default_model, default_key) = match provider.as_str() {
-            "groq" => (
+            // Ollama's OpenAI-compatible endpoint; qwen2.5 supports tool calls.
+            "ollama" => ("http://localhost:11434/v1", "qwen2.5-coder:7b", None),
+            // Groq hosted free tier (default).
+            _ => (
                 "https://api.groq.com/openai/v1",
                 "llama-3.3-70b-versatile",
                 std::env::var("GROQ_API_KEY").ok(),
             ),
-            // Ollama's OpenAI-compatible endpoint; qwen2.5 supports tool calls.
-            _ => ("http://localhost:11434/v1", "qwen2.5-coder:7b", None),
         };
         LlmConfig {
             base_url: std::env::var("AI_ANALYST_LLM_BASE_URL")
