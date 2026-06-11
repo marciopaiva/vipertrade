@@ -10,7 +10,7 @@
 //! only orchestrates tools and narrates, which keeps a small local model
 //! viable. Endpoint: `POST /investigate`.
 
-use crate::{run_sweep_core, ApiError, AppState, SweepCoreError, SweepRequest};
+use crate::{run_sweep_core, ApiError, AppState, SweepCoreError, SweepRequest, SweepResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -446,7 +446,9 @@ async fn dispatch_tool(
             *sweeps_run += 1;
             match run_sweep_core(state, &req).await {
                 Ok(resp) => {
-                    let mut v = serde_json::to_value(&resp).unwrap_or(Value::Null);
+                    // Compact result keeps the agent's context (and Groq free-tier
+                    // token usage) small across many sweeps.
+                    let mut v = compact_sweep(&resp);
                     // Nudge weak models: if every variant moved net PnL by ~0, the
                     // overrides did nothing — flag it so they don't repeat it.
                     let all_zero = resp.result.variants.iter().all(|x| x.delta_net_pnl.abs() < 1e-9);
@@ -535,6 +537,50 @@ async fn dispatch_tool(
         }
         other => json!({"error": format!("unknown tool: {other}")}).to_string(),
     }
+}
+
+/// Win rate as a percentage rounded to 0.1 (typed to pin the float arithmetic).
+fn win_pct(wins: usize, closed: usize) -> f64 {
+    if closed == 0 {
+        return 0.0;
+    }
+    let pct: f64 = wins as f64 / closed as f64 * 100.0;
+    (pct * 10.0).round() / 10.0
+}
+
+/// A token-frugal view of a backtest report: net PnL, win%, closed count, and
+/// the close_reason breakdown.
+fn report_brief(r: &viper_strategy::backtest::BacktestReport) -> Value {
+    json!({
+        "net_pnl": r.net_pnl,
+        "win_pct": win_pct(r.wins, r.closed),
+        "closed": r.closed,
+        "by_reason": r.by_reason,
+    })
+}
+
+/// Compact a SweepResponse for the model: full baseline breakdown, but per
+/// variant only the label, net PnL, delta and win% (drop the verbose per-variant
+/// by_reason) so many sweeps don't blow the context / free-tier token budget.
+fn compact_sweep(resp: &SweepResponse) -> Value {
+    let variants: Vec<Value> = resp
+        .result
+        .variants
+        .iter()
+        .map(|v| {
+            json!({
+                "label": v.label,
+                "net_pnl": v.report.net_pnl,
+                "delta_net_pnl": v.delta_net_pnl,
+                "win_pct": win_pct(v.report.wins, v.report.closed),
+            })
+        })
+        .collect();
+    json!({
+        "corpus_ticks": resp.corpus_ticks,
+        "baseline": report_brief(&resp.result.baseline),
+        "variants": variants,
+    })
 }
 
 /// Compact close_reason attribution — the table operators read first.
@@ -629,6 +675,9 @@ fn extract_tool_call_from_content(content: &str) -> Option<ToolCall> {
 }
 
 /// POST one turn to the OpenAI-compatible endpoint and parse the response.
+/// Retries on 429 (rate limit) honoring the server's retry-after — the Groq free
+/// tier caps tokens-per-minute, so a busy agent run transiently hits 429 and
+/// just needs to wait a few seconds rather than abort the whole investigation.
 async fn call_llm(
     state: &AppState,
     cfg: &LlmConfig,
@@ -636,36 +685,55 @@ async fn call_llm(
     tools: &[ToolDef],
 ) -> Result<ChatResponse, String> {
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let body = ChatRequest {
-        model: &cfg.model,
-        messages,
-        tools,
-        tool_choice: "auto",
-        temperature: cfg.temperature,
-        stream: false,
-    };
+    let mut attempt = 0u32;
 
-    let mut builder = state
-        .http_client
-        .post(&url)
-        .timeout(Duration::from_secs(240))
-        .json(&body);
-    if let Some(key) = &cfg.api_key {
-        builder = builder.bearer_auth(key);
-    }
+    loop {
+        attempt += 1;
+        let body = ChatRequest {
+            model: &cfg.model,
+            messages,
+            tools,
+            tool_choice: "auto",
+            temperature: cfg.temperature,
+            stream: false,
+        };
+        let mut builder = state
+            .http_client
+            .post(&url)
+            .timeout(Duration::from_secs(240))
+            .json(&body);
+        if let Some(key) = &cfg.api_key {
+            builder = builder.bearer_auth(key);
+        }
 
-    let resp = builder
-        .send()
-        .await
-        .map_err(|e| format!("request to {url} failed: {e}"))?;
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("reading response body failed: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("LLM returned {status}: {text}"));
+        let resp = builder
+            .send()
+            .await
+            .map_err(|e| format!("request to {url} failed: {e}"))?;
+        let status = resp.status();
+
+        if status.as_u16() == 429 && attempt <= 5 {
+            // Honor `retry-after` (seconds, may be fractional); default to 8s.
+            let wait = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .unwrap_or(8.0)
+                .clamp(1.0, 30.0);
+            warn!("LLM 429 rate-limited; retry {attempt}/5 in {wait:.1}s");
+            tokio::time::sleep(Duration::from_secs_f64(wait + 0.5)).await;
+            continue;
+        }
+
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| format!("reading response body failed: {e}"))?;
+        if !status.is_success() {
+            return Err(format!("LLM returned {status}: {text}"));
+        }
+        return serde_json::from_str::<ChatResponse>(&text)
+            .map_err(|e| format!("parsing LLM response failed: {e} (body: {text})"));
     }
-    serde_json::from_str::<ChatResponse>(&text)
-        .map_err(|e| format!("parsing LLM response failed: {e} (body: {text})"))
 }
