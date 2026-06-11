@@ -172,7 +172,9 @@ reason bleeds money, which is the edge).
 3. Test it with run_backtest_sweep: a baseline plus one variant per change. The \
 backtest replays the real recorded corpus through the real decision+exit logic, \
 so the comparison is deterministic and trustworthy. Read each variant's \
-delta_net_pnl.
+delta_net_pnl. Do NOT pass `since` or `limit` — the defaults already replay the \
+most recent corpus under the current config; passing an old `since` would load \
+an empty pre-config window (baseline with 0 closed trades).
 4. Iterate: if the delta is small or negative, try a different lever or value.
 5. When you have a change with a clear positive delta_net_pnl backed by a sweep, \
 call propose_config_change with the exact overrides. NOTE: the engine RE-RUNS \
@@ -211,14 +213,79 @@ pub async fn handle_investigate(
     req: InvestigateRequest,
     state: Arc<AppState>,
 ) -> Result<impl Reply, Rejection> {
-    let cfg = LlmConfig::from_env();
     let default_hours = req.hours.filter(|h| *h > 0).unwrap_or(168);
-    let question = req.question.unwrap_or_else(|| {
-        "Find the single highest-impact config change to improve net PnL. Use the \
-         diagnostics, then prove it with a backtest sweep."
-            .to_string()
-    });
+    let question = req.question.unwrap_or_else(|| DEFAULT_QUESTION.to_string());
 
+    let outcome = run_investigation(&state, question, default_hours).await;
+    if let Some(err) = outcome.error {
+        error!("LLM call failed: {err}");
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&ApiError {
+                error: "llm_call_failed",
+                message: err,
+            }),
+            StatusCode::BAD_GATEWAY,
+        ));
+    }
+    Ok(warp::reply::with_status(
+        warp::reply::json(&InvestigateResponse {
+            provider_model: outcome.provider_model,
+            iterations: outcome.iterations,
+            sweeps_run: outcome.sweeps_run,
+            recommendation: outcome.recommendation,
+            final_message: outcome.final_message,
+            transcript: outcome.transcript,
+        }),
+        StatusCode::OK,
+    ))
+}
+
+const DEFAULT_QUESTION: &str =
+    "Find the single highest-impact config change to improve net PnL. Use the \
+     diagnostics, then prove it with a backtest sweep.";
+
+/// Structured result of one agent investigation. Carries both the HTTP-facing
+/// transcript and the condensed evidence (diagnostics + sweeps + verified
+/// recommendation) used to persist a periodic tuning review.
+pub(crate) struct InvestigationOutcome {
+    pub provider_model: String,
+    pub iterations: usize,
+    pub sweeps_run: usize,
+    pub recommendation: Option<Value>,
+    pub final_message: Option<String>,
+    pub diagnostics: Option<Value>,
+    pub sweeps: Vec<Value>,
+    pub transcript: Vec<ChatMessage>,
+    pub error: Option<String>,
+}
+
+impl InvestigationOutcome {
+    /// Condensed JSON persisted as a tuning review (drops the raw transcript).
+    pub(crate) fn review_json(&self) -> Value {
+        json!({
+            "provider_model": self.provider_model,
+            "verdict": if self.recommendation.is_some() {
+                "change_recommended"
+            } else {
+                "no_improvement"
+            },
+            "recommendation": self.recommendation,
+            "final_message": self.final_message,
+            "diagnostics": self.diagnostics,
+            "sweeps": self.sweeps,
+            "sweeps_run": self.sweeps_run,
+        })
+    }
+}
+
+/// Run one full agent investigation loop and return the structured outcome.
+/// Shared by the `/investigate` endpoint and the periodic tuning-review task.
+pub(crate) async fn run_investigation(
+    state: &AppState,
+    question: String,
+    default_hours: i64,
+) -> InvestigationOutcome {
+    let cfg = LlmConfig::from_env();
     let tools = tool_defs();
     let mut messages = vec![
         ChatMessage {
@@ -241,25 +308,19 @@ pub async fn handle_investigate(
     let mut final_message: Option<String> = None;
     let mut sweeps_run = 0usize;
     let mut iterations = 0usize;
-    // Corpus window of the agent's FIRST sweep — the window it reasons over.
-    // propose_config_change grounds its verification on this same window so the
-    // verdict matches the data behind the proposal, not whatever a later
-    // exploratory sweep happened to use.
     let mut analysis_window: Option<(Option<String>, i64)> = None;
+    // Evidence captured for the stored review.
+    let mut diagnostics: Option<Value> = None;
+    let mut sweeps: Vec<Value> = Vec::new();
+    let mut error: Option<String> = None;
 
     for _ in 0..cfg.max_iters {
         iterations += 1;
-        let resp = match call_llm(&state, &cfg, &messages, &tools).await {
+        let resp = match call_llm(state, &cfg, &messages, &tools).await {
             Ok(r) => r,
             Err(err) => {
-                error!("LLM call failed: {err}");
-                return Ok(warp::reply::with_status(
-                    warp::reply::json(&ApiError {
-                        error: "llm_call_failed",
-                        message: err,
-                    }),
-                    StatusCode::BAD_GATEWAY,
-                ));
+                error = Some(err);
+                break;
             }
         };
 
@@ -270,8 +331,8 @@ pub async fn handle_investigate(
         let msg = choice.message;
 
         // Prefer structured tool_calls; fall back to parsing a tool call emitted
-        // as plain content (some free local models — e.g. qwen2.5-coder — don't
-        // fill the structured field and write the call as text instead).
+        // as plain content (some free local models don't fill the structured
+        // field and write the call as text instead).
         let calls: Option<Vec<ToolCall>> = msg
             .tool_calls
             .clone()
@@ -283,7 +344,6 @@ pub async fn handle_investigate(
                     .map(|tc| vec![tc])
             });
 
-        // Record the assistant turn (with any tool_calls) into history.
         messages.push(ChatMessage {
             role: "assistant".to_string(),
             content: msg.content.clone(),
@@ -296,7 +356,7 @@ pub async fn handle_investigate(
             Some(calls) if !calls.is_empty() => {
                 for call in calls {
                     let result = dispatch_tool(
-                        &state,
+                        state,
                         &call,
                         default_hours,
                         &mut recommendation,
@@ -304,6 +364,20 @@ pub async fn handle_investigate(
                         &mut analysis_window,
                     )
                     .await;
+                    // Capture evidence for the review.
+                    match call.function.name.as_str() {
+                        "get_trade_diagnostics" => {
+                            if let Ok(v) = serde_json::from_str::<Value>(&result) {
+                                diagnostics = Some(v);
+                            }
+                        }
+                        "run_backtest_sweep" => {
+                            if let Ok(v) = serde_json::from_str::<Value>(&result) {
+                                sweeps.push(v);
+                            }
+                        }
+                        _ => {}
+                    }
                     messages.push(ChatMessage {
                         role: "tool".to_string(),
                         content: Some(result),
@@ -312,12 +386,10 @@ pub async fn handle_investigate(
                         name: Some(call.function.name.clone()),
                     });
                 }
-                // A config proposal is terminal.
                 if recommendation.is_some() {
                     break;
                 }
             }
-            // No tool calls => the model gave a final answer.
             _ => {
                 final_message = msg.content;
                 break;
@@ -325,19 +397,103 @@ pub async fn handle_investigate(
         }
     }
 
-    // Drop the system prompt from the returned transcript (keep it lean).
-    let transcript: Vec<ChatMessage> = messages.into_iter().skip(1).collect();
-    Ok(warp::reply::with_status(
-        warp::reply::json(&InvestigateResponse {
-            provider_model: cfg.provider_model(),
-            iterations,
-            sweeps_run,
-            recommendation,
-            final_message,
-            transcript,
-        }),
-        StatusCode::OK,
-    ))
+    InvestigationOutcome {
+        provider_model: cfg.provider_model(),
+        iterations,
+        sweeps_run,
+        recommendation,
+        final_message,
+        diagnostics,
+        sweeps,
+        // Drop the system prompt from the transcript (keep it lean).
+        transcript: messages.into_iter().skip(1).collect(),
+        error,
+    }
+}
+
+/// Background task: every N newly-closed trades, run the agent and persist a
+/// tuning review (evidence + backtest + verified recommendation) to
+/// `tuning_reviews`, which the /analysis feed reads via the api. Spawned once
+/// from `run()`. Seeds an immediate review on first boot (no prior reviews).
+pub(crate) async fn tuning_review_loop(state: Arc<AppState>) {
+    let n: i64 = std::env::var("AI_ANALYST_REVIEW_EVERY_N_TRADES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(10);
+    let poll_secs: u64 = std::env::var("AI_ANALYST_REVIEW_POLL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v >= 30)
+        .unwrap_or(300);
+
+    let cfg = LlmConfig::from_env();
+    if cfg.api_key.is_none() && cfg.base_url.contains("groq") {
+        warn!("tuning review loop disabled: provider=groq but no GROQ_API_KEY set");
+        return;
+    }
+    info!("tuning review loop: every {n} closed trades (poll {poll_secs}s)");
+
+    // Resume from the last stored review so a redeploy doesn't re-fire early.
+    let mut last: i64 = sqlx::query_scalar::<_, i32>(
+        "SELECT trade_count FROM tuning_reviews ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_optional(&state.db_pool)
+    .await
+    .ok()
+    .flatten()
+    .map(i64::from)
+    .unwrap_or(0);
+
+    let mut interval = tokio::time::interval(Duration::from_secs(poll_secs));
+    loop {
+        interval.tick().await;
+        let count = match sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM trades WHERE status = 'closed'",
+        )
+        .fetch_one(&state.db_pool)
+        .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("tuning review: trade-count query failed: {e}");
+                continue;
+            }
+        };
+
+        if count < last + n {
+            continue;
+        }
+
+        info!("tuning review triggered at {count} closed trades");
+        let outcome = run_investigation(&state, DEFAULT_QUESTION.to_string(), 168).await;
+        if let Some(err) = &outcome.error {
+            warn!("tuning review LLM call failed (will retry): {err}");
+            continue; // don't advance `last` — retry next tick
+        }
+
+        let review_str = outcome.review_json().to_string();
+        if let Err(e) =
+            sqlx::query("INSERT INTO tuning_reviews (trade_count, review) VALUES ($1, $2::jsonb)")
+                .bind(count as i32)
+                .bind(review_str)
+                .execute(&state.db_pool)
+                .await
+        {
+            warn!("tuning review insert failed (will retry): {e}");
+            continue;
+        }
+
+        info!(
+            "tuning review stored at {count} trades (verdict {})",
+            if outcome.recommendation.is_some() {
+                "change_recommended"
+            } else {
+                "no_improvement"
+            }
+        );
+        last = count;
+    }
 }
 
 // ── Tool definitions + dispatch ─────────────────────────────────────────────
@@ -372,7 +528,7 @@ fn tool_defs() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {
                         "since": {"type": "string", "description": "optional RFC3339; restrict corpus to rows at/after this"},
-                        "limit": {"type": "integer", "description": "max audit rows to replay (default 5000)"},
+                        "limit": {"type": "integer", "description": "max audit rows to replay (default 20000)"},
                         "variants": {
                             "type": "array",
                             "description": "one config variant per entry",
@@ -446,7 +602,7 @@ async fn dispatch_tool(
             // proposal is later verified on this same corpus rather than on
             // whatever a subsequent exploratory sweep happened to use.
             if analysis_window.is_none() {
-                *analysis_window = Some((req.since.clone(), req.limit.unwrap_or(5000)));
+                *analysis_window = Some((req.since.clone(), req.limit.unwrap_or(20000)));
             }
             *sweeps_run += 1;
             match run_sweep_core(state, &req).await {
@@ -492,7 +648,7 @@ async fn dispatch_tool(
                 .to_string();
             }
 
-            let (since, limit) = analysis_window.clone().unwrap_or((None, 5000));
+            let (since, limit) = analysis_window.clone().unwrap_or((None, 20000));
             let body =
                 json!({"since": since, "limit": limit, "variants": [{"overrides": overrides}]});
             let req: SweepRequest = match serde_json::from_value(body) {

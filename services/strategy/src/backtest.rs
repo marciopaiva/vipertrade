@@ -198,12 +198,17 @@ pub async fn load_corpus(
         .fetch_all(pool)
         .await?
     } else {
-        sqlx::query_as(
-            "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at ASC LIMIT $1",
+        // No window given: take the MOST RECENT `limit` rows (DESC), then restore
+        // chronological order for replay. (ASC + LIMIT would grab the OLDEST rows
+        // — the pre-ADX era with no entries — making every sweep empty.)
+        let mut rows: Vec<(DateTime<Utc>, String)> = sqlx::query_as(
+            "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at DESC LIMIT $1",
         )
         .bind(limit)
         .fetch_all(pool)
-        .await?
+        .await?;
+        rows.reverse();
+        rows
     };
     Ok(rows
         .into_iter()

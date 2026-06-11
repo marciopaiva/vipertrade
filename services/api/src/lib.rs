@@ -876,6 +876,49 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
     }
 }
 
+/// `GET /api/v1/tuning-reviews?limit=N` — the periodic AI tuning reviews written
+/// by ai-analyst (evidence + backtest sweeps + verified recommendation), newest
+/// first. The `review` jsonb is read as text and re-parsed so it nests as JSON.
+async fn tuning_reviews_handler(query: TradesQuery, state: Arc<AppState>) -> impl Reply {
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+    let limit = clamp_limit(query.limit, 20);
+    let rows = sqlx::query_as::<_, (DateTime<Utc>, i32, String)>(
+        "SELECT created_at, trade_count, review::text \
+         FROM tuning_reviews ORDER BY created_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let items: Vec<Value> = rows
+                .into_iter()
+                .map(|(created_at, trade_count, review_text)| {
+                    json!({
+                        "created_at": created_at,
+                        "trade_count": trade_count,
+                        "review": serde_json::from_str::<Value>(&review_text)
+                            .unwrap_or(Value::Null),
+                    })
+                })
+                .collect();
+            json_ok(&json!({ "items": items }))
+        }
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "query_failed",
+            e.to_string(),
+        ),
+    }
+}
+
 async fn daily_trades_summary_handler(state: Arc<AppState>) -> impl Reply {
     let window_end_utc = Utc::now();
     let window_start_utc = start_of_day_utc(window_end_utc);
@@ -2336,6 +2379,14 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(daily_trades_summary_handler);
 
+    let tuning_reviews = api_v1
+        .and(warp::path("tuning-reviews"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::query::<TradesQuery>())
+        .and(with_state(state.clone()))
+        .then(tuning_reviews_handler);
+
     let decisions = api_v1
         .and(warp::path("decisions"))
         .and(warp::path::end())
@@ -2430,6 +2481,7 @@ pub async fn run() {
         .or(positions)
         .or(trades)
         .or(daily_trades_summary)
+        .or(tuning_reviews)
         .or(decisions)
         .or(events)
         .or(performance)
