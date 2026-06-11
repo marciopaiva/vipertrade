@@ -96,6 +96,13 @@ global:
         short_degrading_hard_unaligned: 200
         short_degrading_soft: 200
         short_degrading_soft_unaligned: 200
+        # Regime-flip exit: require BOTH consensus_side AND bybit_regime to flip
+        # against the position before cutting (the old "any"/OR cut on a single
+        # noisy bybit_regime blip). Backtest (ADX-era corpus, 3 windows): net
+        # Δ +0.11..+0.19, win rate up in all, stop_loss unchanged — fewer false
+        # cuts migrate to trailing without losing the protective value. "off"
+        # was worse (losers ride to stop_loss: 7 -> 16). evaluate_thesis_invalidation.
+        opposite_side_exit: both
       entry_filters:
         # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
         thesis_invalidation_confirmation_ticks: 4
