@@ -2,10 +2,9 @@
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
-import { PositionTable } from '@/components/dashboard/PositionTable';
+import { PositionGauge } from '@/components/console/PositionGauge';
 import { KpiStrip } from '@/components/console/KpiStrip';
-import { RecentFills } from '@/components/console/RecentFills';
-import { StrategyPulse } from '@/components/console/StrategyPulse';
+import { EquityCurve } from '@/components/analysis/EquityCurve';
 
 interface PositionItem {
   trade_id: string;
@@ -60,13 +59,9 @@ export default function ConsolePage() {
     '/api/dashboard',
     { refreshInterval: 5000, enabled: true }
   );
-  // Live decisions power the "guards holding N setups" empty state — the same
-  // %B gate the /strategy screen surfaces.
-  const {
-    decisions,
-    live: decisionsLive,
-    loading: decisionsLoading,
-  } = useDecisions();
+  // Live decisions power the PositionTable's "guards holding N setups" empty
+  // state — the same %B gate the /strategy screen surfaces.
+  const { decisions } = useDecisions();
 
   if (loading && !dashboardData) {
     return (
@@ -105,22 +100,15 @@ export default function ConsolePage() {
         trades={closedTrades}
       />
 
-      {/* Open positions + Strategy pulse, side by side (proposal §6.1). */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PositionTable
-          positions={openPositions}
-          guardedSetups={guardedSetups}
-          marketSignals={marketSignals}
-        />
-        <StrategyPulse
-          decisions={decisions}
-          live={decisionsLive}
-          loading={decisionsLoading}
-        />
-      </div>
+      {/* Equity curve — cumulative realized PnL, right under the KPI strip. */}
+      <EquityCurve />
 
-      {/* Recent fills — live feed (full ledger lives on /trades). */}
-      <RecentFills trades={closedTrades} />
+      {/* Open positions — vertical risk-rail gauges (full width). */}
+      <PositionGauge
+        positions={openPositions}
+        guardedSetups={guardedSetups}
+        marketSignals={marketSignals}
+      />
     </main>
   );
 }
