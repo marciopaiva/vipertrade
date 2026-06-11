@@ -28,7 +28,7 @@ pub struct Tick {
     pub entry_eligible: bool,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct BacktestReport {
     pub ticks: usize,
     pub opened: usize,
@@ -61,7 +61,7 @@ fn tick_price(input: &StrategyInput) -> f64 {
 
 /// Deterministic position-lifecycle simulation over chronological ticks.
 /// Pure: same ticks + config => same report.
-pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
+pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
     let mut rep = BacktestReport::default();
     // One open position per symbol (mirrors the single-position-per-symbol live model).
     let mut open: BTreeMap<String, OpenTradeSnapshot> = BTreeMap::new();
@@ -169,6 +169,99 @@ pub(crate) fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
     rep
 }
 
+/// Load the replay corpus from `tupa_audit_logs` in chronological order.
+/// Reusable by any caller (the CLI, the ai-analyst `/sweep` endpoint) so the
+/// corpus-fetch + parse logic lives in one place. `since` restricts to rows
+/// at/after a timestamp (e.g. an era cutover); `limit` caps the row count.
+pub async fn load_corpus(
+    pool: &sqlx::PgPool,
+    since: Option<DateTime<Utc>>,
+    limit: i64,
+) -> Result<Vec<Tick>, sqlx::Error> {
+    // input_data fetched as text (sqlx here has no `json` feature).
+    let rows: Vec<(DateTime<Utc>, String)> = if let Some(since) = since {
+        sqlx::query_as(
+            "SELECT executed_at, input_data::text FROM tupa_audit_logs \
+             WHERE executed_at >= $1 ORDER BY executed_at ASC LIMIT $2",
+        )
+        .bind(since)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as(
+            "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at ASC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    };
+    Ok(rows
+        .into_iter()
+        .filter_map(|(ts, json)| parse_tick(ts, &json))
+        .collect())
+}
+
+/// Clone `base` and apply each `(dotted.path, value)` override to BOTH the
+/// global mode profile and every per-symbol block. Lookup precedence varies per
+/// parameter (some read global first, some the per-symbol block), so patching
+/// everywhere guarantees the override takes effect instead of silently no-op'ing.
+pub fn apply_overrides(base: &StrategyConfig, overrides: &[(String, String)]) -> StrategyConfig {
+    let mut variant = base.clone();
+    for (path, raw) in overrides {
+        set_json_path(&mut variant.global, path, raw);
+        for pair in variant.pairs.values_mut() {
+            set_json_path(pair, path, raw);
+        }
+    }
+    variant
+}
+
+/// One config variant in a sweep: its label, its report, and the net-PnL delta
+/// versus the baseline run on the same corpus.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SweepVariant {
+    pub label: String,
+    pub report: BacktestReport,
+    pub delta_net_pnl: f64,
+}
+
+/// A baseline report plus one report per config variant, all on the same corpus.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SweepResult {
+    pub baseline: BacktestReport,
+    pub variants: Vec<SweepVariant>,
+}
+
+/// Run the baseline config plus one variant per override-set on the same corpus,
+/// returning structured results. Deterministic: same ticks + configs => same
+/// result. Each variant's label is derived from its overrides (`path=value, …`).
+pub fn run_sweep(
+    ticks: &[Tick],
+    base_cfg: &StrategyConfig,
+    variant_overrides: &[Vec<(String, String)>],
+) -> SweepResult {
+    let baseline = simulate(ticks, base_cfg);
+    let variants = variant_overrides
+        .iter()
+        .map(|overrides| {
+            let label = overrides
+                .iter()
+                .map(|(p, v)| format!("{p}={v}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let report = simulate(ticks, &apply_overrides(base_cfg, overrides));
+            let delta_net_pnl = report.net_pnl - baseline.net_pnl;
+            SweepVariant {
+                label,
+                report,
+                delta_net_pnl,
+            }
+        })
+        .collect();
+    SweepResult { baseline, variants }
+}
+
 fn print_report(rep: &BacktestReport, cfg_label: &str) {
     println!("─ Backtest report ({cfg_label}) ───────────────────────");
     println!("  ticks replayed : {}", rep.ticks);
@@ -242,30 +335,10 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&db_url)
         .await?;
 
-    // input_data fetched as text (sqlx here has no `json` feature).
-    let rows: Vec<(DateTime<Utc>, String)> = if let Some(since) = since {
+    if let Some(since) = since {
         println!("Replaying rows at/after {since}");
-        sqlx::query_as(
-            "SELECT executed_at, input_data::text FROM tupa_audit_logs \
-             WHERE executed_at >= $1 ORDER BY executed_at ASC LIMIT $2",
-        )
-        .bind(since)
-        .bind(limit)
-        .fetch_all(&pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT executed_at, input_data::text FROM tupa_audit_logs ORDER BY executed_at ASC LIMIT $1",
-        )
-        .bind(limit)
-        .fetch_all(&pool)
-        .await?
-    };
-
-    let ticks: Vec<Tick> = rows
-        .into_iter()
-        .filter_map(|(ts, json)| parse_tick(ts, &json))
-        .collect();
+    }
+    let ticks = load_corpus(&pool, since, limit).await?;
     println!("Loaded {} replay ticks from tupa_audit_logs", ticks.len());
 
     let base = simulate(&ticks, &cfg);
@@ -278,17 +351,7 @@ pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
     // config and runs the SAME corpus, for deterministic config comparison.
     let overrides = parse_set_overrides();
     if !overrides.is_empty() {
-        let mut variant = cfg.clone();
-        // Apply each override to BOTH the global mode profile and every
-        // per-symbol block. Lookup precedence varies per parameter (some read
-        // global first, some the per-symbol block), so patching everywhere
-        // guarantees the override takes effect instead of silently no-op'ing.
-        for (path, raw) in &overrides {
-            set_json_path(&mut variant.global, path, raw);
-            for pair in variant.pairs.values_mut() {
-                set_json_path(pair, path, raw);
-            }
-        }
+        let variant = apply_overrides(&cfg, &overrides);
         println!(
             "Applied {} override(s) to global + {} per-symbol blocks",
             overrides.len(),
