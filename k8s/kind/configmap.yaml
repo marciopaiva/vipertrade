@@ -60,6 +60,12 @@ data:
   # AI Analyst configuration
   AI_ANALYST_LOOKBACK_HOURS: "24"
   AI_ANALYST_ENABLE_LLM: "false"
+  # Tuning agent (POST /investigate). Groq's free hosted tier is the default
+  # provider; GROQ_API_KEY is a runtime-patched secret (see secret.yaml). Set
+  # AI_ANALYST_LLM_PROVIDER=ollama for a local model instead.
+  AI_ANALYST_LLM_PROVIDER: "groq"
+  AI_ANALYST_LLM_MODEL: "llama-3.3-70b-versatile"
+  AI_ANALYST_LLM_MAX_ITERS: "10"
 
   # Operator API configuration
   OPERATOR_AUTH_MODE: token
