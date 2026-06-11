@@ -54,7 +54,7 @@ struct SweepVariantRequest {
 struct SweepRequest {
     /// Optional RFC3339 timestamp; restricts the corpus to rows at/after it.
     since: Option<String>,
-    /// Max audit rows to replay (default 5000).
+    /// Max audit rows to replay (default 20000).
     limit: Option<i64>,
     /// One config variant per entry; an empty list runs the baseline only.
     #[serde(default)]
@@ -374,6 +374,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(24),
     });
 
+    // Periodic tuning-review task: every N closed trades, run the agent and
+    // persist evidence + backtest + verified recommendation for the /analysis feed.
+    tokio::spawn(agent::tuning_review_loop(state.clone()));
+
     let health = warp::path!("health")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -506,7 +510,7 @@ pub(crate) async fn run_sweep_core(
 
     // Clamp the corpus size: a negative limit errors in Postgres and a huge one
     // would load the whole audit table into memory.
-    let limit = req.limit.unwrap_or(5000).clamp(1, MAX_SWEEP_LIMIT);
+    let limit = req.limit.unwrap_or(20000).clamp(1, MAX_SWEEP_LIMIT);
     let ticks = backtest::load_corpus(&state.db_pool, since, limit)
         .await
         .map_err(|e| SweepCoreError::Internal(format!("corpus load failed: {e}")))?;
