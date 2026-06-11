@@ -455,17 +455,19 @@ async fn handle_recent_analysis(
     }
 }
 
-/// `POST /sweep` — run a deterministic backtest of the baseline config plus
-/// requested variants over a corpus window. Gives the analyst the same
-/// counterfactual "what if I change X?" power used for manual tuning: the real
-/// decision + exit logic replayed on the recorded `tupa_audit_logs` corpus.
-/// A sweep failure split into the HTTP status it maps to: bad input (400) vs
-/// an internal failure (500). Shared by the `/sweep` endpoint and the agent's
+/// How a sweep failure maps to an HTTP status: bad input (400) vs an internal
+/// failure (500). Shared by the `/sweep` endpoint and the agent's
 /// `run_backtest_sweep` tool.
 pub(crate) enum SweepCoreError {
     BadRequest(String),
     Internal(String),
 }
+
+/// Safety bounds on a sweep request (caller- and LLM-controlled): the corpus
+/// `limit` is clamped to this range, and at most this many variants run per
+/// call, so one request can't trigger an unbounded backtest.
+const MAX_SWEEP_LIMIT: i64 = 60_000;
+const MAX_SWEEP_VARIANTS: usize = 8;
 
 /// Core of `/sweep`, factored out so both the HTTP endpoint and the agent loop
 /// (agent.rs `run_backtest_sweep` tool) drive the deterministic backtest the
@@ -502,13 +504,19 @@ pub(crate) async fn run_sweep_core(
         None => None,
     };
 
-    let ticks = backtest::load_corpus(&state.db_pool, since, req.limit.unwrap_or(5000))
+    // Clamp the corpus size: a negative limit errors in Postgres and a huge one
+    // would load the whole audit table into memory.
+    let limit = req.limit.unwrap_or(5000).clamp(1, MAX_SWEEP_LIMIT);
+    let ticks = backtest::load_corpus(&state.db_pool, since, limit)
         .await
         .map_err(|e| SweepCoreError::Internal(format!("corpus load failed: {e}")))?;
 
+    // Cap the number of variants: each is a full simulate over the corpus, so an
+    // unbounded list (the variants are caller-/LLM-controlled) is a cost risk.
     let variant_overrides: Vec<Vec<(String, String)>> = req
         .variants
         .iter()
+        .take(MAX_SWEEP_VARIANTS)
         .map(|variant| {
             variant
                 .overrides
@@ -526,6 +534,10 @@ pub(crate) async fn run_sweep_core(
     })
 }
 
+/// `POST /sweep` — run a deterministic backtest of the baseline config plus
+/// requested variants over a corpus window. Gives the analyst the same
+/// counterfactual "what if I change X?" power used for manual tuning: the real
+/// decision + exit logic replayed on the recorded `tupa_audit_logs` corpus.
 async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
     match run_sweep_core(&state, &req).await {
         Ok(resp) => Ok(warp::reply::with_status(

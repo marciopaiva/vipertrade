@@ -243,9 +243,11 @@ pub async fn handle_investigate(
     let mut final_message: Option<String> = None;
     let mut sweeps_run = 0usize;
     let mut iterations = 0usize;
-    // Corpus window of the agent's most recent sweep, reused to ground the
-    // propose_config_change verification on the same data.
-    let mut last_window: Option<(Option<String>, i64)> = None;
+    // Corpus window of the agent's FIRST sweep — the window it reasons over.
+    // propose_config_change grounds its verification on this same window so the
+    // verdict matches the data behind the proposal, not whatever a later
+    // exploratory sweep happened to use.
+    let mut analysis_window: Option<(Option<String>, i64)> = None;
 
     for _ in 0..cfg.max_iters {
         iterations += 1;
@@ -301,7 +303,7 @@ pub async fn handle_investigate(
                         default_hours,
                         &mut recommendation,
                         &mut sweeps_run,
-                        &mut last_window,
+                        &mut analysis_window,
                     )
                     .await;
                     messages.push(ChatMessage {
@@ -415,7 +417,7 @@ async fn dispatch_tool(
     default_hours: i64,
     recommendation: &mut Option<Value>,
     sweeps_run: &mut usize,
-    last_window: &mut Option<(Option<String>, i64)>,
+    analysis_window: &mut Option<(Option<String>, i64)>,
 ) -> String {
     let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
     info!(tool = %call.function.name, "agent tool call");
@@ -429,7 +431,7 @@ async fn dispatch_tool(
             }
         }
         "run_backtest_sweep" => {
-            // Bound runtime: cap variants per call.
+            // run_sweep_core clamps the corpus limit and caps the variant count.
             let req: SweepRequest = match serde_json::from_value(args) {
                 Ok(r) => r,
                 Err(e) => {
@@ -440,9 +442,12 @@ async fn dispatch_tool(
                     .to_string()
                 }
             };
-            // Remember the corpus window so propose_config_change grounds its
-            // verification on the same data the agent reasoned over.
-            *last_window = Some((req.since.clone(), req.limit.unwrap_or(5000)));
+            // Capture the FIRST sweep's window as the analysis window; the
+            // proposal is later verified on this same corpus rather than on
+            // whatever a subsequent exploratory sweep happened to use.
+            if analysis_window.is_none() {
+                *analysis_window = Some((req.since.clone(), req.limit.unwrap_or(5000)));
+            }
             *sweeps_run += 1;
             match run_sweep_core(state, &req).await {
                 Ok(resp) => {
@@ -486,7 +491,7 @@ async fn dispatch_tool(
                 .to_string();
             }
 
-            let (since, limit) = last_window.clone().unwrap_or((None, 5000));
+            let (since, limit) = analysis_window.clone().unwrap_or((None, 5000));
             let body = json!({"since": since, "limit": limit, "variants": [{"overrides": overrides}]});
             let req: SweepRequest = match serde_json::from_value(body) {
                 Ok(r) => r,
