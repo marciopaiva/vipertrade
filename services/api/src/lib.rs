@@ -1,4 +1,5 @@
 mod bybit_client;
+mod exchanges;
 mod position_config;
 mod state;
 
@@ -19,11 +20,11 @@ use warp::{Filter, Rejection, Reply};
 use position_config::{default_trailing_profile, load_position_config};
 use state::{
     ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
-    BybitPositionFetchResult, BybitWalletFetchResult, ConfigActivateRequest,
-    ConfigApplyReviewRequest, ConfigPromoteRequest, ConfigSaveRequest, ControlStateResponse,
-    DecisionItem, DecisionsQuery, DecisionsResponse, EventItem, EventsQuery, EventsResponse,
-    ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
-    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    BybitPositionFetchResult, BybitWalletFetchResult, ConfigActivateRequest, ConfigAddTokenRequest,
+    ConfigApplyReviewRequest, ConfigPromoteRequest, ConfigSaveRequest, ConfigValidateSymbolRequest,
+    ControlStateResponse, DecisionItem, DecisionsQuery, DecisionsResponse, EventItem, EventsQuery,
+    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
+    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
     PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
     RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
 };
@@ -1408,6 +1409,154 @@ async fn config_apply_review_handler(
         Ok(id) => {
             publish_config_changed(&state.redis_url, id).await;
             json_ok(&json!({ "id": id, "applied": true }))
+        }
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist_failed",
+            e.to_string(),
+        ),
+    }
+}
+
+/// POST /api/v1/config/validate-symbol — is the symbol tradeable on all 3 venues?
+async fn config_validate_symbol_handler(
+    req: ConfigValidateSymbolRequest,
+    token_header: Option<String>,
+    _operator_id_header: Option<String>,
+    state: Arc<AppState>,
+) -> impl Reply {
+    if let Err(err) = ensure_operator_token(&state, token_header.as_deref()) {
+        return err;
+    }
+    let Some(symbol) = exchanges::normalize_symbol(&req.symbol) else {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "bad_symbol",
+            "symbol must be a USDT perp like SOLUSDT",
+        );
+    };
+    let http = reqwest::Client::new();
+    let avail = exchanges::symbol_availability(&http, &symbol).await;
+    json_ok(&json!({
+        "symbol": symbol,
+        "bybit": avail.bybit,
+        "binance": avail.binance,
+        "okx": avail.okx,
+        "available_on_all": avail.available_on_all(),
+    }))
+}
+
+/// POST /api/v1/config/add-token — add a new token to the universe (cloned from an
+/// existing block, disabled), after verifying it trades on all 3 venues.
+async fn config_add_token_handler(
+    req: ConfigAddTokenRequest,
+    token_header: Option<String>,
+    _operator_id_header: Option<String>,
+    state: Arc<AppState>,
+) -> impl Reply {
+    if let Err(err) = ensure_operator_token(&state, token_header.as_deref()) {
+        return err;
+    }
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+    let Some(symbol) = exchanges::normalize_symbol(&req.symbol) else {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "bad_symbol",
+            "symbol must be a USDT perp like SOLUSDT",
+        );
+    };
+    let clone_from = req.clone_from.trim().to_uppercase();
+
+    let http = reqwest::Client::new();
+    let avail = exchanges::symbol_availability(&http, &symbol).await;
+    if !avail.available_on_all() {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "not_available",
+            format!(
+                "{symbol} is not tradeable on: {}",
+                avail.missing().join(", ")
+            ),
+        );
+    }
+
+    let active = sqlx::query_as::<_, (String,)>(
+        "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await;
+    let mut config: Value = match active {
+        Ok(Some((c,))) => match serde_json::from_str(&c) {
+            Ok(v) => v,
+            Err(e) => {
+                return json_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "parse_failed",
+                    e.to_string(),
+                )
+            }
+        },
+        Ok(None) => {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                "no_active",
+                "no active config version",
+            )
+        }
+        Err(e) => {
+            return json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "query_failed",
+                e.to_string(),
+            )
+        }
+    };
+
+    let Some(obj) = config.as_object_mut() else {
+        return json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "bad_config",
+            "active config is not an object",
+        );
+    };
+    if obj.contains_key(&symbol) {
+        return json_err(
+            StatusCode::CONFLICT,
+            "exists",
+            format!("{symbol} is already in the config"),
+        );
+    }
+    let Some(template) = obj.get(&clone_from).cloned() else {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "bad_clone_from",
+            format!("clone_from '{clone_from}' is not an existing token"),
+        );
+    };
+    if template.get("enabled").is_none() {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "bad_clone_from",
+            format!("'{clone_from}' is not a token block"),
+        );
+    }
+    let mut block = template;
+    if let Some(bo) = block.as_object_mut() {
+        bo.insert("enabled".to_string(), json!(false));
+    }
+    obj.insert(symbol.clone(), block);
+
+    let note = format!("add token {symbol} (cloned from {clone_from}, disabled)");
+    match insert_active_version(pool, "operator", &note, None, &config).await {
+        Ok(id) => {
+            publish_config_changed(&state.redis_url, id).await;
+            json_ok(&json!({ "id": id, "symbol": symbol, "added": true }))
         }
         Err(e) => json_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -3030,6 +3179,28 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(config_apply_review_handler);
 
+    let config_validate_symbol = api_v1
+        .and(warp::path("config"))
+        .and(warp::path("validate-symbol"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json::<ConfigValidateSymbolRequest>())
+        .and(warp::header::optional::<String>("x-operator-token"))
+        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_state(state.clone()))
+        .then(config_validate_symbol_handler);
+
+    let config_add_token = api_v1
+        .and(warp::path("config"))
+        .and(warp::path("add-token"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json::<ConfigAddTokenRequest>())
+        .and(warp::header::optional::<String>("x-operator-token"))
+        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_state(state.clone()))
+        .then(config_add_token_handler);
+
     let legacy_root = warp::path::end().map(|| "Hello, ViperTrade API!");
     let legacy_health = warp::path("health")
         .and(warp::path::end())
@@ -3055,6 +3226,8 @@ pub async fn run() {
         .or(config_activate)
         .or(config_promote)
         .or(config_apply_review)
+        .or(config_validate_symbol)
+        .or(config_add_token)
         .or(config_save)
         .or(config_get)
         .or(legacy_root)

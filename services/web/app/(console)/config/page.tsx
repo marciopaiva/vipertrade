@@ -177,6 +177,20 @@ export default function ConfigPage() {
   const [tokenDrafts, setTokenDrafts] = useState<Record<string, boolean>>({});
   const [pageError, setPageError] = useState<string | null>(null);
 
+  // Add-token flow.
+  type Avail = {
+    symbol: string;
+    bybit: boolean;
+    binance: boolean;
+    okx: boolean;
+    available_on_all: boolean;
+  };
+  const [addSymbol, setAddSymbol] = useState('');
+  const [cloneFrom, setCloneFrom] = useState('');
+  const [avail, setAvail] = useState<Avail | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   const dirtyCount =
     Object.entries(drafts).filter(([key, v]) => {
       const f = fields.find(ff => ff.relPath.join('.') === key);
@@ -223,6 +237,29 @@ export default function ConfigPage() {
     await send('save', { config: next, note: 'web edit' });
     setDrafts({});
     setTokenDrafts({});
+    await refresh();
+  }
+
+  async function checkSymbol() {
+    setChecking(true);
+    setAddError(null);
+    setAvail(null);
+    try {
+      const body = await send('validate-symbol', { symbol: addSymbol });
+      setAvail(body.result as Avail);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function addToken() {
+    setAddError(null);
+    const clone = cloneFrom || tokens[0]?.sym;
+    await send('add-token', { symbol: addSymbol, clone_from: clone });
+    setAddSymbol('');
+    setAvail(null);
     await refresh();
   }
 
@@ -297,6 +334,83 @@ export default function ConfigPage() {
                   </button>
                 );
               })}
+            </div>
+
+            {/* add token */}
+            <div className="mt-4 border-t border-border/50 pt-4">
+              <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                Add token
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={addSymbol}
+                  onChange={e => {
+                    setAddSymbol(e.target.value.toUpperCase());
+                    setAvail(null);
+                    setAddError(null);
+                  }}
+                  placeholder="SOLUSDT"
+                  className="w-32 rounded-md border border-border bg-card px-2 py-1 font-mono text-sm uppercase text-foreground outline-none transition-colors placeholder:normal-case focus:border-primary/50"
+                />
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  clone from
+                  <select
+                    value={cloneFrom || tokens[0]?.sym || ''}
+                    onChange={e => setCloneFrom(e.target.value)}
+                    className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground outline-none focus:border-primary/50"
+                  >
+                    {tokens.map(t => (
+                      <option key={t.sym} value={t.sym}>
+                        {t.sym}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={!addSymbol || checking}
+                  onClick={checkSymbol}
+                  className="rounded-md border border-border px-3 py-1 text-xs text-foreground transition-colors hover:border-primary/40 disabled:opacity-50"
+                >
+                  {checking ? 'checking…' : 'Check'}
+                </button>
+                {avail && (
+                  <span className="flex items-center gap-2.5 text-xs">
+                    {(['bybit', 'binance', 'okx'] as const).map(ex => (
+                      <span
+                        key={ex}
+                        className={cn(
+                          'font-mono',
+                          avail[ex] ? 'text-accent' : 'text-destructive'
+                        )}
+                      >
+                        {avail[ex] ? '✓' : '✗'} {ex}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                {avail?.available_on_all && (
+                  <ConfirmAction
+                    label="Add (disabled)"
+                    confirmLabel="Add token"
+                    tone="danger"
+                    onConfirm={addToken}
+                  />
+                )}
+                {avail && !avail.available_on_all && (
+                  <span className="text-xs text-destructive">
+                    not on all 3 exchanges — can&apos;t add
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Verified on Bybit + Binance + OKX (the consensus venues). Added
+                disabled and cloned from the chosen token — review &amp; enable it
+                above.
+              </p>
+              {addError && (
+                <p className="mt-1 text-xs text-destructive">{addError}</p>
+              )}
             </div>
           </section>
 
