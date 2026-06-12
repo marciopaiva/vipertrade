@@ -25,12 +25,13 @@ use position_config::{default_trailing_profile, load_position_config};
 use state::{
     ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
     BybitPositionFetchResult, BybitWalletFetchResult, ConfigActivateRequest, ConfigAddTokenRequest,
-    ConfigApplyReviewRequest, ConfigPromoteRequest, ConfigSaveRequest, ConfigValidateSymbolRequest,
-    ControlStateResponse, DecisionItem, DecisionsQuery, DecisionsResponse, EventItem, EventsQuery,
-    EventsResponse, ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus,
-    HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
-    PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
-    RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
+    ConfigApplyReviewRequest, ConfigPromoteRequest, ConfigSaveRequest, ConfigSuggestRequest,
+    ConfigValidateSymbolRequest, ControlStateResponse, DecisionItem, DecisionsQuery,
+    DecisionsResponse, EventItem, EventsQuery, EventsResponse, ExecutorControlRequest,
+    ExecutorControlResponse, ExecutorControlStatus, HealthResponse, KillSwitchRequest,
+    KillSwitchResponse, KillSwitchStatus, PerformanceResponse, PerformanceWindow, PositionItem,
+    PositionsResponse, RiskLimitsRequest, RiskLimitsResponse, RiskLimitsStatus, StatusResponse,
+    TradeItem, TradesQuery, TradesResponse,
 };
 
 #[derive(Serialize)]
@@ -1475,8 +1476,6 @@ async fn config_add_token_handler(
             "symbol must be a USDT perp like SOLUSDT",
         );
     };
-    let clone_from = req.clone_from.trim().to_uppercase();
-
     let http = reqwest::Client::new();
     let avail = exchanges::symbol_availability(&http, &symbol).await;
     if !avail.available_on_all() {
@@ -1536,27 +1535,15 @@ async fn config_add_token_handler(
             format!("{symbol} is already in the config"),
         );
     }
-    let Some(template) = obj.get(&clone_from).cloned() else {
-        return json_err(
-            StatusCode::BAD_REQUEST,
-            "bad_clone_from",
-            format!("clone_from '{clone_from}' is not an existing token"),
-        );
-    };
-    if template.get("enabled").is_none() {
-        return json_err(
-            StatusCode::BAD_REQUEST,
-            "bad_clone_from",
-            format!("'{clone_from}' is not a token block"),
-        );
-    }
-    let mut block = template;
-    if let Some(bo) = block.as_object_mut() {
-        bo.insert("enabled".to_string(), json!(false));
-    }
-    obj.insert(symbol.clone(), block);
+    // Minimal block — every tunable falls back to the global mode_profiles.PAPER
+    // config + defaults, so a new token needs no per-symbol settings to run. The
+    // operator tunes globally via /config; it stays disabled until reviewed.
+    obj.insert(
+        symbol.clone(),
+        json!({ "enabled": false, "category": "manual" }),
+    );
 
-    let note = format!("add token {symbol} (cloned from {clone_from}, disabled)");
+    let note = format!("add token {symbol} (disabled)");
     match insert_active_version(pool, "operator", &note, None, &config).await {
         Ok(id) => {
             publish_config_changed(&state.redis_url, id).await;
@@ -1568,6 +1555,68 @@ async fn config_add_token_handler(
             e.to_string(),
         ),
     }
+}
+
+/// POST /api/v1/config/suggest-tokens — busiest perps not yet in the universe and
+/// available on all 3 venues, volume-sorted (the candidate pool for adding).
+async fn config_suggest_tokens_handler(
+    req: ConfigSuggestRequest,
+    token_header: Option<String>,
+    _operator_id_header: Option<String>,
+    state: Arc<AppState>,
+) -> impl Reply {
+    if let Err(err) = ensure_operator_token(&state, token_header.as_deref()) {
+        return err;
+    }
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+    let limit = req.limit.unwrap_or(8).clamp(1, 20) as usize;
+
+    let active = sqlx::query_as::<_, (String,)>(
+        "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await;
+    let config: Value = match active {
+        Ok(Some((c,))) => serde_json::from_str(&c).unwrap_or(Value::Null),
+        Ok(None) => Value::Null,
+        Err(e) => {
+            return json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "query_failed",
+                e.to_string(),
+            )
+        }
+    };
+    let exclude: std::collections::HashSet<String> = config
+        .as_object()
+        .map(|o| o.keys().map(|k| k.to_uppercase()).collect())
+        .unwrap_or_default();
+
+    let http = reqwest::Client::new();
+    // Screen the busiest non-listed perps, then keep those tradeable on all 3.
+    let candidates = exchanges::top_volume_candidates(&http, &exclude, 12).await;
+    let checks = candidates.iter().map(|(symbol, turnover)| {
+        let http = &http;
+        async move {
+            let avail = exchanges::symbol_availability(http, symbol).await;
+            (symbol.clone(), *turnover, avail.available_on_all())
+        }
+    });
+    let results = futures_util::future::join_all(checks).await;
+    let suggestions: Vec<Value> = results
+        .into_iter()
+        .filter(|(_, _, ok)| *ok)
+        .take(limit)
+        .map(|(symbol, turnover, _)| json!({ "symbol": symbol, "turnover_24h": turnover }))
+        .collect();
+
+    json_ok(&json!({ "suggestions": suggestions }))
 }
 
 async fn daily_trades_summary_handler(state: Arc<AppState>) -> impl Reply {
@@ -3205,6 +3254,17 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(config_add_token_handler);
 
+    let config_suggest_tokens = api_v1
+        .and(warp::path("config"))
+        .and(warp::path("suggest-tokens"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json::<ConfigSuggestRequest>())
+        .and(warp::header::optional::<String>("x-operator-token"))
+        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_state(state.clone()))
+        .then(config_suggest_tokens_handler);
+
     let legacy_root = warp::path::end().map(|| "Hello, ViperTrade API!");
     let legacy_health = warp::path("health")
         .and(warp::path::end())
@@ -3238,6 +3298,7 @@ pub async fn run() {
         .or(config_apply_review)
         .or(config_validate_symbol)
         .or(config_add_token)
+        .or(config_suggest_tokens)
         .or(config_save)
         .or(config_get)
         .boxed();

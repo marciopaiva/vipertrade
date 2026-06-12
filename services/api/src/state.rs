@@ -133,11 +133,17 @@ pub struct ConfigValidateSymbolRequest {
     pub symbol: String,
 }
 
-/// Add a new token to the universe (cloned from an existing one, disabled).
+/// Add a new token to the universe (minimal block, disabled — inherits PAPER).
 #[derive(Deserialize)]
 pub struct ConfigAddTokenRequest {
     pub symbol: String,
-    pub clone_from: String,
+}
+
+/// Suggest tokens to add (busiest perps not in the universe, on all 3 venues).
+#[derive(Deserialize, Default)]
+pub struct ConfigSuggestRequest {
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[derive(Deserialize)]
