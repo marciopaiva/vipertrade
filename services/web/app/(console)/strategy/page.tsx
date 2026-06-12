@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { useDecisions } from '@/hooks/useDecisions';
-import { DecisionCard } from '@/components/cockpit/DecisionCard';
+import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
 const LONG_PB_CEILING = 0.85;
 const SHORT_PB_FLOOR = 0.15;
@@ -15,6 +15,13 @@ export default function StrategyPage() {
     const pb = d.consensus_bollinger_percent_b;
     return typeof pb === 'number' && (pb > LONG_PB_CEILING || pb < SHORT_PB_FLOOR);
   }).length;
+
+  // Entering symbols float to the top (the actionable ones), then alphabetical.
+  const ordered = [...decisions].sort((a, b) => {
+    const ae = a.action.startsWith('ENTER') ? 0 : 1;
+    const be = b.action.startsWith('ENTER') ? 0 : 1;
+    return ae - be || a.symbol.localeCompare(b.symbol);
+  });
 
   return (
     <div className="space-y-5">
@@ -82,11 +89,11 @@ export default function StrategyPage() {
       )}
 
       {loading && decisions.length === 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="h-72 animate-pulse rounded-xl border border-border bg-card"
+              className="h-14 animate-pulse rounded-lg border border-border bg-card"
             />
           ))}
         </div>
@@ -96,10 +103,25 @@ export default function StrategyPage() {
           market data flows in.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {decisions.map(d => (
+        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+          {/* column header */}
+          <div
+            className={cn(
+              ROW_GRID,
+              'border-b border-border px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground'
+            )}
+          >
+            <span>Symbol</span>
+            <span>State</span>
+            <span>Consensus</span>
+            <span>RSI</span>
+            <span>%B</span>
+            <span>ADX</span>
+            <span>Why</span>
+          </div>
+          {ordered.map(d => (
             <div key={d.symbol} id={`sym-${d.symbol}`} className="scroll-mt-24">
-              <DecisionCard d={d} />
+              <DecisionRow d={d} />
             </div>
           ))}
         </div>
