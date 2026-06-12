@@ -1,3 +1,4 @@
+use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
@@ -53,8 +54,10 @@ pub struct StrategyInput {
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Process-wide strategy config, set once at startup so the (free-fn) pipeline
-/// steps can reach it.
-static STRATEGY_CFG: std::sync::OnceLock<Arc<StrategyConfig>> = std::sync::OnceLock::new();
+/// steps can reach it. Held in an `ArcSwap` so a `viper:config_changed` Redis
+/// notification can hot-swap the active DB version live (no restart); readers
+/// get a consistent lock-free snapshot via `real_cfg()`.
+static STRATEGY_CFG: std::sync::OnceLock<ArcSwap<StrategyConfig>> = std::sync::OnceLock::new();
 
 /// `Some(cfg)` when real decisions are enabled and the config is available.
 fn real_cfg() -> Option<Arc<StrategyConfig>> {
@@ -64,7 +67,7 @@ fn real_cfg() -> Option<Arc<StrategyConfig>> {
     if !enabled {
         return None;
     }
-    STRATEGY_CFG.get().cloned()
+    STRATEGY_CFG.get().map(|swap| swap.load_full())
 }
 
 /// Assemble the flat `state` the legacy logic reads: market signal features
@@ -4901,7 +4904,8 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         )?,
     });
     // Expose config to the pipeline steps for the real (flag-gated) decision logic.
-    let _ = STRATEGY_CFG.set(cfg.clone());
+    // Wrapped in an ArcSwap so a viper:config_changed notification can hot-swap it.
+    let _ = STRATEGY_CFG.set(ArcSwap::from(cfg.clone()));
     if real_cfg().is_some() {
         info!("STRATEGY_REAL_DECISIONS enabled — using real decision logic");
     }
@@ -4924,6 +4928,9 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     pubsub.subscribe("viper:market_data").await?;
     info!("Subscribed to viper:market_data");
+    // Same connection also carries config hot-reload notifications (Phase 2).
+    pubsub.subscribe("viper:config_changed").await?;
+    info!("Subscribed to viper:config_changed");
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
     let mut messages = pubsub.on_message();
@@ -5010,6 +5017,39 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             error!("Market data stream ended unexpectedly; exiting so container can restart");
                             return Err("market data stream ended unexpectedly".into());
                         };
+
+                        // Config hot-reload (Phase 2): on a viper:config_changed
+                        // notification, reload the active DB version and atomically
+                        // swap it in. Non-fatal — keep the current config on error.
+                        if msg.get_channel_name() == "viper:config_changed" {
+                            let trigger: String = msg.get_payload().unwrap_or_default();
+                            match db_pool.as_ref() {
+                                Some(pool) => match StrategyConfig::from_db(
+                                    pool,
+                                    &strategy_config_path,
+                                    &profile_config_path,
+                                    &trading_profile,
+                                    &trading_mode,
+                                )
+                                .await
+                                {
+                                    Ok(new_cfg) => {
+                                        if let Some(swap) = STRATEGY_CFG.get() {
+                                            swap.store(Arc::new(new_cfg));
+                                        }
+                                        info!(trigger = %trigger, "Hot-reloaded trading config from DB");
+                                    }
+                                    Err(err) => warn!(
+                                        err = %err,
+                                        "Config hot-reload failed; keeping current config"
+                                    ),
+                                },
+                                None => {
+                                    warn!("Config change signalled but no DB pool; ignoring")
+                                }
+                            }
+                            continue;
+                        }
 
                         let payload: String = msg.get_payload()?;
 
