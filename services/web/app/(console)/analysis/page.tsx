@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
+import { ConfirmAction } from '@/components/system/ConfirmAction';
 import { cn } from '@/lib/utils';
 
 type Override = { path: string; value: string };
@@ -34,7 +35,13 @@ type Review = {
   sweeps?: Sweep[];
   sweeps_run?: number;
 };
-type ReviewItem = { created_at: string; trade_count: number; review: Review };
+type ReviewItem = {
+  id: number;
+  created_at: string;
+  trade_count: number;
+  applied_version_id: number | null;
+  review: Review;
+};
 
 const num = (v?: number, d = 2) =>
   typeof v === 'number' && !Number.isNaN(v) ? v.toFixed(d) : '—';
@@ -58,16 +65,38 @@ function relTime(iso: string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-function VerdictBanner({ review }: { review: Review }) {
+function VerdictBanner({
+  item,
+  onApply,
+}: {
+  item: ReviewItem;
+  onApply: (reviewId: number) => Promise<void>;
+}) {
+  const review = item.review;
   const rec = review.recommendation;
   if (review.verdict === 'change_recommended' && rec) {
     const d = rec.measured?.delta_net_pnl;
     const base = rec.measured?.baseline_net_pnl;
     const variant = rec.measured?.variant_net_pnl;
+    const applied = item.applied_version_id != null;
     return (
       <div className="rounded-lg border border-accent/40 bg-accent/10 p-4">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-accent">
-          Recommended change · engine-verified
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-accent">
+            Recommended change · engine-verified
+          </div>
+          {applied ? (
+            <span className="shrink-0 rounded-md border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11px] text-accent">
+              Applied as v{item.applied_version_id}
+            </span>
+          ) : (
+            <ConfirmAction
+              label="Aplicar"
+              confirmLabel="Apply live"
+              tone="danger"
+              onConfirm={() => onApply(item.id)}
+            />
+          )}
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <div className="font-mono text-sm text-foreground">
@@ -200,10 +229,17 @@ function BacktestRuns({ sweeps }: { sweeps: Sweep[] }) {
   );
 }
 
-function ReviewBody({ review }: { review: Review }) {
+function ReviewBody({
+  item,
+  onApply,
+}: {
+  item: ReviewItem;
+  onApply: (reviewId: number) => Promise<void>;
+}) {
+  const review = item.review;
   return (
     <div className="space-y-4">
-      <VerdictBanner review={review} />
+      <VerdictBanner item={item} onApply={onApply} />
       <Evidence rows={review.diagnostics?.by_close_reason ?? []} />
       <BacktestRuns sweeps={review.sweeps ?? []} />
     </div>
@@ -211,7 +247,7 @@ function ReviewBody({ review }: { review: Review }) {
 }
 
 export default function AnalysisPage() {
-  const { data, loading, error } = useDashboard<{ items: ReviewItem[] }>(
+  const { data, loading, error, refresh } = useDashboard<{ items: ReviewItem[] }>(
     '/api/v1/tuning-reviews?limit=20',
     { refreshInterval: 30000 }
   );
@@ -219,6 +255,26 @@ export default function AnalysisPage() {
   const latest = items[0];
   const history = items.slice(1);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  async function onApply(reviewId: number) {
+    setApplyError(null);
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'apply-review',
+        payload: { review_id: reviewId },
+      }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || body?.ok === false) {
+      const msg = body?.message || body?.error || `HTTP ${res.status}`;
+      setApplyError(msg);
+      throw new Error(msg);
+    }
+    await refresh();
+  }
 
   return (
     <div className="space-y-5">
@@ -233,9 +289,9 @@ export default function AnalysisPage() {
         </p>
       </div>
 
-      {error && (
+      {(error || applyError) && (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
+          {applyError || error}
         </div>
       )}
 
@@ -259,7 +315,7 @@ export default function AnalysisPage() {
                   ` · ${latest.review.provider_model.split(' ')[0]}`}
               </span>
             </div>
-            <ReviewBody review={latest.review} />
+            <ReviewBody item={latest} onApply={onApply} />
           </section>
 
           {history.length > 0 && (
@@ -307,7 +363,7 @@ export default function AnalysisPage() {
                       </button>
                       {open && (
                         <div className="mt-3">
-                          <ReviewBody review={item.review} />
+                          <ReviewBody item={item} onApply={onApply} />
                         </div>
                       )}
                     </div>
