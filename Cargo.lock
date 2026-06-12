@@ -3141,12 +3141,15 @@ dependencies = [
 name = "viper-market-data"
 version = "0.9.0"
 dependencies = [
+ "arc-swap",
  "chrono",
+ "futures-util",
  "redis 0.27.6",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
