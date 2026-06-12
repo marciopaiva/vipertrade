@@ -54,6 +54,11 @@ function setPath(obj: Json, path: string[], value: unknown) {
 
 const PAPER_PATH = ['global', 'mode_profiles', 'PAPER'];
 
+// Audited 2026-06-12 against every service: `name` is a profile label (shown
+// read-only in the header, not a knob) and `prefer_bybit_for_decisions` is dead
+// config (documented but read by no service). Keep them out of the edit grid.
+const NON_TUNABLE = new Set(['name', 'prefer_bybit_for_decisions']);
+
 // Flatten PAPER's scalar children (+ the thesis_health sub-object) into editable
 // fields. relPath is relative to mode_profiles.PAPER.
 type Field = {
@@ -77,7 +82,7 @@ function paperFields(config: Json): Field[] {
             group: 'Thesis health',
           });
       }
-    } else if (isScalar(v)) {
+    } else if (isScalar(v) && !NON_TUNABLE.has(k)) {
       out.push({ relPath: [k], label: prettify(k), value: v, group: 'Tunables' });
     }
   }
@@ -149,6 +154,9 @@ export default function ConfigPage() {
     () => (active ? paperFields(active.config) : []),
     [active]
   );
+  const profileName = active
+    ? (getPath(active.config, [...PAPER_PATH, 'name']) as string | undefined)
+    : undefined;
   const tokens = useMemo(() => {
     if (!active) return [];
     // Real token blocks have an `enabled` flag; this skips `global` and the
@@ -252,11 +260,56 @@ export default function ConfigPage() {
         </div>
       ) : (
         <>
+          {/* Tokens */}
+          <section className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              Token universe
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-4">
+              {tokens.map(t => {
+                const enabled = tokenDrafts[t.sym] ?? t.enabled;
+                const dirty =
+                  tokenDrafts[t.sym] !== undefined && enabled !== t.enabled;
+                return (
+                  <button
+                    key={t.sym}
+                    type="button"
+                    onClick={() =>
+                      setTokenDrafts(d => ({ ...d, [t.sym]: !enabled }))
+                    }
+                    className={cn(
+                      'flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors',
+                      enabled
+                        ? 'border-accent/40 bg-accent/10 text-foreground'
+                        : 'border-border bg-secondary/40 text-muted-foreground',
+                      dirty && 'ring-1 ring-accent/60'
+                    )}
+                  >
+                    <span className="font-mono">{t.sym}</span>
+                    <span
+                      className={cn(
+                        'text-[10px] uppercase tracking-wide',
+                        enabled ? 'text-accent' : 'text-muted-foreground'
+                      )}
+                    >
+                      {enabled ? 'on' : 'off'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
           {/* Tunables */}
           <section className="rounded-xl border border-border bg-card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold text-foreground">
+              <h2 className="flex items-baseline gap-2 text-base font-semibold text-foreground">
                 PAPER tunables
+                {profileName && (
+                  <span className="font-mono text-xs font-normal text-muted-foreground">
+                    {profileName}
+                  </span>
+                )}
               </h2>
               <div className="flex items-center gap-3">
                 {dirtyCount > 0 && (
@@ -317,45 +370,6 @@ export default function ConfigPage() {
                 </div>
               );
             })}
-          </section>
-
-          {/* Tokens */}
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Token universe
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-4">
-              {tokens.map(t => {
-                const enabled = tokenDrafts[t.sym] ?? t.enabled;
-                const dirty = tokenDrafts[t.sym] !== undefined && enabled !== t.enabled;
-                return (
-                  <button
-                    key={t.sym}
-                    type="button"
-                    onClick={() =>
-                      setTokenDrafts(d => ({ ...d, [t.sym]: !enabled }))
-                    }
-                    className={cn(
-                      'flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors',
-                      enabled
-                        ? 'border-accent/40 bg-accent/10 text-foreground'
-                        : 'border-border bg-secondary/40 text-muted-foreground',
-                      dirty && 'ring-1 ring-accent/60'
-                    )}
-                  >
-                    <span className="font-mono">{t.sym}</span>
-                    <span
-                      className={cn(
-                        'text-[10px] uppercase tracking-wide',
-                        enabled ? 'text-accent' : 'text-muted-foreground'
-                      )}
-                    >
-                      {enabled ? 'on' : 'off'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           </section>
 
           {/* Versions + promote */}
