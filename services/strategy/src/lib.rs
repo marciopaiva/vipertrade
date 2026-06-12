@@ -640,6 +640,24 @@ impl StrategyConfig {
         let pairs_json = serde_json::to_value(pairs_yaml)?;
         let profiles_json = serde_json::to_value(profiles_yaml)?;
 
+        Ok(Self::from_pairs_json(
+            pairs_json,
+            profiles_json,
+            profile,
+            trading_mode,
+        ))
+    }
+
+    /// Build a config from already-parsed JSON: the `pairs_json` mirrors the
+    /// `pairs.yaml` shape (top-level `global` + each `<SYMBOL>` block) and
+    /// `profiles_json` mirrors `profiles.yaml`. Shared by `from_files` (YAML on
+    /// disk) and `from_db` (the active DB-stored version).
+    pub fn from_pairs_json(
+        pairs_json: Value,
+        profiles_json: Value,
+        profile: &str,
+        trading_mode: &str,
+    ) -> Self {
         let global = pairs_json
             .get("global")
             .cloned()
@@ -654,7 +672,7 @@ impl StrategyConfig {
             }
         }
 
-        Ok(Self {
+        Self {
             profile: profile.to_uppercase(),
             trading_mode: trading_mode.to_uppercase(),
             global,
@@ -662,7 +680,61 @@ impl StrategyConfig {
             profiles: profiles_json,
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
-        })
+        }
+    }
+
+    /// Load the ACTIVE trading config version from the DB. On the first cold boot
+    /// (no rows yet) it seeds version 1 idempotently from the baked `pairs_path`
+    /// YAML, so behavior is identical to the file until a later version is
+    /// activated. `profiles.yaml` stays file-based (structural risk profiles).
+    pub async fn from_db(
+        pool: &sqlx::PgPool,
+        pairs_path: &str,
+        profiles_path: &str,
+        profile: &str,
+        trading_mode: &str,
+    ) -> Result<Self, Box<dyn Error>> {
+        let profiles_raw = fs::read_to_string(profiles_path)?;
+        let profiles_yaml: serde_yaml::Value = serde_yaml::from_str(&profiles_raw)?;
+        let profiles_json = serde_json::to_value(profiles_yaml)?;
+
+        // Seed version 1 from the baked YAML if the table is empty. Race-safe:
+        // WHERE NOT EXISTS means whichever role boots first wins, the rest no-op.
+        let active: Option<(String,)> =
+            sqlx::query_as("SELECT config::text FROM trading_config_versions WHERE active LIMIT 1")
+                .fetch_optional(pool)
+                .await?;
+
+        let pairs_json: Value = match active {
+            Some((config_text,)) => serde_json::from_str(&config_text)?,
+            None => {
+                let pairs_raw = fs::read_to_string(pairs_path)?;
+                let pairs_yaml: serde_yaml::Value = serde_yaml::from_str(&pairs_raw)?;
+                let seed = serde_json::to_value(pairs_yaml)?;
+                sqlx::query(
+                    "INSERT INTO trading_config_versions (created_by, note, config, active) \
+                     SELECT 'migration', 'seed from pairs.yaml', $1::jsonb, true \
+                     WHERE NOT EXISTS (SELECT 1 FROM trading_config_versions)",
+                )
+                .bind(seed.to_string())
+                .execute(pool)
+                .await?;
+                // Re-read the active row (covers the race where another role seeded).
+                let (config_text,): (String,) = sqlx::query_as(
+                    "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
+                )
+                .fetch_one(pool)
+                .await?;
+                serde_json::from_str(&config_text)?
+            }
+        };
+
+        Ok(Self::from_pairs_json(
+            pairs_json,
+            profiles_json,
+            profile,
+            trading_mode,
+        ))
     }
 
     fn profile_cfg(&self) -> Option<&Value> {
@@ -4785,12 +4857,49 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
-    let cfg = Arc::new(StrategyConfig::from_files(
-        &strategy_config_path,
-        &profile_config_path,
-        &trading_profile,
-        &trading_mode,
-    )?);
+    // Pool is created before the config load so the config can come from the DB
+    // (active version, seeded from YAML on first boot). Falls back to the baked
+    // file when there is no DB (local/CLI use).
+    let db_pool = match resolve_database_url() {
+        Some(database_url) => match PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(&database_url)
+            .await
+        {
+            Ok(pool) => {
+                info!("Strategy database connection: enabled");
+                Some(pool)
+            }
+            Err(err) => {
+                warn!(err = %err, "Strategy database unavailable (open-position trailing disabled)");
+                None
+            }
+        },
+        None => {
+            info!("Strategy database connection: disabled (missing DB_* env)");
+            None
+        }
+    };
+
+    let cfg = Arc::new(match db_pool.as_ref() {
+        Some(pool) => {
+            StrategyConfig::from_db(
+                pool,
+                &strategy_config_path,
+                &profile_config_path,
+                &trading_profile,
+                &trading_mode,
+            )
+            .await?
+        }
+        None => StrategyConfig::from_files(
+            &strategy_config_path,
+            &profile_config_path,
+            &trading_profile,
+            &trading_mode,
+        )?,
+    });
     // Expose config to the pipeline steps for the real (flag-gated) decision logic.
     let _ = STRATEGY_CFG.set(cfg.clone());
     if real_cfg().is_some() {
@@ -4865,28 +4974,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(6);
-
-    let db_pool = match resolve_database_url() {
-        Some(database_url) => match PgPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(5))
-            .connect(&database_url)
-            .await
-        {
-            Ok(pool) => {
-                info!("Strategy database connection: enabled");
-                Some(pool)
-            }
-            Err(err) => {
-                warn!(err = %err, "Strategy database unavailable (open-position trailing disabled)");
-                None
-            }
-        },
-        None => {
-            info!("Strategy database connection: disabled (missing DB_* env)");
-            None
-        }
-    };
 
     loop {
         tokio::select! {
