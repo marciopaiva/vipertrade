@@ -6,7 +6,8 @@ type ConfigKind =
   | 'promote'
   | 'apply-review'
   | 'validate-symbol'
-  | 'add-token';
+  | 'add-token'
+  | 'suggest-tokens';
 
 const DEFAULT_BASE_URLS = [
   process.env.BACKEND_API_URL,
@@ -37,6 +38,8 @@ function resolvePath(kind: ConfigKind): string {
       return '/config/validate-symbol';
     case 'add-token':
       return '/config/add-token';
+    case 'suggest-tokens':
+      return '/config/suggest-tokens';
   }
 }
 
@@ -57,6 +60,7 @@ export async function POST(req: Request) {
       'apply-review',
       'validate-symbol',
       'add-token',
+      'suggest-tokens',
     ].includes(body.kind)
   ) {
     return NextResponse.json(
