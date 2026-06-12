@@ -3178,6 +3178,7 @@ dependencies = [
 name = "viper-strategy"
 version = "0.9.0"
 dependencies = [
+ "arc-swap",
  "chrono",
  "futures-util",
  "hex",
