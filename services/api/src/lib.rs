@@ -1,3 +1,7 @@
+// The big `.or(...)` warp route chain nests filter types deeply; the default
+// trait-resolution recursion limit (128) overflows in release builds, so raise it.
+#![recursion_limit = "512"]
+
 mod bybit_client;
 mod exchanges;
 mod position_config;
@@ -3206,23 +3210,29 @@ pub async fn run() {
         .and(warp::path::end())
         .map(|| warp::reply::json(&"OK"));
 
-    let routes = health
+    // Boxed sub-groups: collapsing each group's filter type with `.boxed()` keeps
+    // the combined `.or(...)` tree shallow, avoiding warp's deep-type recursion
+    // overflow (E0275) that a single 25-deep chain triggers in release builds.
+    let public = health
         .or(status)
         .or(positions)
         .or(trades)
         .or(daily_trades_summary)
         .or(tuning_reviews)
-        .or(decisions)
+        .boxed();
+    let data = decisions
         .or(events)
         .or(performance)
         .or(risk_kpis)
         .or(bybit_private_health)
         .or(bybit_wallet)
-        .or(control_state)
+        .boxed();
+    let control = control_state
         .or(kill_switch)
         .or(executor_control)
         .or(risk_limits_control)
-        .or(config_version)
+        .boxed();
+    let config = config_version
         .or(config_activate)
         .or(config_promote)
         .or(config_apply_review)
@@ -3230,9 +3240,14 @@ pub async fn run() {
         .or(config_add_token)
         .or(config_save)
         .or(config_get)
-        .or(legacy_root)
-        .or(legacy_health)
-        .or(ws_stream)
+        .boxed();
+    let misc = legacy_root.or(legacy_health).or(ws_stream).boxed();
+
+    let routes = public
+        .or(data)
+        .or(control)
+        .or(config)
+        .or(misc)
         .recover(handle_rejection);
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
