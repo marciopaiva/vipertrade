@@ -17,7 +17,6 @@ global:
       permissive_entry: false
       require_multi_exchange_consensus: true
       require_btc_macro_alignment: true
-      prefer_bybit_for_decisions: false
       min_volume_24h_usdt: 16000000
       max_spread_pct: 0.0008
       max_atr_pct: 0.035
@@ -114,7 +113,6 @@ global:
       permissive_entry: true
       require_multi_exchange_consensus: false
       require_btc_macro_alignment: false
-      prefer_bybit_for_decisions: true
       min_volume_24h_usdt: 0
       max_spread_pct: 0.02
       max_atr_pct: 1.0
