@@ -151,8 +151,12 @@ export default function ConfigPage() {
   );
   const tokens = useMemo(() => {
     if (!active) return [];
+    // Real token blocks have an `enabled` flag; this skips `global` and the
+    // `profiles` risk-profile block, which ride along as top-level keys.
     return Object.keys(active.config)
-      .filter(k => k !== 'global')
+      .filter(
+        k => typeof (active.config[k] as Json)?.enabled === 'boolean'
+      )
       .sort()
       .map(sym => ({
         sym,
