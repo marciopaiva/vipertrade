@@ -6,8 +6,6 @@ data:
   # Trading configuration
   TRADING_MODE: paper
   BYBIT_ENV: testnet
-  BYBIT_WS_PUBLIC: wss://stream-testnet.bybit.com/v5/public/linear
-  BYBIT_WS_PRIVATE: wss://stream-testnet.bybit.com/v5/private
   BYBIT_RECV_WINDOW: "5000"
   BYBIT_ACCOUNT_TYPE: UNIFIED
 

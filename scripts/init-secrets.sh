@@ -164,8 +164,6 @@ echo -e "${BLUE}📊 Trading configuration:${NC}"
 echo "   Mode: ${TRADING_MODE:-paper}"
 echo "   Profile: ${TRADING_PROFILE:-MEDIUM}"
 echo "   Pairs: ${TRADING_PAIRS:-from config/trading/pairs.yaml}"
-echo "   Smart Copy: ${SMART_COPY_ENABLED:-true}"
-echo "   Trailing Stop: ${TRAILING_STOP_ENABLED:-true}"
 
 # 10. Final instructions
 echo ""
