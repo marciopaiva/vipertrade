@@ -69,12 +69,24 @@ async fn check_bybit(http: &Client, symbol: &str) -> bool {
 }
 
 async fn check_binance(http: &Client, symbol: &str) -> bool {
-    // exchangeInfo?symbol=X returns 200 for a valid symbol, 400 otherwise.
+    // exchangeInfo?symbol=X is NOT strict — an unknown symbol still returns 200 with
+    // the full list, so confirm the symbol is actually present and TRADING.
     let url = format!("https://fapi.binance.com/fapi/v1/exchangeInfo?symbol={symbol}");
-    match http.get(&url).timeout(HTTP_TIMEOUT).send().await {
-        Ok(resp) => resp.status().is_success(),
-        Err(_) => false,
-    }
+    let Ok(resp) = http.get(&url).timeout(HTTP_TIMEOUT).send().await else {
+        return false;
+    };
+    let Ok(v) = resp.json::<Value>().await else {
+        return false;
+    };
+    v.get("symbols")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter().any(|s| {
+                s.get("symbol").and_then(Value::as_str) == Some(symbol)
+                    && s.get("status").and_then(Value::as_str) == Some("TRADING")
+            })
+        })
+        .unwrap_or(false)
 }
 
 async fn check_okx(http: &Client, symbol: &str) -> bool {
