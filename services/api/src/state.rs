@@ -127,6 +127,19 @@ pub struct ConfigApplyReviewRequest {
     pub review_id: i64,
 }
 
+/// Check a symbol's availability across the 3 consensus exchanges (Phase 4a).
+#[derive(Deserialize)]
+pub struct ConfigValidateSymbolRequest {
+    pub symbol: String,
+}
+
+/// Add a new token to the universe (cloned from an existing one, disabled).
+#[derive(Deserialize)]
+pub struct ConfigAddTokenRequest {
+    pub symbol: String,
+    pub clone_from: String,
+}
+
 #[derive(Deserialize)]
 pub struct EventsQuery {
     pub limit: Option<u32>,

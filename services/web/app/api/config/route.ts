@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 
-type ConfigKind = 'save' | 'activate' | 'promote' | 'apply-review';
+type ConfigKind =
+  | 'save'
+  | 'activate'
+  | 'promote'
+  | 'apply-review'
+  | 'validate-symbol'
+  | 'add-token';
 
 const DEFAULT_BASE_URLS = [
   process.env.BACKEND_API_URL,
@@ -27,6 +33,10 @@ function resolvePath(kind: ConfigKind): string {
       return '/config/promote';
     case 'apply-review':
       return '/config/apply-review';
+    case 'validate-symbol':
+      return '/config/validate-symbol';
+    case 'add-token':
+      return '/config/add-token';
   }
 }
 
@@ -40,7 +50,14 @@ export async function POST(req: Request) {
 
   if (
     !body.kind ||
-    !['save', 'activate', 'promote', 'apply-review'].includes(body.kind)
+    ![
+      'save',
+      'activate',
+      'promote',
+      'apply-review',
+      'validate-symbol',
+      'add-token',
+    ].includes(body.kind)
   ) {
     return NextResponse.json(
       { error: 'invalid_kind', message: 'invalid config command' },
