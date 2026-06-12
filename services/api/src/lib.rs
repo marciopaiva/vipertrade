@@ -19,12 +19,13 @@ use warp::{Filter, Rejection, Reply};
 use position_config::{default_trailing_profile, load_position_config};
 use state::{
     ApiError, AppState, BybitClosedPnlFetchResult, BybitOrderHistoryFetchResult,
-    BybitPositionFetchResult, BybitWalletFetchResult, ConfigActivateRequest, ConfigPromoteRequest,
-    ConfigSaveRequest, ControlStateResponse, DecisionItem, DecisionsQuery, DecisionsResponse,
-    EventItem, EventsQuery, EventsResponse, ExecutorControlRequest, ExecutorControlResponse,
-    ExecutorControlStatus, HealthResponse, KillSwitchRequest, KillSwitchResponse, KillSwitchStatus,
-    PerformanceResponse, PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest,
-    RiskLimitsResponse, RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
+    BybitPositionFetchResult, BybitWalletFetchResult, ConfigActivateRequest,
+    ConfigApplyReviewRequest, ConfigPromoteRequest, ConfigSaveRequest, ControlStateResponse,
+    DecisionItem, DecisionsQuery, DecisionsResponse, EventItem, EventsQuery, EventsResponse,
+    ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
+    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
+    RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
 };
 
 #[derive(Serialize)]
@@ -888,9 +889,11 @@ async fn tuning_reviews_handler(query: TradesQuery, state: Arc<AppState>) -> imp
         );
     };
     let limit = clamp_limit(query.limit, 20);
-    let rows = sqlx::query_as::<_, (DateTime<Utc>, i32, String)>(
-        "SELECT created_at, trade_count, review::text \
-         FROM tuning_reviews ORDER BY created_at DESC LIMIT $1",
+    let rows = sqlx::query_as::<_, (i64, DateTime<Utc>, i32, String, Option<i64>)>(
+        "SELECT tr.id, tr.created_at, tr.trade_count, tr.review::text, \
+                (SELECT max(cv.id) FROM trading_config_versions cv \
+                 WHERE cv.source_review_id = tr.id) AS applied_version_id \
+         FROM tuning_reviews tr ORDER BY tr.created_at DESC LIMIT $1",
     )
     .bind(limit)
     .fetch_all(pool)
@@ -900,14 +903,18 @@ async fn tuning_reviews_handler(query: TradesQuery, state: Arc<AppState>) -> imp
         Ok(rows) => {
             let items: Vec<Value> = rows
                 .into_iter()
-                .map(|(created_at, trade_count, review_text)| {
-                    json!({
-                        "created_at": created_at,
-                        "trade_count": trade_count,
-                        "review": serde_json::from_str::<Value>(&review_text)
-                            .unwrap_or(Value::Null),
-                    })
-                })
+                .map(
+                    |(id, created_at, trade_count, review_text, applied_version_id)| {
+                        json!({
+                            "id": id,
+                            "created_at": created_at,
+                            "trade_count": trade_count,
+                            "applied_version_id": applied_version_id,
+                            "review": serde_json::from_str::<Value>(&review_text)
+                                .unwrap_or(Value::Null),
+                        })
+                    },
+                )
                 .collect();
             json_ok(&json!({ "items": items }))
         }
@@ -1233,6 +1240,174 @@ async fn config_promote_handler(
         Ok(id) => {
             publish_config_changed(&state.redis_url, id).await;
             json_ok(&json!({ "id": id, "promoted": true }))
+        }
+        Err(e) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist_failed",
+            e.to_string(),
+        ),
+    }
+}
+
+/// Coerce a string override value to JSON, same order as the backtest setter:
+/// i64 → f64 → bool → string.
+fn coerce_value(raw: &str) -> Value {
+    if let Ok(i) = raw.parse::<i64>() {
+        return json!(i);
+    }
+    if let Ok(f) = raw.parse::<f64>() {
+        return json!(f);
+    }
+    if let Ok(b) = raw.parse::<bool>() {
+        return json!(b);
+    }
+    json!(raw)
+}
+
+/// Set `value` at a dotted path in `root`, creating intermediate objects.
+fn set_config_path(root: &mut Value, path: &[&str], value: Value) {
+    if path.is_empty() {
+        return;
+    }
+    let mut cur = root;
+    for key in &path[..path.len() - 1] {
+        if !cur.is_object() {
+            return;
+        }
+        cur = cur
+            .as_object_mut()
+            .unwrap()
+            .entry((*key).to_string())
+            .or_insert_with(|| json!({}));
+    }
+    if let Some(obj) = cur.as_object_mut() {
+        obj.insert(path[path.len() - 1].to_string(), value);
+    }
+}
+
+/// POST /api/v1/config/apply-review — turn an AI tuning review's recommendation
+/// into a new active config version (Phase 4). Allowlist-restricted to PAPER
+/// tunables; the new version links back to the review via source_review_id.
+async fn config_apply_review_handler(
+    req: ConfigApplyReviewRequest,
+    token_header: Option<String>,
+    _operator_id_header: Option<String>,
+    state: Arc<AppState>,
+) -> impl Reply {
+    if let Err(err) = ensure_operator_token(&state, token_header.as_deref()) {
+        return err;
+    }
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+
+    let review_row =
+        sqlx::query_as::<_, (String,)>("SELECT review::text FROM tuning_reviews WHERE id=$1")
+            .bind(req.review_id)
+            .fetch_optional(pool)
+            .await;
+    let review: Value = match review_row {
+        Ok(Some((t,))) => match serde_json::from_str(&t) {
+            Ok(v) => v,
+            Err(e) => {
+                return json_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "parse_failed",
+                    e.to_string(),
+                )
+            }
+        },
+        Ok(None) => return json_err(StatusCode::NOT_FOUND, "not_found", "review not found"),
+        Err(e) => {
+            return json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "query_failed",
+                e.to_string(),
+            )
+        }
+    };
+
+    let rec = review.get("recommendation");
+    let overrides = rec
+        .and_then(|r| r.get("overrides"))
+        .and_then(|o| o.as_array())
+        .filter(|a| !a.is_empty());
+    let Some(overrides) = overrides else {
+        return json_err(
+            StatusCode::BAD_REQUEST,
+            "no_recommendation",
+            "review has no applyable recommendation",
+        );
+    };
+
+    // Allowlist: every override must target a PAPER tunable. The AI never writes
+    // tokens, infra, or MAINNET. Reject the whole apply if any path is outside.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for ov in overrides {
+        let path = ov.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let value = ov.get("value").and_then(|v| v.as_str()).unwrap_or_default();
+        if !path.starts_with("mode_profiles.PAPER.") {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                "path_not_allowed",
+                format!("override path '{path}' is outside mode_profiles.PAPER"),
+            );
+        }
+        pairs.push((path.to_string(), value.to_string()));
+    }
+
+    let active = sqlx::query_as::<_, (String,)>(
+        "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await;
+    let mut config: Value = match active {
+        Ok(Some((c,))) => match serde_json::from_str(&c) {
+            Ok(v) => v,
+            Err(e) => {
+                return json_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "parse_failed",
+                    e.to_string(),
+                )
+            }
+        },
+        Ok(None) => {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                "no_active",
+                "no active config version",
+            )
+        }
+        Err(e) => {
+            return json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "query_failed",
+                e.to_string(),
+            )
+        }
+    };
+    for (path, value) in &pairs {
+        let full: Vec<&str> = std::iter::once("global").chain(path.split('.')).collect();
+        set_config_path(&mut config, &full, coerce_value(value));
+    }
+
+    let rationale: String = rec
+        .and_then(|r| r.get("rationale"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .chars()
+        .take(200)
+        .collect();
+    let note = format!("applied review #{}: {}", req.review_id, rationale);
+    match insert_active_version(pool, "ai", &note, Some(req.review_id), &config).await {
+        Ok(id) => {
+            publish_config_changed(&state.redis_url, id).await;
+            json_ok(&json!({ "id": id, "applied": true }))
         }
         Err(e) => json_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2844,6 +3019,17 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(config_promote_handler);
 
+    let config_apply_review = api_v1
+        .and(warp::path("config"))
+        .and(warp::path("apply-review"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json::<ConfigApplyReviewRequest>())
+        .and(warp::header::optional::<String>("x-operator-token"))
+        .and(warp::header::optional::<String>("x-operator-id"))
+        .and(with_state(state.clone()))
+        .then(config_apply_review_handler);
+
     let legacy_root = warp::path::end().map(|| "Hello, ViperTrade API!");
     let legacy_health = warp::path("health")
         .and(warp::path::end())
@@ -2868,6 +3054,7 @@ pub async fn run() {
         .or(config_version)
         .or(config_activate)
         .or(config_promote)
+        .or(config_apply_review)
         .or(config_save)
         .or(config_get)
         .or(legacy_root)
