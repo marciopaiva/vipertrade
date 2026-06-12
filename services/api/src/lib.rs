@@ -1476,8 +1476,6 @@ async fn config_add_token_handler(
             "symbol must be a USDT perp like SOLUSDT",
         );
     };
-    let clone_from = req.clone_from.trim().to_uppercase();
-
     let http = reqwest::Client::new();
     let avail = exchanges::symbol_availability(&http, &symbol).await;
     if !avail.available_on_all() {
@@ -1537,27 +1535,15 @@ async fn config_add_token_handler(
             format!("{symbol} is already in the config"),
         );
     }
-    let Some(template) = obj.get(&clone_from).cloned() else {
-        return json_err(
-            StatusCode::BAD_REQUEST,
-            "bad_clone_from",
-            format!("clone_from '{clone_from}' is not an existing token"),
-        );
-    };
-    if template.get("enabled").is_none() {
-        return json_err(
-            StatusCode::BAD_REQUEST,
-            "bad_clone_from",
-            format!("'{clone_from}' is not a token block"),
-        );
-    }
-    let mut block = template;
-    if let Some(bo) = block.as_object_mut() {
-        bo.insert("enabled".to_string(), json!(false));
-    }
-    obj.insert(symbol.clone(), block);
+    // Minimal block — every tunable falls back to the global mode_profiles.PAPER
+    // config + defaults, so a new token needs no per-symbol settings to run. The
+    // operator tunes globally via /config; it stays disabled until reviewed.
+    obj.insert(
+        symbol.clone(),
+        json!({ "enabled": false, "category": "manual" }),
+    );
 
-    let note = format!("add token {symbol} (cloned from {clone_from}, disabled)");
+    let note = format!("add token {symbol} (disabled)");
     match insert_active_version(pool, "operator", &note, None, &config).await {
         Ok(id) => {
             publish_config_changed(&state.redis_url, id).await;

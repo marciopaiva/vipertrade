@@ -187,7 +187,6 @@ export default function ConfigPage() {
   };
   type Suggestion = { symbol: string; turnover_24h: number };
   const [addSymbol, setAddSymbol] = useState('');
-  const [cloneFrom, setCloneFrom] = useState('');
   const [avail, setAvail] = useState<Avail | null>(null);
   const [checking, setChecking] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -259,8 +258,7 @@ export default function ConfigPage() {
 
   async function addToken() {
     setAddError(null);
-    const clone = cloneFrom || tokens[0]?.sym;
-    await send('add-token', { symbol: addSymbol, clone_from: clone });
+    await send('add-token', { symbol: addSymbol });
     setAddSymbol('');
     setAvail(null);
     await refresh();
@@ -375,20 +373,6 @@ export default function ConfigPage() {
                   placeholder="SOLUSDT"
                   className="w-32 rounded-md border border-border bg-card px-2 py-1 font-mono text-sm uppercase text-foreground outline-none transition-colors placeholder:normal-case focus:border-primary/50"
                 />
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  clone from
-                  <select
-                    value={cloneFrom || tokens[0]?.sym || ''}
-                    onChange={e => setCloneFrom(e.target.value)}
-                    className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground outline-none focus:border-primary/50"
-                  >
-                    {tokens.map(t => (
-                      <option key={t.sym} value={t.sym}>
-                        {t.sym}
-                      </option>
-                    ))}
-                  </select>
-                </label>
                 <button
                   type="button"
                   disabled={!addSymbol || checking}
@@ -428,8 +412,8 @@ export default function ConfigPage() {
               </div>
               <p className="mt-2 text-[11px] text-muted-foreground">
                 Verified on Bybit + Binance + OKX (the consensus venues). Added
-                disabled and cloned from the chosen token — review &amp; enable it
-                above.
+                disabled; it inherits the PAPER config above — review &amp; enable it
+                when ready.
               </p>
 
               {/* suggestions */}
