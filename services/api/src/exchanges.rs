@@ -5,6 +5,7 @@
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::time::Duration;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -119,6 +120,42 @@ pub async fn symbol_availability(http: &Client, symbol: &str) -> SymbolAvailabil
         binance,
         okx,
     }
+}
+
+/// Busiest Bybit linear USDT perps (by 24h turnover) NOT in `exclude`, top `take`.
+/// The candidate pool for token suggestions; callers still verify each on all 3.
+pub async fn top_volume_candidates(
+    http: &Client,
+    exclude: &HashSet<String>,
+    take: usize,
+) -> Vec<(String, f64)> {
+    let url = format!("{}/v5/market/tickers?category=linear", bybit_base());
+    let Ok(resp) = http.get(&url).timeout(HTTP_TIMEOUT).send().await else {
+        return Vec::new();
+    };
+    let Ok(v) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    let Some(list) = v.pointer("/result/list").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(String, f64)> = list
+        .iter()
+        .filter_map(|row| {
+            let symbol = normalize_symbol(row.get("symbol").and_then(Value::as_str)?)?;
+            if exclude.contains(&symbol) {
+                return None;
+            }
+            let turnover = row
+                .get("turnover24h")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<f64>().ok())?;
+            Some((symbol, turnover))
+        })
+        .collect();
+    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+    rows.truncate(take);
+    rows
 }
 
 /// Normalize + validate an operator-supplied symbol to a linear USDT perp id.

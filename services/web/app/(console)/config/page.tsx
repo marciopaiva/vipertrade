@@ -185,11 +185,14 @@ export default function ConfigPage() {
     okx: boolean;
     available_on_all: boolean;
   };
+  type Suggestion = { symbol: string; turnover_24h: number };
   const [addSymbol, setAddSymbol] = useState('');
   const [cloneFrom, setCloneFrom] = useState('');
   const [avail, setAvail] = useState<Avail | null>(null);
   const [checking, setChecking] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
 
   const dirtyCount =
     Object.entries(drafts).filter(([key, v]) => {
@@ -262,6 +265,26 @@ export default function ConfigPage() {
     setAvail(null);
     await refresh();
   }
+
+  async function suggest() {
+    setSuggesting(true);
+    setAddError(null);
+    try {
+      const body = await send('suggest-tokens', {});
+      setSuggestions((body.result?.suggestions ?? []) as Suggestion[]);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  const fmtVol = (v: number) =>
+    v >= 1e9
+      ? `$${(v / 1e9).toFixed(1)}B`
+      : v >= 1e6
+        ? `$${(v / 1e6).toFixed(0)}M`
+        : `$${(v / 1e3).toFixed(0)}K`;
 
   return (
     <div className="space-y-5">
@@ -408,6 +431,44 @@ export default function ConfigPage() {
                 disabled and cloned from the chosen token — review &amp; enable it
                 above.
               </p>
+
+              {/* suggestions */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={suggesting}
+                  onClick={suggest}
+                  className="rounded-md border border-border px-3 py-1 text-xs text-foreground transition-colors hover:border-primary/40 disabled:opacity-50"
+                >
+                  {suggesting ? 'finding…' : 'Suggest tokens'}
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  busiest perps not in your universe, available on all 3 venues
+                </span>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {suggestions.map(s => (
+                    <button
+                      key={s.symbol}
+                      type="button"
+                      onClick={() => {
+                        setAddSymbol(s.symbol);
+                        setAvail(null);
+                        setAddError(null);
+                      }}
+                      className="rounded-md border border-border bg-secondary/40 px-2 py-1 text-xs transition-colors hover:border-primary/40"
+                      title={`24h turnover ${fmtVol(s.turnover_24h)} — click to fill`}
+                    >
+                      <span className="font-mono text-foreground">{s.symbol}</span>{' '}
+                      <span className="text-muted-foreground">
+                        {fmtVol(s.turnover_24h)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {addError && (
                 <p className="mt-1 text-xs text-destructive">{addError}</p>
               )}

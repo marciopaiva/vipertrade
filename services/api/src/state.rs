@@ -140,6 +140,13 @@ pub struct ConfigAddTokenRequest {
     pub clone_from: String,
 }
 
+/// Suggest tokens to add (busiest perps not in the universe, on all 3 venues).
+#[derive(Deserialize, Default)]
+pub struct ConfigSuggestRequest {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 #[derive(Deserialize)]
 pub struct EventsQuery {
     pub limit: Option<u32>,
