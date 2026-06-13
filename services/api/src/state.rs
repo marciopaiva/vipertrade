@@ -121,12 +121,6 @@ pub struct ConfigPromoteRequest {
     pub note: Option<String>,
 }
 
-/// Apply an AI tuning review's recommendation as a new active version (Phase 4).
-#[derive(Deserialize)]
-pub struct ConfigApplyReviewRequest {
-    pub review_id: i64,
-}
-
 /// Check a symbol's availability across the 3 consensus exchanges (Phase 4a).
 #[derive(Deserialize)]
 pub struct ConfigValidateSymbolRequest {

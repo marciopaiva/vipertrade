@@ -4,7 +4,6 @@ type ConfigKind =
   | 'save'
   | 'activate'
   | 'promote'
-  | 'apply-review'
   | 'validate-symbol'
   | 'add-token'
   | 'suggest-tokens';
@@ -32,8 +31,6 @@ function resolvePath(kind: ConfigKind): string {
       return '/config/activate';
     case 'promote':
       return '/config/promote';
-    case 'apply-review':
-      return '/config/apply-review';
     case 'validate-symbol':
       return '/config/validate-symbol';
     case 'add-token':
@@ -57,7 +54,6 @@ export async function POST(req: Request) {
       'save',
       'activate',
       'promote',
-      'apply-review',
       'validate-symbol',
       'add-token',
       'suggest-tokens',

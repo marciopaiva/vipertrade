@@ -473,9 +473,6 @@ services:
       DB_USER: ${POSTGRES_USER:-viper}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       AI_ANALYST_LOOKBACK_HOURS: ${AI_ANALYST_LOOKBACK_HOURS:-24}
-      AI_ANALYST_ENABLE_LLM: ${AI_ANALYST_ENABLE_LLM:-false}
-      OLLAMA_URL: ${OLLAMA_URL:-}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: viper_ai_analyst=info
     depends_on:
