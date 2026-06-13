@@ -39,6 +39,20 @@ pub struct StrategyInput {
     pub signal: Value,
 }
 
+impl StrategyInput {
+    fn max_daily_loss_pct(&self) -> f64 {
+        self.config["risk"]["max_daily_loss_pct"]
+            .as_f64()
+            .unwrap_or(0.03)
+    }
+
+    fn max_consecutive_losses(&self) -> f64 {
+        self.config["risk"]["max_consecutive_losses"]
+            .as_f64()
+            .unwrap_or(3.0)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Real strategy decision logic (Phase 1) — gated behind STRATEGY_REAL_DECISIONS.
 //
@@ -283,6 +297,24 @@ fn step_equity_floor(input: &StrategyInput) -> Value {
     json!(input.account_equity_usdt)
 }
 
+/// Scalar metric step — raw daily-loss ratio for constraint evaluation.
+fn step_current_daily_loss(input: &StrategyInput) -> Value {
+    json!(input
+        .temporal
+        .get("current_daily_loss")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0))
+}
+
+/// Scalar metric step — consecutive loss count (as f64) for constraint evaluation.
+fn step_consecutive_losses(input: &StrategyInput) -> Value {
+    json!(input
+        .temporal
+        .get("consecutive_losses")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0))
+}
+
 pipeline! {
     name: ViperSmartCopy,
     input: StrategyInput,
@@ -297,16 +329,15 @@ pipeline! {
         step("signal_confirmation") { step_signal_confirmation(input) },
         step("cooldown_guard") { step_cooldown_guard(input) },
         step("thesis_confirmation") { step_thesis_confirmation(input) },
+        step("current_daily_loss") { step_current_daily_loss(input) },
+        step("consecutive_losses") { step_consecutive_losses(input) },
         step("equity_floor") { step_equity_floor(input) },
         step("decision") { step_decision(input) },
         step("audit") { step_audit(input) },
     ],
-    // Typed invariant: account equity must never be negative (a negative value
-    // signals a data/reconciliation fault, not a tradeable state). This is the
-    // first real constraint — evaluated by tupa-engine into result.failures.
-    // NOTE: the runtime does not yet gate trades on constraint failures; wiring
-    // that (and broader risk constraints) is a follow-up decision.
     constraints: [
+        metric("current_daily_loss").le(input.max_daily_loss_pct()).fail_fast(),
+        metric("consecutive_losses").le(input.max_consecutive_losses()).fail_fast(),
         metric("equity_floor").ge(0.0)
     ]
 }
@@ -5105,6 +5136,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                 "bollinger": {
                                     "std_dev_multiplier": cfg.bollinger_std_dev_multiplier,
                                     "invalidation_threshold": cfg.bollinger_invalidation_threshold
+                                },
+                                "risk": {
+                                    "max_daily_loss_pct": cfg.max_daily_loss_pct(),
+                                    "max_consecutive_losses": cfg.max_consecutive_losses()
                                 }
                             }),
                             signal: serde_json::to_value(&signal_event.signal)
