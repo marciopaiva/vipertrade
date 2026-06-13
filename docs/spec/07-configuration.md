@@ -4,16 +4,16 @@ This document describes the main runtime and strategy configuration surfaces use
 
 ## Configuration layers
 
-ViperTrade is configured through three main layers:
+ViperTrade is configured through two main layers:
 
-1. `compose/.env`
-   - environment and infrastructure settings
+1. `compose/.env` (or `k8s/kind/configmap.yaml` + `secret.yaml` for Kind)
+   - environment and infrastructure settings (trading mode, DB, Redis, exchange credentials)
 2. `config/trading/pairs.yaml`
-   - strategy, risk, and per-token behavior
-3. service defaults in Rust
-   - fallback behavior used when configuration is omitted
+   - strategy, risk, and per-token behavior — the single source of truth for all tunables
 
-Safe operation depends on understanding how these layers interact.
+`config/trading/pairs.yaml` is baked into the service image at build time. Config changes
+require: edit the YAML → commit → `make build && make deploy` → `kubectl rollout restart`
+the affected deployments. There is no hot-reload and no database config layer.
 
 ## Runtime mode
 
@@ -64,72 +64,49 @@ Common environment variables in `compose/.env`:
 
 Mode profiles define the broad risk posture of the runtime.
 
-Common fields used there include:
+Key fields read by the strategy from `global.mode_profiles.PAPER`:
 
-- `permissive_entry`
-- `require_multi_exchange_consensus`
-- `require_btc_macro_alignment`
-- `prefer_bybit_for_decisions`
-- `min_volume_24h_usdt`
-- `max_spread_pct`
-- `max_atr_pct`
-- `max_funding_rate_pct`
-- `stop_loss_pct`
-- `trailing_enabled`
-- `min_hold_seconds`
-- `min_trend_score_long`
-- `min_trend_score_short`
-- `min_signal_confirmation_ticks_long`
-- `min_signal_confirmation_ticks_short`
-- `btc_macro_min_trend_score_long`
-- `btc_macro_min_trend_score_short`
-- `btc_macro_min_consensus_count_long`
-- `btc_macro_min_consensus_count_short`
+Entry filters:
+- `min_adx` — minimum ADX to allow entry
+- `min_trend_score_long` / `min_trend_score_short`
+- `min_percent_b_long` / `min_percent_b_short` (Bollinger %B guard)
+- `rsi_long_min` / `rsi_long_max` / `rsi_short_min` / `rsi_short_max`
+- `max_spread_pct` / `max_atr_pct` / `max_funding_rate_pct`
+- `min_volume_24h_usdt` / `min_volume_ratio_long` / `min_volume_ratio_short`
+- `min_signal_confirmation_ticks_long` / `min_signal_confirmation_ticks_short`
+- `permissive_entry` / `require_multi_exchange_consensus`
+
+Exit controls:
+- `stop_loss_pct` / `trailing_enabled` / `min_hold_seconds`
+- `stop_loss_cooldown_minutes_long` / `stop_loss_cooldown_minutes_short`
+- `opposite_side_exit` — `both` (require consensus AND regime flip), `any`, or `off`
+- `thesis_health.*` — thesis-invalidation health thresholds (all disabled: long_* = -200, short_* = 200)
+
+Sizing (under `global.mode_profiles.PAPER.risk`):
+- `max_position_wallet_pct` / `atr_multiplier` / `max_position_usdt`
+
+BTC macro filters:
+- `btc_macro_min_trend_score_long` / `btc_macro_min_trend_score_short`
+- `btc_macro_min_consensus_count_long` / `btc_macro_min_consensus_count_short`
 - `btc_macro_neutral_penalty`
-- `min_volume_ratio_long`
-- `min_volume_ratio_short`
-- `rsi_long_min`
-- `rsi_long_max`
-- `rsi_short_min`
-- `rsi_short_max`
-- `stop_loss_cooldown_minutes_long`
-- `stop_loss_cooldown_minutes_short`
 
 These settings should be treated as high-impact controls.
 
 ## Token-level configuration
 
-Each token block may define:
+Each token block in `pairs.yaml` defines:
 
-- `enabled`
-- `category`
-- `volatility_profile`
-- `mode_profiles`
-- `risk`
-- `trailing_stop`
-- `entry_filters`
+- `enabled` — whether market-data streams and strategy evaluates this symbol (required)
 
-Common token-level `entry_filters` and risk controls include:
+And optionally, up to three sizing overrides (everything else is global):
 
-- `min_trend_score_long`
-- `min_trend_score_short`
-- `min_signal_confirmation_ticks`
-- `min_signal_confirmation_ticks_long`
-- `min_signal_confirmation_ticks_short`
-- `thesis_invalidation_confirmation_ticks`
-- `stop_loss_cooldown_minutes_long`
-- `stop_loss_cooldown_minutes_short`
-- `max_atr_pct`
-- `max_position_usdt`
+- `mode_profiles.<MODE>.risk.max_position_wallet_pct` — wallet cap override
+- `risk.atr_multiplier` — ATR multiplier override
+- `risk.max_position_usdt` — USDT position cap override
 
-This is where token-specific behavior is tuned.
-
-Examples:
-
-- tighter `max_position_usdt` for more volatile tokens
-- higher `min_trend_score_short` for unstable short setups
-- additional confirmation ticks for noisy pairs
-- earlier thesis invalidation for weak-follow-through symbols
+All entry, exit, thesis, and trailing parameters are read from `global.mode_profiles.PAPER`
+only. Adding per-symbol `entry_filters` or `trailing_stop` blocks has no effect and
+creates a silent shadowing hazard — do not add them.
 
 ## High-risk tuning areas
 
@@ -154,22 +131,20 @@ The following settings can materially change runtime behavior and should be chan
 
 Recommended workflow for configuration changes:
 
-1. change one class of variables at a time
-2. validate locally with:
-   - `./scripts/validate-workspace.sh ci`
-   - `./scripts/validate-runtime.sh bridge all`
-3. run in `paper`
-4. collect enough closed trades to evaluate behavior
-5. only then promote to `testnet`
+1. Identify a hypothesis from `/analyze/recent` or direct observation.
+2. Validate the change with a deterministic sweep before committing:
+   ```
+   kubectl exec deploy/web -- curl -s -X POST http://ai-analyst:8087/sweep \
+     -H 'content-type: application/json' \
+     -d '{"variants":[{"overrides":[{"path":"mode_profiles.PAPER.<param>","value":<v>}]}]}'
+   ```
+3. Test on at least two corpus windows (e.g. `limit=60000` and `limit=20000`).
+4. If the change is robust, edit `config/trading/pairs.yaml` (under `global.mode_profiles.PAPER`).
+5. Commit → `make build && make deploy` → `kubectl rollout restart deployment strategy`.
+6. After a wipe or significant change, validate behavior in paper before touching testnet.
 
-Avoid changing:
-
-- token universe
-- trend thresholds
-- confirmation ticks
-- trailing behavior
-
-all at once.
+Avoid changing multiple unrelated tunables at once — the interactions are hard to attribute.
+To reset paper data and start fresh: `make wipe [CONFIRM=yes]`.
 
 ## Operational guidance
 

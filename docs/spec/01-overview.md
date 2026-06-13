@@ -12,7 +12,7 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 - Tupa engine for deterministic and auditable decisions.
 - Dynamic progressive trailing stop.
 - Optimization for Smart Copy with small and medium followers.
-- Risk profiles (Conservative, Medium, Aggressive).
+- Single-file config source of truth (`pairs.yaml`) with deterministic tuning via backtest sweep.
 - Layered risk management.
 
 ## Public Performance Targets
@@ -38,8 +38,7 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 | executor | Paper/testnet/mainnet execution |
 | monitor | Health, reconciliation, drift checks |
 | analytics | Market analysis insights |
-| ai-analyst | Optional LLM-powered analysis |
-| backtest | Historical validation |
+| ai-analyst | Heuristic diagnostics and deterministic backtest sweep (`/sweep`, `/analyze/recent`) |
 | api | REST endpoints |
 | web | Operator dashboard |
 | postgres | Persistent state |

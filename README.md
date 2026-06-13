@@ -72,7 +72,7 @@ Core services:
 - `analytics`
   - market analysis and strategy performance insights
 - `ai-analyst`
-  - optional LLM-powered market analysis
+  - heuristic diagnostics and deterministic backtest sweep
 - `api`
   - exposes status, trades, positions, controls, and diagnostics
 - `web`
@@ -127,6 +127,7 @@ make build    # build + push all service images
 make deploy   # apply the Kubernetes manifests
 make start    # start the cluster + local registry
 make stop     # stop the cluster + local registry
+make wipe     # wipe paper trading data + restart services (prompts for confirmation)
 ```
 
 Everything else is invoked directly from `scripts/`:
@@ -135,7 +136,7 @@ Everything else is invoked directly from `scripts/`:
 - Cluster status / teardown: `./scripts/kind/status.sh` · `./scripts/kind/delete.sh`
 - Validation: `./scripts/ci-local.sh` · `./scripts/validate-workspace.sh`
 - Kill switch: `./scripts/kill-switch-control.sh status|enable|disable`
-- Paper DB reset: `./scripts/reset-paper-db.sh --yes`
+- Paper data wipe: `make wipe` (truncates all paper data, restarts stateful services)
 - Podman Compose (alt. local runtime): `./scripts/compose.sh up -d|down`
 
 ## Runtime Modes
@@ -229,8 +230,6 @@ Documentation is organized by intent:
   - operator workflows and runtime evidence
 - `docs/releases/`
   - release and change history
-- `docs/legacy/`
-  - archived material kept for reference
 
 Start here:
 
@@ -246,6 +245,7 @@ Start here:
 - `make deploy` — apply the Kubernetes manifests
 - `make start` — start the cluster + local registry
 - `make stop` — stop the cluster + local registry
+- `make wipe` — wipe paper trading data + restart services (`CONFIRM=yes` to skip prompt)
 
 Everything else lives under `scripts/`:
 
@@ -254,7 +254,6 @@ Everything else lives under `scripts/`:
 - `./scripts/validate-workspace.sh {quick|all|ci}` · `./scripts/ci-local.sh` — validation
 - `./scripts/build-base-images.sh` — base images
 - `./scripts/kill-switch-control.sh {status|enable|disable}` — execution kill switch
-- `./scripts/reset-paper-db.sh --yes` — reset paper trades/snapshots
 - `./scripts/compose.sh {up -d|down}` — Podman Compose (alternative local runtime)
 
 ## Status
