@@ -56,10 +56,6 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 # HTTP server
 warp = "0.3"
 
-[patch.crates-io]
-tupa-core = { path = "../tupalang/crates/tupa-core" }
-tupa-engine = { path = "../tupalang/crates/tupa-engine" }
-
 [profile.release]
 lto = true
 codegen-units = 1

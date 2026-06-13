@@ -2874,6 +2874,8 @@ dependencies = [
 [[package]]
 name = "tupa-core"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e56a9e91ab7169f56d64f90cb8bbb66805ebfd8392d37e46d2b66f8ea26b576b"
 dependencies = [
  "serde_json",
  "tupa-core-macros",
@@ -2882,6 +2884,8 @@ dependencies = [
 [[package]]
 name = "tupa-core-macros"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "379590f79242305581d72e4cbc68c8a75836c8bf8f401cad93964fc2559cdd43"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2892,6 +2896,8 @@ dependencies = [
 [[package]]
 name = "tupa-engine"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c62b3443b4fd61574ffed4b9f53a5bcac7543b759ea7b220b612f86a50f28de5"
 dependencies = [
  "serde",
  "serde_json",
