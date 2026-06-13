@@ -12,7 +12,7 @@ CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || 
 KUBE_NAMESPACE   ?= vipertrade
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-web deploy start stop
+.PHONY: help build build-web deploy start stop wipe
 
 ## Show the lifecycle targets
 help:
@@ -22,6 +22,7 @@ help:
 	@printf "  make deploy     Apply the Kubernetes manifests to the Kind cluster\n"
 	@printf "  make start      Start the Kind cluster and local registry\n"
 	@printf "  make stop       Stop the Kind cluster and local registry\n"
+	@printf "  make wipe       Wipe paper trading data from postgres + restart services (fresh start)\n"
 
 ## Build all service images (web first) and push them to the local Kind registry
 build:
@@ -48,3 +49,9 @@ start:
 ## Stop the Kind cluster and local registry
 stop:
 	@$(CONTAINER_ENGINE) stop $(KIND_NODE) $(REGISTRY_CTR)
+
+## Wipe paper trading data from the cluster's postgres and restart the stateful
+## services so they come back clean. Destructive — prompts for confirmation
+## (skip with `make wipe CONFIRM=yes`). Config is unaffected (lives in pairs.yaml).
+wipe:
+	@./scripts/kind/wipe.sh
