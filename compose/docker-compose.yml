@@ -164,7 +164,6 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       BYBIT_ENV: ${BYBIT_ENV:-testnet}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
-      PROFILE_CONFIG: /app/config/system/profiles.yaml
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: ${PYO3_USE_ABI3_FORWARD_COMPATIBILITY:-1}
       TUPA_PIPELINE_PATH: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_smart_copy.tp}
       TUPA_AUDIT_PATH: /app/logs/audit

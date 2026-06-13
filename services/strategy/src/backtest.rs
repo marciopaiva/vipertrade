@@ -318,20 +318,13 @@ fn print_report(rep: &BacktestReport, cfg_label: &str) {
 ///
 /// Env: `DATABASE_URL` (or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD),
 /// `BACKTEST_LIMIT` (default 5000), plus the usual STRATEGY_CONFIG /
-/// PROFILE_CONFIG / TRADING_PROFILE / TRADING_MODE.
+/// TRADING_PROFILE / TRADING_MODE.
 pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
     let strategy_config = std::env::var("STRATEGY_CONFIG")
         .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
-    let profile_config = std::env::var("PROFILE_CONFIG")
-        .unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
     let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
-    let cfg = StrategyConfig::from_files(
-        &strategy_config,
-        &profile_config,
-        &trading_profile,
-        &trading_mode,
-    )?;
+    let cfg = StrategyConfig::from_files(&strategy_config, &trading_profile, &trading_mode)?;
 
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         let host = std::env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());

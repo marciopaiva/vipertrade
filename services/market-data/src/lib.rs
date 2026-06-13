@@ -1,9 +1,6 @@
-use arc_swap::ArcSwap;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1501,61 +1498,6 @@ async fn shutdown_signal() {
     }
 }
 
-/// The streamed symbol universe = the enabled token blocks of the ACTIVE DB config
-/// version. `None` when there is no active config / no enabled symbols, so the
-/// caller can fall back to the file/env list.
-async fn enabled_symbols_from_db(pool: &PgPool) -> Option<Vec<String>> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT key FROM trading_config_versions, jsonb_object_keys(config) AS key \
-         WHERE active AND (config->key->>'enabled')::boolean IS TRUE ORDER BY key",
-    )
-    .fetch_all(pool)
-    .await
-    .ok()?;
-    let symbols: Vec<String> = rows.into_iter().map(|(s,)| s.to_uppercase()).collect();
-    if symbols.is_empty() {
-        None
-    } else {
-        Some(symbols)
-    }
-}
-
-/// Hot-reload the streamed universe: on each `viper:config_changed` notification,
-/// reload the enabled symbols from the DB and swap them in. Reconnects on error.
-async fn config_change_subscriber(
-    redis_url: String,
-    pool: PgPool,
-    universe: Arc<ArcSwap<Vec<String>>>,
-) {
-    use futures_util::StreamExt;
-    loop {
-        let result: redis::RedisResult<()> = async {
-            let client = redis::Client::open(redis_url.as_str())?;
-            #[allow(deprecated)]
-            let mut pubsub = client.get_async_connection().await?.into_pubsub();
-            pubsub.subscribe("viper:config_changed").await?;
-            tracing::info!("market-data subscribed to viper:config_changed");
-            let mut stream = pubsub.on_message();
-            while let Some(msg) = stream.next().await {
-                let trigger: String = msg.get_payload().unwrap_or_default();
-                if let Some(symbols) = enabled_symbols_from_db(&pool).await {
-                    let n = symbols.len();
-                    universe.store(Arc::new(symbols));
-                    tracing::info!(trigger = %trigger, count = n, "Reloaded streaming symbols");
-                } else {
-                    tracing::warn!(trigger = %trigger, "Config change had no enabled symbols; kept current universe");
-                }
-            }
-            Ok(())
-        }
-        .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "market-data config subscriber dropped; retrying in 3s");
-        }
-        tokio::time::sleep(Duration::from_secs(3)).await;
-    }
-}
-
 pub async fn run() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -1652,41 +1594,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let bybit_env = TradingMode::from_env().bybit_env();
 
-    // The streamed symbol universe comes from the ACTIVE DB config (enabled tokens)
-    // and hot-reloads on viper:config_changed, so /config token toggles take effect
-    // live. Falls back to the file/env list when there is no DB.
-    let db_pool: Option<PgPool> = match resolve_database_url() {
-        Some(url) => match PgPoolOptions::new()
-            .max_connections(2)
-            .acquire_timeout(Duration::from_secs(5))
-            .connect(&url)
-            .await
-        {
-            Ok(pool) => {
-                tracing::info!("Market-data database connection: enabled");
-                Some(pool)
-            }
-            Err(err) => {
-                tracing::warn!(err = %err, "Market-data database unavailable; using file/env pairs");
-                None
-            }
-        },
-        None => None,
-    };
-    let initial_symbols = match db_pool.as_ref() {
-        Some(pool) => enabled_symbols_from_db(pool)
-            .await
-            .unwrap_or_else(parse_trading_pairs),
-        None => parse_trading_pairs(),
-    };
-    let universe = Arc::new(ArcSwap::from_pointee(initial_symbols));
-    if let Some(pool) = db_pool.clone() {
-        tokio::spawn(config_change_subscriber(
-            redis_url.clone(),
-            pool,
-            universe.clone(),
-        ));
-    }
+    // The streamed symbol universe = the enabled symbols in pairs.yaml (the single
+    // source of truth). Static for the process lifetime; a change is a git edit +
+    // redeploy.
+    let universe: Vec<String> = parse_trading_pairs();
 
     let base_url = resolve_bybit_base_url();
     let analytics_scores_url = std::env::var("ANALYTICS_SCORES_URL")
@@ -1701,7 +1612,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         bybit_env = %bybit_env,
         base_url = %base_url,
         analytics_scores_url = %analytics_scores_url,
-        pairs = %universe.load().join(","),
+        pairs = %universe.join(","),
         "Market-data config"
     );
 
@@ -1741,11 +1652,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         let mut cycle_signals = HashMap::<String, MarketSignal>::new();
         let mut cycle_failed = false;
 
-        // Snapshot the universe for this cycle; a config_changed reload mid-cycle is
-        // picked up on the next one.
-        let symbols = universe.load_full();
-
-        for symbol in symbols.iter() {
+        for symbol in universe.iter() {
             match fetch_market_signal(&http, &base_url, symbol, &weights).await {
                 Ok(mut signal) => {
                     stabilize_consensus_side(&mut signal, &mut consensus_latch);
@@ -1778,10 +1685,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        if cycle_failed || cycle_signals.len() != symbols.len() {
+        if cycle_failed || cycle_signals.len() != universe.len() {
             latest_signals.write().await.clear();
             tracing::warn!(
-                expected_symbols = symbols.len(),
+                expected_symbols = universe.len(),
                 got_symbols = cycle_signals.len(),
                 "Skipping market-data publish cycle because signals are incomplete"
             );
