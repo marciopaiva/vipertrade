@@ -74,6 +74,15 @@ global:
       min_adx: 20
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
+      # Position-sizing DEFAULTS (single source of truth). Every token inherits
+      # these unless it sets a per-symbol risk override — so a freshly-added token
+      # (just `enabled: true`) is sized conservatively, never on the raw global cap.
+      # Read by max_position_wallet_pct / atr_multiplier / max_position_usdt as the
+      # fallback after any per-symbol value.
+      risk:
+        max_position_wallet_pct: 0.08   # cap = 8% of equity
+        atr_multiplier: 0.65            # volatility sizing dampener (applied to live ATR)
+        max_position_usdt: 18           # also bounded by smart_copy.max_position_usdt (30)
       # Thesis health-score invalidation DISABLED (analysis 2026-06-11). The
       # health-score exit tiers were micro-cutting winners that would have
       # trailed to profit. Deterministic backtest (ADX-era corpus, 91 trades):

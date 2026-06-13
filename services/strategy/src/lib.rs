@@ -814,34 +814,52 @@ impl StrategyConfig {
         cfg_f64(&self.global, &["smart_copy", "min_position_usdt"], 5.0)
     }
 
+    /// Global per-mode sizing default: mode_profiles.<MODE>.risk.<key>. This is
+    /// the single source of truth a symbol inherits when it has no per-symbol
+    /// override, so a freshly-added token (minimal block, just `enabled`) is sized
+    /// from the curated global default instead of the raw global cap.
+    fn mode_risk_f64(&self, key: &str) -> Option<f64> {
+        self.mode_cfg()
+            .and_then(|v| cfg_get(v, &["risk", key]))
+            .and_then(Value::as_f64)
+    }
+
     fn max_position_usdt(&self, symbol: &str) -> f64 {
         let global_max = cfg_f64(&self.global, &["smart_copy", "max_position_usdt"], 30.0);
-        let mode_pair_max = self
+        // per-symbol override (mode then top-level) → global mode default → cap.
+        let pair = self
             .pair_mode_cfg(symbol)
             .and_then(|v| cfg_get(v, &["risk", "max_position_usdt"]))
-            .and_then(Value::as_f64);
-        let pair_max = self
-            .pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["risk", "max_position_usdt"], global_max))
-            .unwrap_or(global_max);
-        mode_pair_max.unwrap_or(pair_max).min(global_max)
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                self.pair_cfg(symbol)
+                    .and_then(|v| cfg_get(v, &["risk", "max_position_usdt"]))
+                    .and_then(Value::as_f64)
+            });
+        pair.or_else(|| self.mode_risk_f64("max_position_usdt"))
+            .unwrap_or(global_max)
+            .min(global_max)
     }
 
     fn max_position_wallet_pct(&self, symbol: &str) -> Option<f64> {
-        let mode_pair_pct = self
-            .pair_mode_cfg(symbol)
+        // per-symbol override (mode then top-level) → global mode default.
+        self.pair_mode_cfg(symbol)
             .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
-            .and_then(Value::as_f64);
-        let pair_pct = self
-            .pair_cfg(symbol)
-            .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
-            .and_then(Value::as_f64);
-        mode_pair_pct.or(pair_pct)
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                self.pair_cfg(symbol)
+                    .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
+                    .and_then(Value::as_f64)
+            })
+            .or_else(|| self.mode_risk_f64("max_position_wallet_pct"))
     }
 
     fn atr_multiplier(&self, symbol: &str) -> f64 {
+        // per-symbol override → global mode default → 1.0 (neutral).
         self.pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["risk", "atr_multiplier"], 1.0))
+            .and_then(|v| cfg_get(v, &["risk", "atr_multiplier"]))
+            .and_then(Value::as_f64)
+            .or_else(|| self.mode_risk_f64("atr_multiplier"))
             .unwrap_or(1.0)
     }
 
@@ -5514,6 +5532,55 @@ mod tests {
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
+    }
+
+    // Sizing single-source-of-truth: a token with no per-symbol risk override
+    // inherits the global mode-profile default; an override still wins.
+    fn sizing_cfg() -> StrategyConfig {
+        StrategyConfig {
+            profile: "TEST".to_string(),
+            trading_mode: "PAPER".to_string(),
+            global: json!({
+                "smart_copy": { "max_position_usdt": 30 },
+                "mode_profiles": {
+                    "PAPER": {
+                        "risk": {
+                            "max_position_wallet_pct": 0.08,
+                            "atr_multiplier": 0.65,
+                            "max_position_usdt": 18
+                        }
+                    }
+                }
+            }),
+            pairs: HashMap::from([(
+                "OVERRIDEUSDT".to_string(),
+                json!({
+                    "enabled": true,
+                    "mode_profiles": { "PAPER": { "risk": { "max_position_wallet_pct": 0.12 } } },
+                    "risk": { "atr_multiplier": 0.5, "max_position_usdt": 20 }
+                }),
+            )]),
+            profiles: json!({}),
+            bollinger_std_dev_multiplier: 2.0,
+            bollinger_invalidation_threshold: 0.7,
+        }
+    }
+
+    #[test]
+    fn new_token_inherits_global_sizing_defaults() {
+        let cfg = sizing_cfg();
+        // NEWUSDT has no per-symbol block (a freshly-added token) → global default.
+        assert_eq!(cfg.max_position_wallet_pct("NEWUSDT"), Some(0.08));
+        assert_eq!(cfg.atr_multiplier("NEWUSDT"), 0.65);
+        assert_eq!(cfg.max_position_usdt("NEWUSDT"), 18.0);
+    }
+
+    #[test]
+    fn per_symbol_sizing_override_wins_over_global_default() {
+        let cfg = sizing_cfg();
+        assert_eq!(cfg.max_position_wallet_pct("OVERRIDEUSDT"), Some(0.12));
+        assert_eq!(cfg.atr_multiplier("OVERRIDEUSDT"), 0.5);
+        assert_eq!(cfg.max_position_usdt("OVERRIDEUSDT"), 20.0);
     }
 
     fn sample_open_trade() -> OpenTradeSnapshot {
