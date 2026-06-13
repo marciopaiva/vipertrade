@@ -14,7 +14,6 @@ use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
-mod agent;
 mod trade_diagnostics;
 
 #[derive(Clone)]
@@ -22,9 +21,6 @@ struct AppState {
     db_pool: PgPool,
     http_client: Client,
     engine: Executor,
-    llm_enabled: bool,
-    ollama_url: Option<String>,
-    ollama_model: Option<String>,
     default_lookback_hours: i64,
 }
 
@@ -74,7 +70,6 @@ struct SweepResponse {
 struct HealthResponse {
     status: &'static str,
     db_connected: bool,
-    llm_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,7 +128,6 @@ struct AnalysisResponse {
     tupa_evaluation: Option<Value>,
     tupa_error: Option<String>,
     heuristic_summary: String,
-    llm_summary: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -356,27 +350,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let engine = Executor::new();
 
-    let llm_enabled = env::var("AI_ANALYST_ENABLE_LLM")
-        .map(|value| value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-
     let state = Arc::new(AppState {
         db_pool,
         http_client: Client::new(),
         engine,
-        llm_enabled,
-        ollama_url: env::var("OLLAMA_URL").ok(),
-        ollama_model: env::var("OLLAMA_MODEL").ok(),
         default_lookback_hours: env::var("AI_ANALYST_LOOKBACK_HOURS")
             .ok()
             .and_then(|value| value.parse::<i64>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(24),
     });
-
-    // Periodic tuning-review task: every N closed trades, run the agent and
-    // persist evidence + backtest + verified recommendation for the /analysis feed.
-    tokio::spawn(agent::tuning_review_loop(state.clone()));
 
     let health = warp::path!("health")
         .and(warp::get())
@@ -395,16 +378,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .and_then(handle_sweep);
 
-    let investigate = warp::path!("investigate")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and(with_state(state.clone()))
-        .and_then(agent::handle_investigate);
-
     let routes = health
         .or(analyze_recent)
         .or(sweep)
-        .or(investigate)
         .recover(handle_rejection)
         .with(warp::cors().allow_any_origin());
 
@@ -428,7 +404,6 @@ async fn handle_health(state: Arc<AppState>) -> Result<impl Reply, Rejection> {
     Ok(warp::reply::json(&HealthResponse {
         status: "ok",
         db_connected,
-        llm_enabled: state.llm_enabled,
     }))
 }
 
@@ -701,11 +676,6 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         blockers: &top_entry_blockers,
         thesis_breakdown: &thesis_invalidation_breakdown,
     });
-    let llm_summary = if state.llm_enabled {
-        request_llm_summary(state, &heuristic_summary).await?
-    } else {
-        None
-    };
 
     Ok(AnalysisResponse {
         generated_at: Utc::now(),
@@ -728,7 +698,6 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
         tupa_evaluation,
         tupa_error,
         heuristic_summary,
-        llm_summary,
     })
 }
 
@@ -2375,44 +2344,6 @@ fn build_tupa_snapshot(ctx: TupaSnapshotContext<'_>) -> trade_diagnostics::Analy
             best_symbol_pnl_usdt: best_symbol.map(|item| item.pnl_usdt).unwrap_or(0.0),
         },
     }
-}
-
-async fn request_llm_summary(
-    state: &AppState,
-    heuristic_summary: &str,
-) -> Result<Option<String>, AnalystError> {
-    let Some(base_url) = &state.ollama_url else {
-        return Ok(None);
-    };
-    let Some(model) = &state.ollama_model else {
-        return Ok(None);
-    };
-
-    let prompt = format!(
-        "You are an AI analyst for a crypto trading bot. Summarize the latest diagnostics in a short operational note, highlighting risk, stability, and next steps. Data: {}",
-        heuristic_summary
-    );
-
-    let response = state
-        .http_client
-        .post(format!("{}/api/generate", base_url.trim_end_matches('/')))
-        .json(&serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "stream": false
-        }))
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-
-    let body: serde_json::Value = response.json().await?;
-    Ok(body
-        .get("response")
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string()))
 }
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
