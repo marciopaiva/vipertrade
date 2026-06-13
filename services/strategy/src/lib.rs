@@ -5113,17 +5113,20 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         let pipeline_input = input_value.clone();
                         let strategy_input: StrategyInput = serde_json::from_value(input_value.clone())?;
                         let pipeline_started_at = Instant::now();
-                        let mut runtime_output = match executor.run_parallel(&pipeline, &strategy_input).await {
-                            Ok(result) => {
-                                let mut values = result.values;
-                                values.insert("execution_advice".to_string(), json!({}));
-                                json!(values)
-                            }
-                            Err(e) => {
-                                error!(err = %e, "Pipeline execution failed");
-                                continue;
-                            }
-                        };
+                        let (constraint_passed, constraint_failures, mut runtime_output) =
+                            match executor.run_parallel(&pipeline, &strategy_input).await {
+                                Ok(result) => {
+                                    let passed = result.passed;
+                                    let failures = result.failures;
+                                    let mut values = result.values;
+                                    values.insert("execution_advice".to_string(), json!({}));
+                                    (passed, failures, json!(values))
+                                }
+                                Err(e) => {
+                                    error!(err = %e, "Pipeline execution failed");
+                                    continue;
+                                }
+                            };
 
                         if let Some(obj) = runtime_output.as_object_mut() {
                             obj.insert(
@@ -5141,6 +5144,31 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
                         match serde_json::from_value::<StrategyDecision>(decision_value.clone()) {
                             Ok(decision) => {
+                                // Gate entries when pipeline invariants are violated.
+                                let decision = if !constraint_passed
+                                    && matches!(
+                                        decision.action.as_str(),
+                                        "ENTER_LONG" | "ENTER_SHORT"
+                                    )
+                                {
+                                    let reason = format!(
+                                        "constraint_gate_{}",
+                                        constraint_failures
+                                            .iter()
+                                            .map(|f| f.metric.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join("_")
+                                    );
+                                    warn!(
+                                        symbol = %symbol,
+                                        failure_count = constraint_failures.len(),
+                                        reason = %reason,
+                                        "Pipeline constraints failed — blocking entry"
+                                    );
+                                    create_hold_decision(&symbol, &reason)
+                                } else {
+                                    decision
+                                };
                                 let intended_side = if decision.action == "ENTER_SHORT" {
                                     "short"
                                 } else {
