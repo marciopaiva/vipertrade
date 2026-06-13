@@ -320,7 +320,6 @@ pub struct StrategyConfig {
     trading_mode: String,
     global: Value,
     pairs: HashMap<String, Value>,
-    profiles: Value,
     bollinger_std_dev_multiplier: f64,
     bollinger_invalidation_threshold: f64,
 }
@@ -620,7 +619,6 @@ impl StrategyConfig {
                 "trailing_stop": { "min_move_threshold_pct": 0.002 }
             }),
             pairs: std::collections::HashMap::new(),
-            profiles: serde_json::json!({}),
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
@@ -630,37 +628,20 @@ impl StrategyConfig {
 impl StrategyConfig {
     pub fn from_files(
         pairs_path: &str,
-        profiles_path: &str,
         profile: &str,
         trading_mode: &str,
     ) -> Result<Self, Box<dyn Error>> {
         let pairs_raw = fs::read_to_string(pairs_path)?;
-        let profiles_raw = fs::read_to_string(profiles_path)?;
-
         let pairs_yaml: serde_yaml::Value = serde_yaml::from_str(&pairs_raw)?;
-        let profiles_yaml: serde_yaml::Value = serde_yaml::from_str(&profiles_raw)?;
-
         let pairs_json = serde_json::to_value(pairs_yaml)?;
-        let profiles_json = serde_json::to_value(profiles_yaml)?;
-
-        Ok(Self::from_pairs_json(
-            pairs_json,
-            profiles_json,
-            profile,
-            trading_mode,
-        ))
+        Ok(Self::from_pairs_json(pairs_json, profile, trading_mode))
     }
 
-    /// Build a config from already-parsed JSON: the `pairs_json` mirrors the
-    /// `pairs.yaml` shape (top-level `global` + each `<SYMBOL>` block) and
-    /// `profiles_json` mirrors `profiles.yaml`. Shared by `from_files` (YAML on
-    /// disk) and `from_db` (the active DB-stored version).
-    pub fn from_pairs_json(
-        pairs_json: Value,
-        profiles_json: Value,
-        profile: &str,
-        trading_mode: &str,
-    ) -> Self {
+    /// Build a config from already-parsed JSON: `pairs_json` mirrors the
+    /// `pairs.yaml` shape (top-level `global` + each `<SYMBOL>` block). It is the
+    /// single source of truth for all tunables and risk params. Shared by
+    /// `from_files` (YAML on disk) and `from_db` (the active DB-stored version).
+    pub fn from_pairs_json(pairs_json: Value, profile: &str, trading_mode: &str) -> Self {
         let global = pairs_json
             .get("global")
             .cloned()
@@ -680,7 +661,6 @@ impl StrategyConfig {
             trading_mode: trading_mode.to_uppercase(),
             global,
             pairs,
-            profiles: profiles_json,
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
@@ -689,18 +669,13 @@ impl StrategyConfig {
     /// Load the ACTIVE trading config version from the DB. On the first cold boot
     /// (no rows yet) it seeds version 1 idempotently from the baked `pairs_path`
     /// YAML, so behavior is identical to the file until a later version is
-    /// activated. `profiles.yaml` stays file-based (structural risk profiles).
+    /// activated.
     pub async fn from_db(
         pool: &sqlx::PgPool,
         pairs_path: &str,
-        profiles_path: &str,
         profile: &str,
         trading_mode: &str,
     ) -> Result<Self, Box<dyn Error>> {
-        let profiles_raw = fs::read_to_string(profiles_path)?;
-        let profiles_yaml: serde_yaml::Value = serde_yaml::from_str(&profiles_raw)?;
-        let profiles_json = serde_json::to_value(profiles_yaml)?;
-
         // Seed version 1 from the baked YAML if the table is empty. Race-safe:
         // WHERE NOT EXISTS means whichever role boots first wins, the rest no-op.
         let active: Option<(String,)> =
@@ -732,16 +707,7 @@ impl StrategyConfig {
             }
         };
 
-        Ok(Self::from_pairs_json(
-            pairs_json,
-            profiles_json,
-            profile,
-            trading_mode,
-        ))
-    }
-
-    fn profile_cfg(&self) -> Option<&Value> {
-        self.profiles.get(&self.profile)
+        Ok(Self::from_pairs_json(pairs_json, profile, trading_mode))
     }
 
     fn pair_cfg(&self, symbol: &str) -> Option<&Value> {
@@ -777,25 +743,15 @@ impl StrategyConfig {
     }
 
     fn max_daily_loss_pct(&self) -> f64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "max_daily_loss_pct"], 0.03);
-        }
         cfg_f64(&self.global, &["risk", "max_daily_loss_pct"], 0.03)
     }
 
     fn max_consecutive_losses(&self) -> i64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_i64(profile, &["circuit_breaker", "consecutive_losses_limit"], 3);
-        }
         cfg_i64(&self.global, &["risk", "max_consecutive_losses"], 3)
     }
 
     fn risk_per_trade_fraction(&self) -> f64 {
-        let pct = if let Some(profile) = self.profile_cfg() {
-            cfg_f64(profile, &["trading_parameters", "risk_per_trade_pct"], 1.0)
-        } else {
-            1.0
-        };
+        let pct = cfg_f64(&self.global, &["risk", "risk_per_trade_pct"], 1.0);
         if pct > 1.0 {
             pct / 100.0
         } else {
@@ -804,10 +760,7 @@ impl StrategyConfig {
     }
 
     fn max_leverage(&self) -> f64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "max_leverage"], 2.0);
-        }
-        2.0
+        cfg_f64(&self.global, &["risk", "max_leverage"], 2.0)
     }
 
     fn min_position_usdt(&self) -> f64 {
@@ -1325,9 +1278,6 @@ impl StrategyConfig {
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "stop_loss_pct"], 0.015);
         }
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "stop_loss_pct"], 0.015);
-        }
         0.015
     }
 
@@ -1337,9 +1287,6 @@ impl StrategyConfig {
         }
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "take_profit_pct"], 0.03);
-        }
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "take_profit_pct"], 0.03);
         }
         0.03
     }
@@ -1351,11 +1298,6 @@ impl StrategyConfig {
             if let Some(by_profile) = cfg_get(pair, &["trailing_stop", "by_profile", &self.profile])
             {
                 return by_profile.clone();
-            }
-        }
-        if let Some(profile) = self.profile_cfg() {
-            if let Some(ts) = cfg_get(profile, &["trailing_stop"]) {
-                return ts.clone();
             }
         }
         json!({
@@ -4873,8 +4815,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let strategy_config_path = std::env::var("STRATEGY_CONFIG")
         .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
-    let profile_config_path = std::env::var("PROFILE_CONFIG")
-        .unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
     let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
@@ -4905,21 +4845,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let cfg = Arc::new(match db_pool.as_ref() {
         Some(pool) => {
-            StrategyConfig::from_db(
-                pool,
-                &strategy_config_path,
-                &profile_config_path,
-                &trading_profile,
-                &trading_mode,
-            )
-            .await?
+            StrategyConfig::from_db(pool, &strategy_config_path, &trading_profile, &trading_mode)
+                .await?
         }
-        None => StrategyConfig::from_files(
-            &strategy_config_path,
-            &profile_config_path,
-            &trading_profile,
-            &trading_mode,
-        )?,
+        None => StrategyConfig::from_files(&strategy_config_path, &trading_profile, &trading_mode)?,
     });
     // Expose config to the pipeline steps for the real (flag-gated) decision logic.
     // Wrapped in an ArcSwap so a viper:config_changed notification can hot-swap it.
@@ -5045,7 +4974,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                 Some(pool) => match StrategyConfig::from_db(
                                     pool,
                                     &strategy_config_path,
-                                    &profile_config_path,
                                     &trading_profile,
                                     &trading_mode,
                                 )
@@ -5528,7 +5456,6 @@ mod tests {
                 }
             }),
             pairs: HashMap::new(),
-            profiles: json!({}),
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
@@ -5560,7 +5487,6 @@ mod tests {
                     "risk": { "atr_multiplier": 0.5, "max_position_usdt": 20 }
                 }),
             )]),
-            profiles: json!({}),
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }

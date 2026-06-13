@@ -173,10 +173,14 @@ global:
   trailing_stop:
     enabled: true
   
-  # Risk limits globais
+  # Risk limits globais — single source of truth for account-level risk (was
+  # config/system/profiles.yaml, now removed). risk_per_trade_pct drives the
+  # position-sizing risk budget (risk_budget = equity * pct).
   risk:
     max_daily_loss_pct: 0.03
     max_consecutive_losses: 3
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
   
   # Entry timing filters - OTIMIZADO (2026-04-01)
   entry_filters:
