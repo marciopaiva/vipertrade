@@ -78,6 +78,40 @@ BYBIT_ACCOUNT_TYPE=UNIFIED
 EXECUTOR_RECONCILE_FIX=false
 
 ./scripts/compose.sh up -d --no-deps executor
+```
+
+## 16) Changing Config (Kind cluster)
+
+`config/trading/pairs.yaml` is baked into the image at build time. Hot-reload is not
+supported. The workflow for any config change:
+
+```bash
+# 1. Edit the YAML (all tunables live under global.mode_profiles.PAPER)
+$EDITOR config/trading/pairs.yaml
+
+# 2. (Optional) Validate the change with a backtest sweep before committing
+kubectl exec deploy/web -- curl -s -X POST http://ai-analyst:8087/sweep \
+  -H 'content-type: application/json' \
+  -d '{"variants":[{"overrides":[{"path":"mode_profiles.PAPER.<param>","value":<v>}]}]}'
+
+# 3. Commit, build, and deploy
+git commit -am "config: <describe the change>"
+make build && make deploy
+
+# 4. Restart the affected deployments (same-tag apply is a no-op without this)
+kubectl rollout restart deployment strategy -n vipertrade
+# Also restart market-data if the enabled-symbol list changed
+kubectl rollout restart deployment market-data -n vipertrade
+```
+
+## 17) Wipe Paper Data (Kind cluster)
+
+Truncates all paper trading tables and restarts stateful services for a clean slate.
+Config (pairs.yaml) is not affected.
+
+```bash
+make wipe              # prompts for confirmation
+make wipe CONFIRM=yes  # non-interactive
 ./scripts/compose.sh logs -f executor
 ```
 
