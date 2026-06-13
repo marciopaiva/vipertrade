@@ -430,7 +430,6 @@ export async function GET() {
               tupa_evaluation: undefined,
               tupa_error: aiAnalyst.error || 'unavailable',
               heuristic_summary: 'AI analyst unavailable.',
-              llm_summary: null,
             },
         risk_kpis: riskKpis.ok
           ? riskKpis.data

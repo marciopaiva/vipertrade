@@ -363,11 +363,14 @@ spec:
         ports:
         - containerPort: 8087
         resources:
+          # Larger than the other services: /sweep loads up to 60k audit rows
+          # (input_data jsonb) into memory for the deterministic backtest; 256Mi
+          # OOM-kills it past ~20k rows.
           requests:
-            memory: 256Mi
+            memory: 512Mi
             cpu: 500m
           limits:
-            memory: 256Mi
+            memory: 1Gi
             cpu: 500m
         readinessProbe:
           httpGet:
