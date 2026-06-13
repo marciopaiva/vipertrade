@@ -42,7 +42,10 @@ global:
       min_hold_seconds: 300
       # Aumentado para filtrar entradas marginais - CORRIGIDO 2026-04-02
       min_trend_score_long: 0.50
-      min_trend_score_short: 0.45
+      # Raised 0.45 -> 0.55 in the 2026-06-13 entry-filter retune (deterministic
+      # backtest, 60k+20k windows): part of the combo that ~4x'd net PnL and
+      # halved the stop_loss bleed.
+      min_trend_score_short: 0.55
       # Reduzida assimetria Long/Short
       min_signal_confirmation_ticks_long: 4
       min_signal_confirmation_ticks_short: 5
@@ -61,15 +64,25 @@ global:
       # Bollinger %B entry guard: skip longs at band tops / shorts at band
       # bottoms. Backtest (#37): net -0.3488 -> +0.0030, thesis bleed 37 -> 17.
       max_percent_b_long: 0.85
-      min_percent_b_short: 0.15
-      # ADX(14) entry gate: skip entries in chop (weak trend). Backtest on the
-      # ADX-era corpus (16.3k ticks): net -1.0129 -> -0.5287 (+0.48), win 44.7% ->
-      # 47.7%, cutting 8 low-ADX entries that bled via thesis/stop_loss. Gain
-      # plateaus 18-22; >=25 over-cuts (win rate drops below baseline). Read as a
-      # DIRECT child of the mode profile by mode_f64("min_adx").
-      min_adx: 18
+      # Raised 0.15 -> 0.20 in the 2026-06-13 entry-filter retune (see min_adx).
+      min_percent_b_short: 0.20
+      # ADX(14) entry gate: skip entries in chop (weak trend). Gain plateaus 18-22;
+      # >=25 over-cuts. Set to 20 in the 2026-06-13 retune on the 4x-grown corpus
+      # (60k+20k windows): min_adx alone +1.55 net; the AI auto-tuner had drifted
+      # this to 25 (over-cutting profitable trades) before the retune reverted it.
+      # Read as a DIRECT child of the mode profile by mode_f64("min_adx").
+      min_adx: 20
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
+      # Position-sizing DEFAULTS (single source of truth). Every token inherits
+      # these unless it sets a per-symbol risk override — so a freshly-added token
+      # (just `enabled: true`) is sized conservatively, never on the raw global cap.
+      # Read by max_position_wallet_pct / atr_multiplier / max_position_usdt as the
+      # fallback after any per-symbol value.
+      risk:
+        max_position_wallet_pct: 0.08   # cap = 8% of equity
+        atr_multiplier: 0.65            # volatility sizing dampener (applied to live ATR)
+        max_position_usdt: 18           # also bounded by smart_copy.max_position_usdt (30)
       # Thesis health-score invalidation DISABLED (analysis 2026-06-11). The
       # health-score exit tiers were micro-cutting winners that would have
       # trailed to profit. Deterministic backtest (ADX-era corpus, 91 trades):
@@ -160,10 +173,14 @@ global:
   trailing_stop:
     enabled: true
   
-  # Risk limits globais
+  # Risk limits globais — single source of truth for account-level risk (was
+  # config/system/profiles.yaml, now removed). risk_per_trade_pct drives the
+  # position-sizing risk budget (risk_budget = equity * pct).
   risk:
     max_daily_loss_pct: 0.03
     max_consecutive_losses: 3
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
   
   # Entry timing filters - OTIMIZADO (2026-04-01)
   entry_filters:
@@ -194,596 +211,91 @@ global:
     min_signal_confirmation_ticks_short: 5
 
 # ═══════════════════════════════════════════════════════════
-# DOGEUSDT - Meme Coin (Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short +0,34 (88% WR) | Long -0,10 (0% WR)
-# Ajuste 2026-04-02: Desabilita Long, mantém Short excelente
+# PER-SYMBOL OVERRIDES
+# Only the keys actually honored per symbol: `enabled` (the universe marker
+# read by market-data + web) and position SIZING. All signal/entry/exit tuning
+# lives in global.mode_profiles.PAPER (the single source of truth tuned via the
+# backtest) — per-symbol signal overrides were dropped (they silently shadowed
+# the global tunables). max_position_wallet_pct is read per mode; max_position_usdt
+# (capped at smart_copy.max_position_usdt) + atr_multiplier are pair-level.
 # ═══════════════════════════════════════════════════════════
 
-DOGEUSDT:
+DOGEUSDT:  # meme coin · high vol
   enabled: true
-  category: "meme_coin"
-  volatility_profile: "high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.08
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0027
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.08
-
-  # Risk parameters (mais conservador devido à volatilidade)
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
   risk:
-    stop_loss_pct: 0.0025      # 0.25% para teste scalp
-    take_profit_pct: 0.003      # 0.30% para teste scalp
-    max_position_usdt: 15.00   # Máx 15% do capital
-    atr_multiplier: 0.5        # Reduz sizing em alta volatilidade
+    max_position_usdt: 15.0
+    atr_multiplier: 0.5
 
-  # Trailing Stop Dinâmico (específico para DOGE)
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.015
-        initial_trail_pct: 0.008
-        ratchet_levels:
-          - at_profit_pct: 0.03
-            trail_pct: 0.012
-          - at_profit_pct: 0.06
-            trail_pct: 0.02
-        move_to_break_even_at: 0.02
-      MEDIUM:
-        activate_after_profit_pct: 0.0025
-        initial_trail_pct: 0.0015
-        ratchet_levels:
-          - at_profit_pct: 0.0045
-            trail_pct: 0.002
-          - at_profit_pct: 0.0075
-            trail_pct: 0.003
-        move_to_break_even_at: 0.003
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.025
-        initial_trail_pct: 0.012
-        ratchet_levels:
-          - at_profit_pct: 0.05
-            trail_pct: 0.02
-          - at_profit_pct: 0.10
-            trail_pct: 0.035
-        move_to_break_even_at: 0.03
-
-  entry_filters:
-    # ✅ Reabilitado após bug fix v2.2 - filtros agora funcionam por símbolo
-    allow_long: true
-    allow_short: true
-    # Filtros rigorosos para proteger contra entradas ruins
-    min_trend_score_long: 0.55   # Era desabilitado, agora com filtro forte
-    min_trend_score_short: 0.35
-    min_trend_score: 0.38
-    min_signal_confirmation_ticks_long: 6
-    min_signal_confirmation_ticks_short: 4
-    min_signal_confirmation_ticks: 3
-    thesis_invalidation_confirmation_ticks: 4
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0055
-  
-# ═══════════════════════════════════════════════════════════
-# XRPUSDT - Large Cap Alt (Média-Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short +0,10 (60% WR) | Long: 0 trades
-# Ajuste 2026-04-02: Short mantido, Long com filtros rigorosos
-# ═══════════════════════════════════════════════════════════
-
-XRPUSDT:
+XRPUSDT:  # large-cap alt
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "medium-high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.12
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0041
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.12
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
   risk:
-    stop_loss_pct: 0.0025
-    take_profit_pct: 0.003
-    max_position_usdt: 20.00
+    max_position_usdt: 20.0
     atr_multiplier: 0.6
 
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.01
-          - at_profit_pct: 0.05
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0025
-        initial_trail_pct: 0.0015
-        ratchet_levels:
-          - at_profit_pct: 0.0045
-            trail_pct: 0.002
-          - at_profit_pct: 0.007
-            trail_pct: 0.003
-        move_to_break_even_at: 0.003
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.02
-        initial_trail_pct: 0.01
-        ratchet_levels:
-          - at_profit_pct: 0.04
-            trail_pct: 0.018
-          - at_profit_pct: 0.08
-            trail_pct: 0.03
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # ⚠️ Long: sem trades ainda - filtros rigorosos
-    allow_long: true
-    # ✅ Short: +0,10 USDT, 60% WR - bom!
-    allow_short: true
-    min_trend_score_long: 0.58   # Ajuste 2026-04-06: endurece Long frágil
-    min_trend_score_short: 0.40  # Era 0.32 (+25%)
-    min_trend_score: 0.46        # Ajuste 2026-04-06: sobe baseline de entrada
-    min_signal_confirmation_ticks_long: 8   # Ajuste 2026-04-06: exige mais sustentação
-    min_signal_confirmation_ticks_short: 5  # Era 4
-    min_signal_confirmation_ticks: 5        # Era 3
-    stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0030  # Ajuste 2026-04-06: corta Long em volatilidade marginal
-  
-# ═══════════════════════════════════════════════════════════
-# ADAUSDT - Large Cap Alt (Média-Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short +0,20 (60% WR) | Long -0,18 (60% WR)
-# Ajuste 2026-04-02: Short mantido, Long com filtros rigorosos
-# ═══════════════════════════════════════════════════════════
-
-ADAUSDT:
+ADAUSDT:  # large-cap alt (disabled)
   enabled: false
-  category: "large_cap_alt"
-  volatility_profile: "medium-high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.12
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0041
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.12
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
   risk:
-    stop_loss_pct: 0.0025
-    take_profit_pct: 0.003
-    max_position_usdt: 20.00
+    max_position_usdt: 20.0
     atr_multiplier: 0.65
 
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.010
-          - at_profit_pct: 0.050
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0025
-        initial_trail_pct: 0.0015
-        ratchet_levels:
-          - at_profit_pct: 0.0045
-            trail_pct: 0.0020
-          - at_profit_pct: 0.0070
-            trail_pct: 0.0030
-        move_to_break_even_at: 0.0030
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.020
-        initial_trail_pct: 0.010
-        ratchet_levels:
-          - at_profit_pct: 0.040
-            trail_pct: 0.018
-          - at_profit_pct: 0.080
-            trail_pct: 0.030
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # Aumentado após análise: 2 Longs consecutivos perdendo (-0,72%, -0,57%)
-    allow_long: true
-    allow_short: true
-    min_trend_score_long: 0.66   # Ajuste 2026-04-06: endurece Long frágil
-    min_trend_score_short: 0.40  # Era 0.35 (+14%)
-    min_trend_score: 0.55        # Ajuste 2026-04-06: sobe baseline de entrada
-    min_signal_confirmation_ticks_long: 8   # Ajuste 2026-04-06: exige mais sustentação
-    min_signal_confirmation_ticks_short: 6  # Era 5
-    min_signal_confirmation_ticks: 6        # Era 5
-    thesis_invalidation_confirmation_ticks: 5
-    stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0022  # Ajuste 2026-04-06: evita Long com ATR marginal
-  
-# ═══════════════════════════════════════════════════════════
-# XLMUSDT - Large Cap Alt (Média-Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-
-XLMUSDT:
+XLMUSDT:  # large-cap alt
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "medium-high"
   mode_profiles:
-    PAPER:
-      entry_filters:
-        min_volume_24h_usdt: 16000000
-      risk:
-        max_position_wallet_pct: 0.10
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0034
-    MAINNET:
-      entry_filters:
-        min_volume_24h_usdt: 16000000
-      risk:
-        max_position_wallet_pct: 0.10
-  
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
   risk:
-    stop_loss_pct: 0.0025
-    take_profit_pct: 0.003
-    max_position_usdt: 20.00
+    max_position_usdt: 20.0
     atr_multiplier: 0.6
-  
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.01
-          - at_profit_pct: 0.05
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0025
-        initial_trail_pct: 0.0015
-        ratchet_levels:
-          - at_profit_pct: 0.0045
-            trail_pct: 0.002
-          - at_profit_pct: 0.007
-            trail_pct: 0.003
-        move_to_break_even_at: 0.003
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.02
-        initial_trail_pct: 0.01
-        ratchet_levels:
-          - at_profit_pct: 0.04
-            trail_pct: 0.018
-          - at_profit_pct: 0.08
-            trail_pct: 0.03
-        move_to_break_even_at: 0.025
-  
-  entry_filters:
-    min_trend_score_long: 0.36
-    min_trend_score_short: 0.35
-    min_trend_score: 0.32
-    min_signal_confirmation_ticks_long: 5
-    min_signal_confirmation_ticks_short: 5
-    min_signal_confirmation_ticks: 3
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0032
 
-# ═══════════════════════════════════════════════════════════
-# SUIUSDT - Large Cap Alt (Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short -0,16 (45% WR) | Long -0,26 (40% WR)
-# Ajuste 2026-04-02: FILTROS MAIS RIGOROSOS (ambos lados perdem)
-# ═══════════════════════════════════════════════════════════
-
-SUIUSDT:
+SUIUSDT:  # large-cap alt · high vol
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.10
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0034
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.10
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
   risk:
-    stop_loss_pct: 0.0029
-    take_profit_pct: 0.003
-    max_position_usdt: 18.00
+    max_position_usdt: 18.0
     atr_multiplier: 0.72
 
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.010
-          - at_profit_pct: 0.050
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0030
-        initial_trail_pct: 0.0017
-        ratchet_levels:
-          - at_profit_pct: 0.0050
-            trail_pct: 0.0022
-          - at_profit_pct: 0.0080
-            trail_pct: 0.0032
-        move_to_break_even_at: 0.0032
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.020
-        initial_trail_pct: 0.010
-        ratchet_levels:
-          - at_profit_pct: 0.040
-            trail_pct: 0.018
-          - at_profit_pct: 0.080
-            trail_pct: 0.030
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # 🔴 Ambos lados perdem - filtros muito mais rigorosos
-    allow_long: true
-    allow_short: true
-    min_trend_score_long: 0.55   # Era 0.34 (+62%)
-    min_trend_score_short: 0.50  # Era 0.41 (+22%)
-    min_trend_score: 0.50        # Era 0.34
-    min_signal_confirmation_ticks_long: 6   # Era 4
-    min_signal_confirmation_ticks_short: 8  # Era 7
-    min_signal_confirmation_ticks: 5        # Era 4
-    stop_loss_cooldown_minutes_short: 8
-    max_atr_pct: 0.0040  # Era 0.0050 (mais restritivo)
-
-# ═══════════════════════════════════════════════════════════
-# LINKUSDT - Large Cap Alt (Média-Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short +0,03 (40% WR) | Long -0,22 (50% WR)
-# Ajuste 2026-04-02: Short mantido (marginal), Long desabilitado
-# ═══════════════════════════════════════════════════════════
-
-LINKUSDT:
+LINKUSDT:  # large-cap alt
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "medium-high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.08
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0027
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.08
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
   risk:
-    stop_loss_pct: 0.0026
-    take_profit_pct: 0.003
-    max_position_usdt: 18.00
+    max_position_usdt: 18.0
     atr_multiplier: 0.65
 
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.010
-          - at_profit_pct: 0.050
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0026
-        initial_trail_pct: 0.0015
-        ratchet_levels:
-          - at_profit_pct: 0.0046
-            trail_pct: 0.0020
-          - at_profit_pct: 0.0072
-            trail_pct: 0.0030
-        move_to_break_even_at: 0.0030
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.020
-        initial_trail_pct: 0.010
-        ratchet_levels:
-          - at_profit_pct: 0.040
-            trail_pct: 0.018
-          - at_profit_pct: 0.080
-            trail_pct: 0.030
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # ✅ Reabilitado após bug fix v2.2 - Short marginal, Long com filtro forte
-    allow_long: true
-    allow_short: true
-    min_trend_score_long: 0.50   # Forte filtro para Long
-    min_trend_score_short: 0.45  # Era 0.33 (+36%)
-    min_trend_score: 0.45        # Era 0.28
-    min_signal_confirmation_ticks_long: 6   # Era 4
-    min_signal_confirmation_ticks_short: 6  # Era 5
-    min_signal_confirmation_ticks: 5        # Era 3
-    stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0040  # Era 0.0048
-
-# ═══════════════════════════════════════════════════════════
-# NEARUSDT - Large Cap Alt (Média-Alta Volatilidade)
-# ═══════════════════════════════════════════════════════════
-# Performance: Short +0,13 (71% WR) | Long -0,33 (20% WR)
-# Ajuste 2026-04-02: Short excelente mantido, Long desabilitado
-# ═══════════════════════════════════════════════════════════
-
-NEARUSDT:
+NEARUSDT:  # large-cap alt
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "medium-high"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.08
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0027
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.08
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
   risk:
-    stop_loss_pct: 0.0027
-    take_profit_pct: 0.003
-    max_position_usdt: 18.00
+    max_position_usdt: 18.0
     atr_multiplier: 0.66
 
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.010
-          - at_profit_pct: 0.050
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0027
-        initial_trail_pct: 0.0016
-        ratchet_levels:
-          - at_profit_pct: 0.0048
-            trail_pct: 0.0021
-          - at_profit_pct: 0.0075
-            trail_pct: 0.0030
-        move_to_break_even_at: 0.0030
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.020
-        initial_trail_pct: 0.010
-        ratchet_levels:
-          - at_profit_pct: 0.040
-            trail_pct: 0.018
-          - at_profit_pct: 0.080
-            trail_pct: 0.030
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # ✅ Reabilitado após bug fix v2.2 - Short excelente, Long com filtro forte
-    allow_long: true
-    allow_short: true
-    min_trend_score_long: 0.55   # Forte filtro para Long
-    min_trend_score_short: 0.40  # Era 0.37
-    min_trend_score: 0.40        # Era 0.30
-    min_signal_confirmation_ticks_long: 8   # Era 7 (máximo rigor)
-    min_signal_confirmation_ticks_short: 5  # Era 6 (funciona bem)
-    min_signal_confirmation_ticks: 5        # Era 4
-    stop_loss_cooldown_minutes_short: 6
-    max_atr_pct: 0.0045  # Era 0.0048
-
-# ═══════════════════════════════════════════════════════════
-# LTCUSDT - Large Cap Alt (Média Volatilidade)
-# ═══════════════════════════════════════════════════════════
-
-LTCUSDT:
+LTCUSDT:  # large-cap alt
   enabled: true
-  category: "large_cap_alt"
-  volatility_profile: "medium"
   mode_profiles:
-    PAPER:
-      risk:
-        max_position_wallet_pct: 0.07
-    TESTNET:
-      risk:
-        max_position_wallet_pct: 0.0024
-    MAINNET:
-      risk:
-        max_position_wallet_pct: 0.07
-
+    PAPER:   { risk: { max_position_wallet_pct: 0.07 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.07 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0024 } }
   risk:
-    stop_loss_pct: 0.0024
-    take_profit_pct: 0.003
-    max_position_usdt: 16.00
+    max_position_usdt: 16.0
     atr_multiplier: 0.58
-
-  trailing_stop:
-    enabled: true
-    by_profile:
-      CONSERVATIVE:
-        activate_after_profit_pct: 0.012
-        initial_trail_pct: 0.006
-        ratchet_levels:
-          - at_profit_pct: 0.025
-            trail_pct: 0.010
-          - at_profit_pct: 0.050
-            trail_pct: 0.018
-        move_to_break_even_at: 0.018
-      MEDIUM:
-        activate_after_profit_pct: 0.0024
-        initial_trail_pct: 0.0014
-        ratchet_levels:
-          - at_profit_pct: 0.0044
-            trail_pct: 0.0019
-          - at_profit_pct: 0.0068
-            trail_pct: 0.0028
-        move_to_break_even_at: 0.0028
-      AGGRESSIVE:
-        activate_after_profit_pct: 0.020
-        initial_trail_pct: 0.010
-        ratchet_levels:
-          - at_profit_pct: 0.040
-            trail_pct: 0.018
-          - at_profit_pct: 0.080
-            trail_pct: 0.030
-        move_to_break_even_at: 0.025
-
-  entry_filters:
-    # Aumentado após análise: 4 LONGs, 25% WR, -0,042 USDT
-    min_trend_score_long: 0.50   # Era 0.30 (+67%)
-    min_trend_score_short: 0.35
-    min_trend_score: 0.42        # Era 0.24
-    min_signal_confirmation_ticks_long: 7   # Era 5
-    min_signal_confirmation_ticks_short: 7
-    min_signal_confirmation_ticks: 5        # Era 3
-    stop_loss_cooldown_minutes_short: 5
-    max_atr_pct: 0.0035  # Era 0.0042
-  
-# ═══════════════════════════════════════════════════════════
-# RISK PROFILES (Overrides globais por perfil)
-# ═══════════════════════════════════════════════════════════
-
-profiles:
-  CONSERVATIVE:
-    risk_per_trade_pct: 0.75
-    max_leverage: 2
-    max_daily_loss_pct: 0.02
-  
-  MEDIUM:
-    risk_per_trade_pct: 1.25
-    max_leverage: 2
-    max_daily_loss_pct: 0.03
-  
-  AGGRESSIVE:
-    risk_per_trade_pct: 2.00
-    max_leverage: 3
-    max_daily_loss_pct: 0.05

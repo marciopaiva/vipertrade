@@ -458,24 +458,18 @@ pub(crate) async fn run_sweep_core(
 ) -> Result<SweepResponse, SweepCoreError> {
     use viper_strategy::backtest;
 
-    // The ACTIVE trading config version from the DB — the same one the running
-    // strategy loads — so the agent's sweeps + guardrail run against live config,
-    // not the baked file. Seeds from YAML on first cold boot (from_db).
+    // The baked pairs.yaml — the single source of truth, the same file the running
+    // strategy loads — so sweeps run against the live config.
     let strategy_config =
         env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
-    let profile_config =
-        env::var("PROFILE_CONFIG").unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
     let trading_profile = env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
-    let cfg = viper_strategy::StrategyConfig::from_db(
-        &state.db_pool,
+    let cfg = viper_strategy::StrategyConfig::from_files(
         &strategy_config,
-        &profile_config,
         &trading_profile,
         &trading_mode,
     )
-    .await
     .map_err(|e| SweepCoreError::Internal(format!("config load failed: {e}")))?;
 
     let since = match req.since.as_deref() {

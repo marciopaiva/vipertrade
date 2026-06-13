@@ -1,4 +1,3 @@
-use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
@@ -53,11 +52,9 @@ pub struct StrategyInput {
 // Default OFF: when disabled, the original stub behavior is preserved.
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Process-wide strategy config, set once at startup so the (free-fn) pipeline
-/// steps can reach it. Held in an `ArcSwap` so a `viper:config_changed` Redis
-/// notification can hot-swap the active DB version live (no restart); readers
-/// get a consistent lock-free snapshot via `real_cfg()`.
-static STRATEGY_CFG: std::sync::OnceLock<ArcSwap<StrategyConfig>> = std::sync::OnceLock::new();
+/// Process-wide strategy config, set once at startup from the baked `pairs.yaml`
+/// (the single source of truth) so the (free-fn) pipeline steps can reach it.
+static STRATEGY_CFG: std::sync::OnceLock<Arc<StrategyConfig>> = std::sync::OnceLock::new();
 
 /// `Some(cfg)` when real decisions are enabled and the config is available.
 fn real_cfg() -> Option<Arc<StrategyConfig>> {
@@ -67,7 +64,7 @@ fn real_cfg() -> Option<Arc<StrategyConfig>> {
     if !enabled {
         return None;
     }
-    STRATEGY_CFG.get().map(|swap| swap.load_full())
+    STRATEGY_CFG.get().cloned()
 }
 
 /// Assemble the flat `state` the legacy logic reads: market signal features
@@ -320,7 +317,6 @@ pub struct StrategyConfig {
     trading_mode: String,
     global: Value,
     pairs: HashMap<String, Value>,
-    profiles: Value,
     bollinger_std_dev_multiplier: f64,
     bollinger_invalidation_threshold: f64,
 }
@@ -620,7 +616,6 @@ impl StrategyConfig {
                 "trailing_stop": { "min_move_threshold_pct": 0.002 }
             }),
             pairs: std::collections::HashMap::new(),
-            profiles: serde_json::json!({}),
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
@@ -630,37 +625,20 @@ impl StrategyConfig {
 impl StrategyConfig {
     pub fn from_files(
         pairs_path: &str,
-        profiles_path: &str,
         profile: &str,
         trading_mode: &str,
     ) -> Result<Self, Box<dyn Error>> {
         let pairs_raw = fs::read_to_string(pairs_path)?;
-        let profiles_raw = fs::read_to_string(profiles_path)?;
-
         let pairs_yaml: serde_yaml::Value = serde_yaml::from_str(&pairs_raw)?;
-        let profiles_yaml: serde_yaml::Value = serde_yaml::from_str(&profiles_raw)?;
-
         let pairs_json = serde_json::to_value(pairs_yaml)?;
-        let profiles_json = serde_json::to_value(profiles_yaml)?;
-
-        Ok(Self::from_pairs_json(
-            pairs_json,
-            profiles_json,
-            profile,
-            trading_mode,
-        ))
+        Ok(Self::from_pairs_json(pairs_json, profile, trading_mode))
     }
 
-    /// Build a config from already-parsed JSON: the `pairs_json` mirrors the
-    /// `pairs.yaml` shape (top-level `global` + each `<SYMBOL>` block) and
-    /// `profiles_json` mirrors `profiles.yaml`. Shared by `from_files` (YAML on
-    /// disk) and `from_db` (the active DB-stored version).
-    pub fn from_pairs_json(
-        pairs_json: Value,
-        profiles_json: Value,
-        profile: &str,
-        trading_mode: &str,
-    ) -> Self {
+    /// Build a config from already-parsed JSON: `pairs_json` mirrors the
+    /// `pairs.yaml` shape (top-level `global` + each `<SYMBOL>` block). It is the
+    /// single source of truth for all tunables and risk params. Shared by
+    /// `from_files` (YAML on disk) and `from_db` (the active DB-stored version).
+    pub fn from_pairs_json(pairs_json: Value, profile: &str, trading_mode: &str) -> Self {
         let global = pairs_json
             .get("global")
             .cloned()
@@ -680,68 +658,9 @@ impl StrategyConfig {
             trading_mode: trading_mode.to_uppercase(),
             global,
             pairs,
-            profiles: profiles_json,
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
-    }
-
-    /// Load the ACTIVE trading config version from the DB. On the first cold boot
-    /// (no rows yet) it seeds version 1 idempotently from the baked `pairs_path`
-    /// YAML, so behavior is identical to the file until a later version is
-    /// activated. `profiles.yaml` stays file-based (structural risk profiles).
-    pub async fn from_db(
-        pool: &sqlx::PgPool,
-        pairs_path: &str,
-        profiles_path: &str,
-        profile: &str,
-        trading_mode: &str,
-    ) -> Result<Self, Box<dyn Error>> {
-        let profiles_raw = fs::read_to_string(profiles_path)?;
-        let profiles_yaml: serde_yaml::Value = serde_yaml::from_str(&profiles_raw)?;
-        let profiles_json = serde_json::to_value(profiles_yaml)?;
-
-        // Seed version 1 from the baked YAML if the table is empty. Race-safe:
-        // WHERE NOT EXISTS means whichever role boots first wins, the rest no-op.
-        let active: Option<(String,)> =
-            sqlx::query_as("SELECT config::text FROM trading_config_versions WHERE active LIMIT 1")
-                .fetch_optional(pool)
-                .await?;
-
-        let pairs_json: Value = match active {
-            Some((config_text,)) => serde_json::from_str(&config_text)?,
-            None => {
-                let pairs_raw = fs::read_to_string(pairs_path)?;
-                let pairs_yaml: serde_yaml::Value = serde_yaml::from_str(&pairs_raw)?;
-                let seed = serde_json::to_value(pairs_yaml)?;
-                sqlx::query(
-                    "INSERT INTO trading_config_versions (created_by, note, config, active) \
-                     SELECT 'migration', 'seed from pairs.yaml', $1::jsonb, true \
-                     WHERE NOT EXISTS (SELECT 1 FROM trading_config_versions)",
-                )
-                .bind(seed.to_string())
-                .execute(pool)
-                .await?;
-                // Re-read the active row (covers the race where another role seeded).
-                let (config_text,): (String,) = sqlx::query_as(
-                    "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
-                )
-                .fetch_one(pool)
-                .await?;
-                serde_json::from_str(&config_text)?
-            }
-        };
-
-        Ok(Self::from_pairs_json(
-            pairs_json,
-            profiles_json,
-            profile,
-            trading_mode,
-        ))
-    }
-
-    fn profile_cfg(&self) -> Option<&Value> {
-        self.profiles.get(&self.profile)
     }
 
     fn pair_cfg(&self, symbol: &str) -> Option<&Value> {
@@ -777,25 +696,15 @@ impl StrategyConfig {
     }
 
     fn max_daily_loss_pct(&self) -> f64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "max_daily_loss_pct"], 0.03);
-        }
         cfg_f64(&self.global, &["risk", "max_daily_loss_pct"], 0.03)
     }
 
     fn max_consecutive_losses(&self) -> i64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_i64(profile, &["circuit_breaker", "consecutive_losses_limit"], 3);
-        }
         cfg_i64(&self.global, &["risk", "max_consecutive_losses"], 3)
     }
 
     fn risk_per_trade_fraction(&self) -> f64 {
-        let pct = if let Some(profile) = self.profile_cfg() {
-            cfg_f64(profile, &["trading_parameters", "risk_per_trade_pct"], 1.0)
-        } else {
-            1.0
-        };
+        let pct = cfg_f64(&self.global, &["risk", "risk_per_trade_pct"], 1.0);
         if pct > 1.0 {
             pct / 100.0
         } else {
@@ -804,44 +713,59 @@ impl StrategyConfig {
     }
 
     fn max_leverage(&self) -> f64 {
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "max_leverage"], 2.0);
-        }
-        2.0
+        cfg_f64(&self.global, &["risk", "max_leverage"], 2.0)
     }
 
     fn min_position_usdt(&self) -> f64 {
         cfg_f64(&self.global, &["smart_copy", "min_position_usdt"], 5.0)
     }
 
+    /// Global per-mode sizing default: mode_profiles.<MODE>.risk.<key>. This is
+    /// the single source of truth a symbol inherits when it has no per-symbol
+    /// override, so a freshly-added token (minimal block, just `enabled`) is sized
+    /// from the curated global default instead of the raw global cap.
+    fn mode_risk_f64(&self, key: &str) -> Option<f64> {
+        self.mode_cfg()
+            .and_then(|v| cfg_get(v, &["risk", key]))
+            .and_then(Value::as_f64)
+    }
+
     fn max_position_usdt(&self, symbol: &str) -> f64 {
         let global_max = cfg_f64(&self.global, &["smart_copy", "max_position_usdt"], 30.0);
-        let mode_pair_max = self
+        // per-symbol override (mode then top-level) → global mode default → cap.
+        let pair = self
             .pair_mode_cfg(symbol)
             .and_then(|v| cfg_get(v, &["risk", "max_position_usdt"]))
-            .and_then(Value::as_f64);
-        let pair_max = self
-            .pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["risk", "max_position_usdt"], global_max))
-            .unwrap_or(global_max);
-        mode_pair_max.unwrap_or(pair_max).min(global_max)
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                self.pair_cfg(symbol)
+                    .and_then(|v| cfg_get(v, &["risk", "max_position_usdt"]))
+                    .and_then(Value::as_f64)
+            });
+        pair.or_else(|| self.mode_risk_f64("max_position_usdt"))
+            .unwrap_or(global_max)
+            .min(global_max)
     }
 
     fn max_position_wallet_pct(&self, symbol: &str) -> Option<f64> {
-        let mode_pair_pct = self
-            .pair_mode_cfg(symbol)
+        // per-symbol override (mode then top-level) → global mode default.
+        self.pair_mode_cfg(symbol)
             .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
-            .and_then(Value::as_f64);
-        let pair_pct = self
-            .pair_cfg(symbol)
-            .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
-            .and_then(Value::as_f64);
-        mode_pair_pct.or(pair_pct)
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                self.pair_cfg(symbol)
+                    .and_then(|v| cfg_get(v, &["risk", "max_position_wallet_pct"]))
+                    .and_then(Value::as_f64)
+            })
+            .or_else(|| self.mode_risk_f64("max_position_wallet_pct"))
     }
 
     fn atr_multiplier(&self, symbol: &str) -> f64 {
+        // per-symbol override → global mode default → 1.0 (neutral).
         self.pair_cfg(symbol)
-            .map(|v| cfg_f64(v, &["risk", "atr_multiplier"], 1.0))
+            .and_then(|v| cfg_get(v, &["risk", "atr_multiplier"]))
+            .and_then(Value::as_f64)
+            .or_else(|| self.mode_risk_f64("atr_multiplier"))
             .unwrap_or(1.0)
     }
 
@@ -1307,9 +1231,6 @@ impl StrategyConfig {
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "stop_loss_pct"], 0.015);
         }
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "stop_loss_pct"], 0.015);
-        }
         0.015
     }
 
@@ -1319,9 +1240,6 @@ impl StrategyConfig {
         }
         if let Some(pair) = self.pair_cfg(symbol) {
             return cfg_f64(pair, &["risk", "take_profit_pct"], 0.03);
-        }
-        if let Some(profile) = self.profile_cfg() {
-            return cfg_f64(profile, &["trading_parameters", "take_profit_pct"], 0.03);
         }
         0.03
     }
@@ -1333,11 +1251,6 @@ impl StrategyConfig {
             if let Some(by_profile) = cfg_get(pair, &["trailing_stop", "by_profile", &self.profile])
             {
                 return by_profile.clone();
-            }
-        }
-        if let Some(profile) = self.profile_cfg() {
-            if let Some(ts) = cfg_get(profile, &["trailing_stop"]) {
-                return ts.clone();
             }
         }
         json!({
@@ -4855,8 +4768,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let strategy_config_path = std::env::var("STRATEGY_CONFIG")
         .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
-    let profile_config_path = std::env::var("PROFILE_CONFIG")
-        .unwrap_or_else(|_| "config/system/profiles.yaml".to_string());
     let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
     let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
 
@@ -4885,27 +4796,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let cfg = Arc::new(match db_pool.as_ref() {
-        Some(pool) => {
-            StrategyConfig::from_db(
-                pool,
-                &strategy_config_path,
-                &profile_config_path,
-                &trading_profile,
-                &trading_mode,
-            )
-            .await?
-        }
-        None => StrategyConfig::from_files(
-            &strategy_config_path,
-            &profile_config_path,
-            &trading_profile,
-            &trading_mode,
-        )?,
-    });
+    // Config is the baked pairs.yaml — the single source of truth (git). The
+    // db_pool below is still used for open-position trailing, not for config.
+    let cfg = Arc::new(StrategyConfig::from_files(
+        &strategy_config_path,
+        &trading_profile,
+        &trading_mode,
+    )?);
     // Expose config to the pipeline steps for the real (flag-gated) decision logic.
-    // Wrapped in an ArcSwap so a viper:config_changed notification can hot-swap it.
-    let _ = STRATEGY_CFG.set(ArcSwap::from(cfg.clone()));
+    let _ = STRATEGY_CFG.set(cfg.clone());
     if real_cfg().is_some() {
         info!("STRATEGY_REAL_DECISIONS enabled — using real decision logic");
     }
@@ -4928,9 +4827,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     pubsub.subscribe("viper:market_data").await?;
     info!("Subscribed to viper:market_data");
-    // Same connection also carries config hot-reload notifications (Phase 2).
-    pubsub.subscribe("viper:config_changed").await?;
-    info!("Subscribed to viper:config_changed");
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
     let mut messages = pubsub.on_message();
@@ -5017,39 +4913,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             error!("Market data stream ended unexpectedly; exiting so container can restart");
                             return Err("market data stream ended unexpectedly".into());
                         };
-
-                        // Config hot-reload (Phase 2): on a viper:config_changed
-                        // notification, reload the active DB version and atomically
-                        // swap it in. Non-fatal — keep the current config on error.
-                        if msg.get_channel_name() == "viper:config_changed" {
-                            let trigger: String = msg.get_payload().unwrap_or_default();
-                            match db_pool.as_ref() {
-                                Some(pool) => match StrategyConfig::from_db(
-                                    pool,
-                                    &strategy_config_path,
-                                    &profile_config_path,
-                                    &trading_profile,
-                                    &trading_mode,
-                                )
-                                .await
-                                {
-                                    Ok(new_cfg) => {
-                                        if let Some(swap) = STRATEGY_CFG.get() {
-                                            swap.store(Arc::new(new_cfg));
-                                        }
-                                        info!(trigger = %trigger, "Hot-reloaded trading config from DB");
-                                    }
-                                    Err(err) => warn!(
-                                        err = %err,
-                                        "Config hot-reload failed; keeping current config"
-                                    ),
-                                },
-                                None => {
-                                    warn!("Config change signalled but no DB pool; ignoring")
-                                }
-                            }
-                            continue;
-                        }
 
                         let payload: String = msg.get_payload()?;
 
@@ -5510,10 +5373,57 @@ mod tests {
                 }
             }),
             pairs: HashMap::new(),
-            profiles: json!({}),
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
+    }
+
+    // Sizing single-source-of-truth: a token with no per-symbol risk override
+    // inherits the global mode-profile default; an override still wins.
+    fn sizing_cfg() -> StrategyConfig {
+        StrategyConfig {
+            profile: "TEST".to_string(),
+            trading_mode: "PAPER".to_string(),
+            global: json!({
+                "smart_copy": { "max_position_usdt": 30 },
+                "mode_profiles": {
+                    "PAPER": {
+                        "risk": {
+                            "max_position_wallet_pct": 0.08,
+                            "atr_multiplier": 0.65,
+                            "max_position_usdt": 18
+                        }
+                    }
+                }
+            }),
+            pairs: HashMap::from([(
+                "OVERRIDEUSDT".to_string(),
+                json!({
+                    "enabled": true,
+                    "mode_profiles": { "PAPER": { "risk": { "max_position_wallet_pct": 0.12 } } },
+                    "risk": { "atr_multiplier": 0.5, "max_position_usdt": 20 }
+                }),
+            )]),
+            bollinger_std_dev_multiplier: 2.0,
+            bollinger_invalidation_threshold: 0.7,
+        }
+    }
+
+    #[test]
+    fn new_token_inherits_global_sizing_defaults() {
+        let cfg = sizing_cfg();
+        // NEWUSDT has no per-symbol block (a freshly-added token) → global default.
+        assert_eq!(cfg.max_position_wallet_pct("NEWUSDT"), Some(0.08));
+        assert_eq!(cfg.atr_multiplier("NEWUSDT"), 0.65);
+        assert_eq!(cfg.max_position_usdt("NEWUSDT"), 18.0);
+    }
+
+    #[test]
+    fn per_symbol_sizing_override_wins_over_global_default() {
+        let cfg = sizing_cfg();
+        assert_eq!(cfg.max_position_wallet_pct("OVERRIDEUSDT"), Some(0.12));
+        assert_eq!(cfg.atr_multiplier("OVERRIDEUSDT"), 0.5);
+        assert_eq!(cfg.max_position_usdt("OVERRIDEUSDT"), 20.0);
     }
 
     fn sample_open_trade() -> OpenTradeSnapshot {
