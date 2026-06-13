@@ -42,7 +42,10 @@ global:
       min_hold_seconds: 300
       # Aumentado para filtrar entradas marginais - CORRIGIDO 2026-04-02
       min_trend_score_long: 0.50
-      min_trend_score_short: 0.45
+      # Raised 0.45 -> 0.55 in the 2026-06-13 entry-filter retune (deterministic
+      # backtest, 60k+20k windows): part of the combo that ~4x'd net PnL and
+      # halved the stop_loss bleed.
+      min_trend_score_short: 0.55
       # Reduzida assimetria Long/Short
       min_signal_confirmation_ticks_long: 4
       min_signal_confirmation_ticks_short: 5
@@ -61,13 +64,14 @@ global:
       # Bollinger %B entry guard: skip longs at band tops / shorts at band
       # bottoms. Backtest (#37): net -0.3488 -> +0.0030, thesis bleed 37 -> 17.
       max_percent_b_long: 0.85
-      min_percent_b_short: 0.15
-      # ADX(14) entry gate: skip entries in chop (weak trend). Backtest on the
-      # ADX-era corpus (16.3k ticks): net -1.0129 -> -0.5287 (+0.48), win 44.7% ->
-      # 47.7%, cutting 8 low-ADX entries that bled via thesis/stop_loss. Gain
-      # plateaus 18-22; >=25 over-cuts (win rate drops below baseline). Read as a
-      # DIRECT child of the mode profile by mode_f64("min_adx").
-      min_adx: 18
+      # Raised 0.15 -> 0.20 in the 2026-06-13 entry-filter retune (see min_adx).
+      min_percent_b_short: 0.20
+      # ADX(14) entry gate: skip entries in chop (weak trend). Gain plateaus 18-22;
+      # >=25 over-cuts. Set to 20 in the 2026-06-13 retune on the 4x-grown corpus
+      # (60k+20k windows): min_adx alone +1.55 net; the AI auto-tuner had drifted
+      # this to 25 (over-cutting profitable trades) before the retune reverted it.
+      # Read as a DIRECT child of the mode profile by mode_f64("min_adx").
+      min_adx: 20
       stop_loss_cooldown_minutes_long: 5
       stop_loss_cooldown_minutes_short: 8
       # Thesis health-score invalidation DISABLED (analysis 2026-06-11). The
