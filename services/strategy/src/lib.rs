@@ -1,4 +1,3 @@
-use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
@@ -53,11 +52,9 @@ pub struct StrategyInput {
 // Default OFF: when disabled, the original stub behavior is preserved.
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Process-wide strategy config, set once at startup so the (free-fn) pipeline
-/// steps can reach it. Held in an `ArcSwap` so a `viper:config_changed` Redis
-/// notification can hot-swap the active DB version live (no restart); readers
-/// get a consistent lock-free snapshot via `real_cfg()`.
-static STRATEGY_CFG: std::sync::OnceLock<ArcSwap<StrategyConfig>> = std::sync::OnceLock::new();
+/// Process-wide strategy config, set once at startup from the baked `pairs.yaml`
+/// (the single source of truth) so the (free-fn) pipeline steps can reach it.
+static STRATEGY_CFG: std::sync::OnceLock<Arc<StrategyConfig>> = std::sync::OnceLock::new();
 
 /// `Some(cfg)` when real decisions are enabled and the config is available.
 fn real_cfg() -> Option<Arc<StrategyConfig>> {
@@ -67,7 +64,7 @@ fn real_cfg() -> Option<Arc<StrategyConfig>> {
     if !enabled {
         return None;
     }
-    STRATEGY_CFG.get().map(|swap| swap.load_full())
+    STRATEGY_CFG.get().cloned()
 }
 
 /// Assemble the flat `state` the legacy logic reads: market signal features
@@ -664,50 +661,6 @@ impl StrategyConfig {
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         }
-    }
-
-    /// Load the ACTIVE trading config version from the DB. On the first cold boot
-    /// (no rows yet) it seeds version 1 idempotently from the baked `pairs_path`
-    /// YAML, so behavior is identical to the file until a later version is
-    /// activated.
-    pub async fn from_db(
-        pool: &sqlx::PgPool,
-        pairs_path: &str,
-        profile: &str,
-        trading_mode: &str,
-    ) -> Result<Self, Box<dyn Error>> {
-        // Seed version 1 from the baked YAML if the table is empty. Race-safe:
-        // WHERE NOT EXISTS means whichever role boots first wins, the rest no-op.
-        let active: Option<(String,)> =
-            sqlx::query_as("SELECT config::text FROM trading_config_versions WHERE active LIMIT 1")
-                .fetch_optional(pool)
-                .await?;
-
-        let pairs_json: Value = match active {
-            Some((config_text,)) => serde_json::from_str(&config_text)?,
-            None => {
-                let pairs_raw = fs::read_to_string(pairs_path)?;
-                let pairs_yaml: serde_yaml::Value = serde_yaml::from_str(&pairs_raw)?;
-                let seed = serde_json::to_value(pairs_yaml)?;
-                sqlx::query(
-                    "INSERT INTO trading_config_versions (created_by, note, config, active) \
-                     SELECT 'migration', 'seed from pairs.yaml', $1::jsonb, true \
-                     WHERE NOT EXISTS (SELECT 1 FROM trading_config_versions)",
-                )
-                .bind(seed.to_string())
-                .execute(pool)
-                .await?;
-                // Re-read the active row (covers the race where another role seeded).
-                let (config_text,): (String,) = sqlx::query_as(
-                    "SELECT config::text FROM trading_config_versions WHERE active LIMIT 1",
-                )
-                .fetch_one(pool)
-                .await?;
-                serde_json::from_str(&config_text)?
-            }
-        };
-
-        Ok(Self::from_pairs_json(pairs_json, profile, trading_mode))
     }
 
     fn pair_cfg(&self, symbol: &str) -> Option<&Value> {
@@ -4843,16 +4796,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let cfg = Arc::new(match db_pool.as_ref() {
-        Some(pool) => {
-            StrategyConfig::from_db(pool, &strategy_config_path, &trading_profile, &trading_mode)
-                .await?
-        }
-        None => StrategyConfig::from_files(&strategy_config_path, &trading_profile, &trading_mode)?,
-    });
+    // Config is the baked pairs.yaml — the single source of truth (git). The
+    // db_pool below is still used for open-position trailing, not for config.
+    let cfg = Arc::new(StrategyConfig::from_files(
+        &strategy_config_path,
+        &trading_profile,
+        &trading_mode,
+    )?);
     // Expose config to the pipeline steps for the real (flag-gated) decision logic.
-    // Wrapped in an ArcSwap so a viper:config_changed notification can hot-swap it.
-    let _ = STRATEGY_CFG.set(ArcSwap::from(cfg.clone()));
+    let _ = STRATEGY_CFG.set(cfg.clone());
     if real_cfg().is_some() {
         info!("STRATEGY_REAL_DECISIONS enabled — using real decision logic");
     }
@@ -4875,9 +4827,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     pubsub.subscribe("viper:market_data").await?;
     info!("Subscribed to viper:market_data");
-    // Same connection also carries config hot-reload notifications (Phase 2).
-    pubsub.subscribe("viper:config_changed").await?;
-    info!("Subscribed to viper:config_changed");
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;
     let mut messages = pubsub.on_message();
@@ -4964,38 +4913,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             error!("Market data stream ended unexpectedly; exiting so container can restart");
                             return Err("market data stream ended unexpectedly".into());
                         };
-
-                        // Config hot-reload (Phase 2): on a viper:config_changed
-                        // notification, reload the active DB version and atomically
-                        // swap it in. Non-fatal — keep the current config on error.
-                        if msg.get_channel_name() == "viper:config_changed" {
-                            let trigger: String = msg.get_payload().unwrap_or_default();
-                            match db_pool.as_ref() {
-                                Some(pool) => match StrategyConfig::from_db(
-                                    pool,
-                                    &strategy_config_path,
-                                    &trading_profile,
-                                    &trading_mode,
-                                )
-                                .await
-                                {
-                                    Ok(new_cfg) => {
-                                        if let Some(swap) = STRATEGY_CFG.get() {
-                                            swap.store(Arc::new(new_cfg));
-                                        }
-                                        info!(trigger = %trigger, "Hot-reloaded trading config from DB");
-                                    }
-                                    Err(err) => warn!(
-                                        err = %err,
-                                        "Config hot-reload failed; keeping current config"
-                                    ),
-                                },
-                                None => {
-                                    warn!("Config change signalled but no DB pool; ignoring")
-                                }
-                            }
-                            continue;
-                        }
 
                         let payload: String = msg.get_payload()?;
 

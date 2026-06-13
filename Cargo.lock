@@ -3141,7 +3141,6 @@ dependencies = [
 name = "viper-market-data"
 version = "0.9.0"
 dependencies = [
- "arc-swap",
  "chrono",
  "futures-util",
  "redis 0.27.6",
@@ -3149,7 +3148,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3181,7 +3179,6 @@ dependencies = [
 name = "viper-strategy"
 version = "0.9.0"
 dependencies = [
- "arc-swap",
  "chrono",
  "futures-util",
  "hex",

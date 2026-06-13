@@ -19,8 +19,6 @@ pub struct AppState {
     pub default_max_leverage: f64,
     pub default_risk_per_trade_pct: f64,
     pub position_config: PositionConfigStore,
-    /// Resolved Redis URL — used to PUBLISH viper:config_changed on config writes.
-    pub redis_url: String,
 }
 
 #[derive(Serialize)]
@@ -99,44 +97,6 @@ pub struct RiskLimitsRequest {
 
 #[derive(Deserialize)]
 pub struct TradesQuery {
-    pub limit: Option<u32>,
-}
-
-/// Save a full edited trading-config JSON as a new active version (Phase 3).
-#[derive(Deserialize)]
-pub struct ConfigSaveRequest {
-    pub config: Value,
-    pub note: Option<String>,
-}
-
-/// Activate (or revert to) an existing config version by id.
-#[derive(Deserialize)]
-pub struct ConfigActivateRequest {
-    pub version_id: i64,
-}
-
-/// Promote the active PAPER profile into MAINNET as a new active version.
-#[derive(Deserialize)]
-pub struct ConfigPromoteRequest {
-    pub note: Option<String>,
-}
-
-/// Check a symbol's availability across the 3 consensus exchanges (Phase 4a).
-#[derive(Deserialize)]
-pub struct ConfigValidateSymbolRequest {
-    pub symbol: String,
-}
-
-/// Add a new token to the universe (minimal block, disabled — inherits PAPER).
-#[derive(Deserialize)]
-pub struct ConfigAddTokenRequest {
-    pub symbol: String,
-}
-
-/// Suggest tokens to add (busiest perps not in the universe, on all 3 venues).
-#[derive(Deserialize, Default)]
-pub struct ConfigSuggestRequest {
-    #[serde(default)]
     pub limit: Option<u32>,
 }
 
