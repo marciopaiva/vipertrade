@@ -4,6 +4,7 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
 import { PositionGauge } from '@/components/console/PositionGauge';
 import { KpiStrip } from '@/components/console/KpiStrip';
+import { MarketSentiment } from '@/components/console/MarketSentiment';
 import { EquityCurve } from '@/components/analysis/EquityCurve';
 
 interface PositionItem {
@@ -102,6 +103,10 @@ export default function ConsolePage() {
 
       {/* Equity curve — cumulative realized PnL, right under the KPI strip. */}
       <EquityCurve />
+
+      {/* Market sentiment — full-width band: gauge on the left, Fear & Greed
+          explanation + Long/Short ratio on the right. */}
+      <MarketSentiment />
 
       {/* Open positions — vertical risk-rail gauges (full width). */}
       <PositionGauge
