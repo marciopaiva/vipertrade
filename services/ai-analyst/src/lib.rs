@@ -401,10 +401,20 @@ async fn handle_health(state: Arc<AppState>) -> Result<impl Reply, Rejection> {
         .await
         .is_ok();
 
-    Ok(warp::reply::json(&HealthResponse {
-        status: "ok",
-        db_connected,
-    }))
+    // Return 503 when the DB is unreachable so K8s readiness probes (which only
+    // inspect the HTTP status, not the body) actually take the pod out of rotation.
+    let code = if db_connected {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    Ok(warp::reply::with_status(
+        warp::reply::json(&HealthResponse {
+            status: if db_connected { "ok" } else { "unavailable" },
+            db_connected,
+        }),
+        code,
+    ))
 }
 
 async fn handle_recent_analysis(
