@@ -67,6 +67,7 @@ Mode profiles define the broad risk posture of the runtime.
 Key fields read by the strategy from `global.mode_profiles.PAPER`:
 
 Entry filters:
+
 - `min_adx` — minimum ADX to allow entry
 - `min_trend_score_long` / `min_trend_score_short`
 - `min_percent_b_long` / `min_percent_b_short` (Bollinger %B guard)
@@ -77,15 +78,18 @@ Entry filters:
 - `permissive_entry` / `require_multi_exchange_consensus`
 
 Exit controls:
+
 - `stop_loss_pct` / `trailing_enabled` / `min_hold_seconds`
 - `stop_loss_cooldown_minutes_long` / `stop_loss_cooldown_minutes_short`
 - `opposite_side_exit` — `both` (require consensus AND regime flip), `any`, or `off`
-- `thesis_health.*` — thesis-invalidation health thresholds (all disabled: long_* = -200, short_* = 200)
+- `thesis_health.*` — thesis-invalidation health thresholds (all disabled: `long_*` = -200, `short_*` = 200)
 
 Sizing (under `global.mode_profiles.PAPER.risk`):
+
 - `max_position_wallet_pct` / `atr_multiplier` / `max_position_usdt`
 
 BTC macro filters:
+
 - `btc_macro_min_trend_score_long` / `btc_macro_min_trend_score_short`
 - `btc_macro_min_consensus_count_long` / `btc_macro_min_consensus_count_short`
 - `btc_macro_neutral_penalty`
@@ -133,11 +137,13 @@ Recommended workflow for configuration changes:
 
 1. Identify a hypothesis from `/analyze/recent` or direct observation.
 2. Validate the change with a deterministic sweep before committing:
-   ```
+
+   ```bash
    kubectl exec deploy/web -- curl -s -X POST http://ai-analyst:8087/sweep \
      -H 'content-type: application/json' \
      -d '{"variants":[{"overrides":[{"path":"mode_profiles.PAPER.<param>","value":<v>}]}]}'
    ```
+
 3. Test on at least two corpus windows (e.g. `limit=60000` and `limit=20000`).
 4. If the change is robust, edit `config/trading/pairs.yaml` (under `global.mode_profiles.PAPER`).
 5. Commit → `make build && make deploy` → `kubectl rollout restart deployment strategy`.
