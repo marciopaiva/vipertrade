@@ -40,17 +40,23 @@ run_docs_lint() {
       targets+=("$file")
    done < <(find docs -type f -name '*.md' | sort)
 
-   if command -v markdownlint >/dev/null 2>&1; then
+   # Pin to the exact version CI uses (.github/workflows/ci.yml). A host
+   # markdownlint of a different version drifts from CI (e.g. 0.48 adds MD060),
+   # which defeats the purpose of local parity — only trust it if it matches.
+   local pinned="0.41.0"
+
+   if command -v markdownlint >/dev/null 2>&1 \
+      && [[ "$(markdownlint --version 2>/dev/null)" == "$pinned" ]]; then
       markdownlint "${targets[@]}"
       return
    fi
 
    if command -v npx >/dev/null 2>&1; then
-      npx --yes markdownlint-cli@0.41.0 "${targets[@]}"
+      npx --yes "markdownlint-cli@${pinned}" "${targets[@]}"
       return
    fi
 
-   vt_fail "Docs lint requires markdownlint or npx"
+   vt_fail "Docs lint requires markdownlint ${pinned} or npx"
    return 1
 }
 
