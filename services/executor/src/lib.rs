@@ -2287,6 +2287,14 @@ async fn handle_decision_event(
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "viper_executor=info".into()),
+        )
+        .json()
+        .init();
+
     tracing::info!("Starting viper-executor");
 
     let cfg = ExecutorConfig::from_env();
