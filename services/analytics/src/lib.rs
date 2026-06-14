@@ -636,10 +636,20 @@ async fn handle_health(pool: Arc<PgPool>) -> Result<impl warp::Reply, warp::Reje
         .await
         .is_ok();
 
-    Ok(warp::reply::json(&serde_json::json!({
-        "status": "ok",
-        "db_connected": db_connected
-    })))
+    // Return 503 when the DB is unreachable so K8s readiness probes (which only
+    // inspect the HTTP status, not the body) actually take the pod out of rotation.
+    let code = if db_connected {
+        warp::http::StatusCode::OK
+    } else {
+        warp::http::StatusCode::SERVICE_UNAVAILABLE
+    };
+    Ok(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "status": if db_connected { "ok" } else { "unavailable" },
+            "db_connected": db_connected
+        })),
+        code,
+    ))
 }
 
 async fn handle_scores(

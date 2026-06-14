@@ -9,3 +9,4 @@ resources:
   - redis.yaml
   - services.yaml
   - deployments.yaml
+  - networkpolicy.yaml
