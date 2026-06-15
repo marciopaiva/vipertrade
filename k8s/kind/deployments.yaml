@@ -90,8 +90,10 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 when the DB check fails, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it. Under
+          # load the SELECT 1 can blip, which on liveness causes a crash loop.
+          tcpSocket:
             port: 8086
           initialDelaySeconds: 30
           periodSeconds: 20
@@ -379,8 +381,9 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 when the DB check fails, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8087
           initialDelaySeconds: 30
           periodSeconds: 20
@@ -437,3 +440,13 @@ spec:
             port: 3000
           initialDelaySeconds: 45
           periodSeconds: 20
+        # Wait only for api (web's sole backend dependency). The baked image CMD
+        # also waits for postgres/redis/ai-analyst, which web never talks to
+        # directly and the NetworkPolicy correctly denies — waiting on them
+        # hangs startup once policies are enforced (kindnet v20240813+).
+        command:
+        - wait-for-deps.sh
+        - api:8080
+        - --
+        - node
+        - server.js
