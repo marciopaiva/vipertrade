@@ -28,7 +28,8 @@ use state::{
     ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
     KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
     PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
-    RiskLimitsStatus, StatusResponse, TradeItem, TradesQuery, TradesResponse,
+    RiskLimitsStatus, StatusResponse, SymbolPnlItem, SymbolPnlQuery, SymbolPnlResponse, TradeItem,
+    TradesQuery, TradesResponse,
 };
 
 #[derive(Serialize)]
@@ -987,6 +988,70 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
             StatusCode::INTERNAL_SERVER_ERROR,
             "query_failed",
             format!("failed to fetch events: {}", err),
+        ),
+    }
+}
+
+// Per-symbol realized-PnL ranking over closed trades, worst-first. Feeds the
+// "broaden the universe, then prune the worst" workflow: with real decisions on,
+// this is the objective scoreboard for which symbols to disable in pairs.yaml.
+async fn symbol_pnl_handler(query: SymbolPnlQuery, state: Arc<AppState>) -> impl Reply {
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+
+    let days = query.days.unwrap_or(14).clamp(1, 365);
+
+    let rows = sqlx::query_as::<_, (String, f64, i64, i64, f64)>(
+        "SELECT
+             symbol,
+             COALESCE(SUM(pnl), 0)::double precision AS realized_pnl,
+             COUNT(*)::bigint AS trades,
+             COUNT(*) FILTER (WHERE pnl > 0)::bigint AS wins,
+             COALESCE(AVG(pnl_pct), 0)::double precision AS avg_pnl_pct
+         FROM trades
+         WHERE status = 'closed'
+           AND closed_at >= NOW() - make_interval(days => $1::int)
+         GROUP BY symbol
+         ORDER BY realized_pnl ASC",
+    )
+    .bind(days as i32)
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let items = rows
+                .into_iter()
+                .map(|(symbol, realized_pnl, trades, wins, avg_pnl_pct)| {
+                    let win_rate = if trades > 0 {
+                        wins as f64 / trades as f64
+                    } else {
+                        0.0
+                    };
+                    SymbolPnlItem {
+                        symbol,
+                        realized_pnl: round6(realized_pnl),
+                        trades,
+                        wins,
+                        win_rate: round6(win_rate),
+                        avg_pnl_pct: round6(avg_pnl_pct),
+                    }
+                })
+                .collect();
+            json_ok(&SymbolPnlResponse {
+                window_days: days,
+                items,
+            })
+        }
+        Err(err) => json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "query_failed",
+            format!("failed to fetch symbol pnl: {}", err),
         ),
     }
 }
@@ -2360,6 +2425,14 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(performance_handler);
 
+    let symbol_pnl = api_v1
+        .and(warp::path("performance"))
+        .and(warp::path("by-symbol"))
+        .and(warp::path::end())
+        .and(warp::query::<SymbolPnlQuery>())
+        .and(with_state(state.clone()))
+        .then(symbol_pnl_handler);
+
     let risk_kpis = api_v1
         .and(warp::path("risk"))
         .and(warp::path("kpis"))
@@ -2441,6 +2514,7 @@ pub async fn run() {
     let data = decisions
         .or(events)
         .or(performance)
+        .or(symbol_pnl)
         .or(risk_kpis)
         .or(bybit_private_health)
         .or(bybit_wallet)
