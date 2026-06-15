@@ -299,3 +299,67 @@ LTCUSDT:  # large-cap alt
   risk:
     max_position_usdt: 16.0
     atr_multiplier: 0.58
+
+# ── 2026-06-15: universe diversification (broaden-then-prune). All six verified
+# live as USDT perps on bybit ∩ binance ∩ okx. Adds majors + L1 + DeFi + PoW to
+# the previously all-large-cap-alt set, including BTC/ETH benchmarks that were
+# absent. Conservative sizing within the existing per-symbol ranges.
+BTCUSDT:  # major · benchmark
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+ETHUSDT:  # major · benchmark
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+SOLUSDT:  # L1 major
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.65
+
+BNBUSDT:  # exchange token
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.6
+
+AAVEUSDT:  # DeFi blue-chip
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.65
+
+BCHUSDT:  # PoW
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.6
