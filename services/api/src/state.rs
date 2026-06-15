@@ -105,6 +105,28 @@ pub struct EventsQuery {
     pub limit: Option<u32>,
 }
 
+#[derive(Deserialize)]
+pub struct SymbolPnlQuery {
+    pub days: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct SymbolPnlItem {
+    pub symbol: String,
+    pub realized_pnl: f64,
+    pub trades: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+    pub avg_pnl_pct: f64,
+}
+
+#[derive(Serialize)]
+pub struct SymbolPnlResponse {
+    pub window_days: i64,
+    // Ordered worst-first (lowest realized PnL) so callers can prune the tail.
+    pub items: Vec<SymbolPnlItem>,
+}
+
 #[derive(Serialize)]
 pub struct PositionItem {
     pub trade_id: String,

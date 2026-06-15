@@ -44,6 +44,11 @@ data:
   # Trading profile
   TRADING_PROFILE: MEDIUM
 
+  # Strategy: use the real decision logic (ENTER_LONG/SHORT) instead of the
+  # always-HOLD stub. Safe to enable here because TRADING_MODE=paper and
+  # EXECUTOR_ENABLE_LIVE_ORDERS=false — fills are DB-simulated, no real orders.
+  STRATEGY_REAL_DECISIONS: "true"
+
   # Executor configuration
   EXECUTOR_ENABLE_LIVE_ORDERS: "false"
   EXECUTOR_PAPER_MAX_OPEN_POSITIONS: "4"
