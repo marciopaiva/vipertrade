@@ -5,11 +5,12 @@
 # chain and the internal service URLs in configmap.yaml). Egress is intentionally
 # left open so services keep reaching the Bybit API and cluster DNS.
 #
-# IMPORTANT: Kind's default CNI (kindnet) does NOT enforce NetworkPolicy — these
-# manifests are inert until the cluster runs a policy-enforcing CNI such as Calico.
-# When enforcement is enabled, validate that kubelet liveness/readiness probes
-# (sourced from the node, not from a pod) still reach the app ports; you may need
-# an extra ipBlock allow for the node/pod CIDR on the probe ports.
+# IMPORTANT: recent kindnet ENFORCES NetworkPolicy (kindest/kindnetd:v20240813+),
+# so these are live, not aspirational. Each service's wait-for-deps targets and
+# runtime egress must match its allow-list — e.g. web only waits on api:8080,
+# because it is not allowed to reach postgres/redis/ai-analyst. Kubelet probes
+# are node-sourced and kindnet permits host->pod, so liveness/readiness still
+# reach the app ports without an extra ipBlock allow.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
