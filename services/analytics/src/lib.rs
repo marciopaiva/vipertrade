@@ -631,25 +631,21 @@ fn with_cache(
 }
 
 async fn handle_health(pool: Arc<PgPool>) -> Result<impl warp::Reply, warp::Rejection> {
+    // Always 200 — db_connected is informative only. Unlike a request-serving
+    // service (e.g. api), analytics is a background sampler: its readiness gates
+    // the low-criticality /scores endpoint, and the health SELECT 1 competes
+    // with the sampling loop for the small DB pool. Under the 14-symbol load
+    // that contention made the SELECT 1 blip, a 503 here flapped the pod out of
+    // rotation (crash/ready loop). DB liveness is still visible in the body.
     let db_connected = sqlx::query_scalar::<_, i64>("select 1")
         .fetch_one(&*pool)
         .await
         .is_ok();
 
-    // Return 503 when the DB is unreachable so K8s readiness probes (which only
-    // inspect the HTTP status, not the body) actually take the pod out of rotation.
-    let code = if db_connected {
-        warp::http::StatusCode::OK
-    } else {
-        warp::http::StatusCode::SERVICE_UNAVAILABLE
-    };
-    Ok(warp::reply::with_status(
-        warp::reply::json(&serde_json::json!({
-            "status": if db_connected { "ok" } else { "unavailable" },
-            "db_connected": db_connected
-        })),
-        code,
-    ))
+    Ok(warp::reply::json(&serde_json::json!({
+        "status": "ok",
+        "db_connected": db_connected
+    })))
 }
 
 async fn handle_scores(
