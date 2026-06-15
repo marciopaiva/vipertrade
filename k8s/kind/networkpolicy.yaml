@@ -1,29 +1,26 @@
 # NetworkPolicies for the vipertrade namespace.
 #
-# Model: default-deny *ingress* for every pod, then allow only the edges that
-# actually exist in the service graph (derived from the deployments' wait-for-deps
-# chain and the internal service URLs in configmap.yaml). Egress is intentionally
-# left open so services keep reaching the Bybit API and cluster DNS.
+# Scope: protect the datastores only. postgres and redis each get a policy that
+# admits just their real consumers; every other pod that connects to them is
+# denied (a pod selected by an ingress policy defaults to deny for unlisted
+# sources). All app<->app HTTP is intentionally left unrestricted.
 #
-# IMPORTANT: recent kindnet ENFORCES NetworkPolicy (kindest/kindnetd:v20240813+),
-# so these are live, not aspirational. Each service's wait-for-deps targets and
-# runtime egress must match its allow-list — e.g. web only waits on api:8080,
-# because it is not allowed to reach postgres/redis/ai-analyst. Kubelet probes
-# are node-sourced and kindnet permits host->pod, so liveness/readiness still
-# reach the app ports without an extra ipBlock allow.
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-ingress
-  namespace: vipertrade
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
+# Why not a namespace-wide default-deny + per-service allows: this cluster's
+# kindnet (kindest/kindnetd:v20240813+) enforces NetworkPolicy, and getting every
+# app->app edge exactly right proved fragile — a missing/!mismatched allow shows
+# up as a silently dropped SYN (request hangs to timeout), which broke web's
+# startup and the console's server-side calls (web -> api/ai-analyst). The high
+# value is keeping a compromised pod off the DB/Redis; the per-HTTP-service rules
+# added cost without much benefit on a local paper-trading cluster, so they were
+# removed. Re-introduce a default-deny + full allow set only against a CNI/policy
+# matrix you've validated end-to-end.
+#
+# Egress is unrestricted (these are Ingress policies), so services keep reaching
+# the Bybit API and cluster DNS. Kubelet probes are node-sourced; kindnet permits
+# host->pod, so liveness/readiness are unaffected.
 ---
 # postgres: only the DB consumers. market-data is intentionally excluded (it uses
-# redis only), and so is web.
+# redis only), and so is web (it talks to api, not the DB).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -68,130 +65,3 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
----
-# market-data:8081 <- strategy, ai-analyst, web (console cards call it server-side)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-market-data
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: market-data
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values: [strategy, ai-analyst, web]
-      ports:
-        - protocol: TCP
-          port: 8081
----
-# analytics:8086 <- market-data, web (console scores card)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-analytics
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: analytics
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values: [market-data, web]
-      ports:
-        - protocol: TCP
-          port: 8086
----
-# strategy:8082 <- executor
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-strategy
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: strategy
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app: executor
-      ports:
-        - protocol: TCP
-          port: 8082
----
-# ai-analyst:8087 <- strategy, web (console sentiment/analysis cards)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-ai-analyst
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: ai-analyst
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values: [strategy, web]
-      ports:
-        - protocol: TCP
-          port: 8087
----
-# api:8080 <- internal callers (web, strategy, ai-analyst) AND external NodePort
-# traffic (the browser hits the /ws live stream at host :8443). External NodePort
-# packets are SNAT'd to the node IP, so allowing all sources on 8080 is required
-# for the published port to work.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-api
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: api
-  policyTypes:
-    - Ingress
-  ingress:
-    - ports:
-        - protocol: TCP
-          port: 8080
----
-# web:3000 <- external NodePort only (browser reaches the console at host :30080).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-web
-  namespace: vipertrade
-spec:
-  podSelector:
-    matchLabels:
-      app: web
-  policyTypes:
-    - Ingress
-  ingress:
-    - ports:
-        - protocol: TCP
-          port: 3000
