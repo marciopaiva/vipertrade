@@ -240,8 +240,8 @@ XRPUSDT:  # large-cap alt
     max_position_usdt: 20.0
     atr_multiplier: 0.6
 
-ADAUSDT:  # large-cap alt (disabled)
-  enabled: false
+ADAUSDT:  # large-cap alt
+  enabled: true
   mode_profiles:
     PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
     MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
