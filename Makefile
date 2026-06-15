@@ -10,6 +10,7 @@ REGISTRY_CTR     ?= kind-registry
 CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
 KUBE_NAMESPACE   ?= vipertrade
+KIND_CONTEXT     ?= kind-$(KIND_CLUSTER)
 
 # App deployments (stateful postgres/redis excluded) — restarted on redeploy so
 # they pick up the mutable :dev image and re-read ConfigMap env.
@@ -48,14 +49,17 @@ deploy:
 	@./scripts/kind/deploy.sh
 
 ## Full refresh after a code or config change: rebuild images, apply manifests,
-## then restart the app deployments. The restart is required because the :dev
-## image tag is mutable (apply won't recreate pods) and ConfigMap changes don't
-## trigger a rollout on their own. pairs.yaml is baked into the image, so the
-## `build` step is what ships symbol/universe changes.
-redeploy: build deploy
-	@kubectl rollout restart deployment $(APP_DEPLOYMENTS) -n $(KUBE_NAMESPACE)
+## then restart every app deployment so they pick up the new (mutable :dev) image
+## and ConfigMap env. Does its own apply + rollout restart instead of depending on
+## `deploy`: an image-only change leaves the Deployment spec "unchanged" (apply
+## won't recreate pods), and `deploy`'s rollout-status wait is fatal if a prior
+## rollout is stuck — either would skip the restart. `restart` forces a fresh
+## ReplicaSet, which also clears a stuck rollout.
+redeploy: build
+	@kubectl --context $(KIND_CONTEXT) apply -k k8s/kind
+	@kubectl --context $(KIND_CONTEXT) -n $(KUBE_NAMESPACE) rollout restart deployment $(APP_DEPLOYMENTS)
 	@for d in $(APP_DEPLOYMENTS); do \
-		kubectl rollout status deployment $$d -n $(KUBE_NAMESPACE) --timeout=240s; \
+		kubectl --context $(KIND_CONTEXT) -n $(KUBE_NAMESPACE) rollout status deployment $$d --timeout=300s; \
 	done
 
 ## Start the Kind cluster and local registry
