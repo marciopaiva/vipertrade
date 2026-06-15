@@ -69,7 +69,7 @@ spec:
         - protocol: TCP
           port: 6379
 ---
-# market-data:8081 <- strategy, ai-analyst
+# market-data:8081 <- strategy, ai-analyst, web (console cards call it server-side)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -87,12 +87,12 @@ spec:
             matchExpressions:
               - key: app
                 operator: In
-                values: [strategy, ai-analyst]
+                values: [strategy, ai-analyst, web]
       ports:
         - protocol: TCP
           port: 8081
 ---
-# analytics:8086 <- market-data
+# analytics:8086 <- market-data, web (console scores card)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -107,8 +107,10 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchLabels:
-              app: market-data
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [market-data, web]
       ports:
         - protocol: TCP
           port: 8086
@@ -134,7 +136,7 @@ spec:
         - protocol: TCP
           port: 8082
 ---
-# ai-analyst:8087 <- strategy
+# ai-analyst:8087 <- strategy, web (console sentiment/analysis cards)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -149,8 +151,10 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchLabels:
-              app: strategy
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [strategy, web]
       ports:
         - protocol: TCP
           port: 8087
