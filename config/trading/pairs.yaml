@@ -344,8 +344,11 @@ BNBUSDT:  # exchange token
     max_position_usdt: 18.0
     atr_multiplier: 0.6
 
-AAVEUSDT:  # DeFi blue-chip
-  enabled: true
+# 2026-06-16: pruned (broaden-then-prune). Lowest liquidity of the added set
+# (~$28M, near the volume filter) AND worst early paper PnL (-0.10, 0/2 wins) —
+# two independent signals, so this is not a noise-only cut. Replaced by AVAX.
+AAVEUSDT:  # DeFi blue-chip (disabled)
+  enabled: false
   mode_profiles:
     PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
     MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
@@ -353,6 +356,16 @@ AAVEUSDT:  # DeFi blue-chip
   risk:
     max_position_usdt: 18.0
     atr_multiplier: 0.65
+
+AVAXUSDT:  # L1 (replaces AAVE)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.66
 
 BCHUSDT:  # PoW
   enabled: true
