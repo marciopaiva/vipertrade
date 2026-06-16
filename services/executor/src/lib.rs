@@ -1153,24 +1153,30 @@ async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
     Ok(count)
 }
 
-async fn has_open_trade_for_symbol_side(
+// Returns the side ("Long"/"Short") of an existing open trade for the symbol, if
+// any. Guards against BOTH a same-side duplicate AND an opposite-side hedge: the
+// strategy is directional, so at most one open position per symbol is valid.
+// Checking only (symbol, side) let an ENTER_LONG open while a Short was still
+// open (and vice versa), leaving simultaneous long+short on the same symbol.
+async fn open_trade_side_for_symbol(
     state: &ExecutorState,
     symbol: &str,
-    side: &str,
-) -> Result<bool, sqlx::Error> {
+) -> Result<Option<String>, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
-        return Ok(false);
+        return Ok(None);
     };
 
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM trades WHERE status = 'open' AND symbol = $1 AND side = $2",
+    let side: Option<String> = sqlx::query_scalar(
+        "SELECT side FROM trades
+         WHERE status = 'open' AND symbol = $1
+         ORDER BY opened_at ASC
+         LIMIT 1",
     )
     .bind(symbol)
-    .bind(side)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
 
-    Ok(count > 0)
+    Ok(side)
 }
 
 async fn persist_bybit_fills(
@@ -2050,20 +2056,34 @@ async fn handle_decision_event(
                 "Short"
             };
 
-            match has_open_trade_for_symbol_side(state, &event.decision.symbol, side).await {
-                Ok(true) => {
+            match open_trade_side_for_symbol(state, &event.decision.symbol).await {
+                Ok(Some(existing_side)) => {
+                    // Block whether the existing position is the same side (a
+                    // duplicate) or the opposite (would hedge long+short).
+                    let reason = if existing_side == side {
+                        "paper_open_blocked_existing_open"
+                    } else {
+                        "paper_open_blocked_opposite_open"
+                    };
+                    tracing::warn!(
+                        event_id = %event.event_id,
+                        symbol = %event.decision.symbol,
+                        requested_side = %side,
+                        existing_side = %existing_side,
+                        "Blocked ENTER: position already open for symbol"
+                    );
                     mark_processed(
                         state,
                         &idem_key,
                         &event,
-                        "paper_open_blocked_existing_open",
+                        reason,
                         Some(&paper_order_id),
                         None,
                     )
                     .await?;
                     return Ok(());
                 }
-                Ok(false) => {}
+                Ok(None) => {}
                 Err(e) => {
                     tracing::warn!(event_id = %event.event_id, symbol = %event.decision.symbol, side = %side, error = %e, "Failed checking open trade");
                     mark_processed(
