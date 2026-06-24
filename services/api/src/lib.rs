@@ -2271,8 +2271,7 @@ async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
     loop {
         let result: redis::RedisResult<()> = async {
             let client = redis::Client::open(url.as_str())?;
-            let conn = client.get_async_connection().await?;
-            let mut pubsub = conn.into_pubsub();
+            let mut pubsub = client.get_async_pubsub().await?;
             pubsub.subscribe("viper:market_data").await?;
             pubsub.subscribe("viper:decisions").await?;
             tracing::info!("WS bridge subscribed to Redis market/decision channels");

@@ -2318,6 +2318,21 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     tracing::info!("Starting viper-executor");
 
     let cfg = ExecutorConfig::from_env();
+
+    // Defense-in-depth: live_orders_enabled is derived from trading_mode, but if an
+    // operator explicitly tries to force live orders via env while in a non-executing
+    // mode (e.g. paper), refuse to start instead of silently ignoring the request.
+    let live_override = std::env::var("EXECUTOR_ENABLE_LIVE_ORDERS")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false);
+    if live_override && !cfg.trading_mode.executes_exchange_orders() {
+        tracing::error!(
+            mode = %cfg.trading_mode.as_str(),
+            "REFUSING TO START: EXECUTOR_ENABLE_LIVE_ORDERS=true requires testnet/mainnet, got paper"
+        );
+        std::process::exit(1);
+    }
+
     tracing::info!(
         mode = %cfg.trading_mode.as_str(),
         bybit_env = %cfg.bybit_env,
@@ -2795,5 +2810,584 @@ mod tests {
         assert!(set.contains("XRPUSDT"));
         assert!(set.contains("ADAUSDT"));
         assert_eq!(set.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn paper_enter_long_persist_and_query() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-paper-enter-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": trade_key,
+            "source_event_id": format!("{}-src", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "ENTER_LONG",
+                "symbol": "DOGEUSDT",
+                "quantity": 10.0,
+                "leverage": 2.0,
+                "entry_price": 1.0,
+                "stop_loss": 0.98,
+                "take_profit": 1.04,
+                "reason": "it_paper_enter",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("event parse");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let paper_order_id = format!("paper-{}", event.event_id);
+        persist_trade(&state, &event, &paper_order_id, 10.0, 1.0, 0.0, true)
+            .await
+            .expect("persist paper trade");
+
+        let (side, qty, price, status): (String, f64, f64, String) = sqlx::query_as(
+            "SELECT side, quantity::double precision, entry_price::double precision, status FROM trades WHERE order_link_id = $1",
+        )
+        .bind(&event.event_id)
+        .fetch_one(&pool)
+        .await
+        .expect("query trade");
+        assert_eq!(side, "Long");
+        assert!((qty - 10.0).abs() < 1e-9);
+        assert!((price - 1.0).abs() < 1e-9);
+        assert_eq!(status, "open");
+
+        let found_side = open_trade_side_for_symbol(&state, "DOGEUSDT")
+            .await
+            .expect("query open side")
+            .expect("side should exist");
+        assert_eq!(found_side, "Long");
+
+        let count = count_open_trades(&state).await.expect("count trades");
+        assert!(count >= 1);
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&event.event_id)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn paper_enter_short_persist_and_query() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-paper-enter-short-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": trade_key,
+            "source_event_id": format!("{}-src", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "ENTER_SHORT",
+                "symbol": "XRPUSDT",
+                "quantity": 20.0,
+                "leverage": 3.0,
+                "entry_price": 2.0,
+                "stop_loss": 2.05,
+                "take_profit": 1.90,
+                "reason": "it_paper_enter_short",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("event parse");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let paper_order_id = format!("paper-{}", event.event_id);
+        persist_trade(&state, &event, &paper_order_id, 20.0, 2.0, 0.0, true)
+            .await
+            .expect("persist paper short");
+
+        let (side, qty, price, status): (String, f64, f64, String) = sqlx::query_as(
+            "SELECT side, quantity::double precision, entry_price::double precision, status FROM trades WHERE order_link_id = $1",
+        )
+        .bind(&event.event_id)
+        .fetch_one(&pool)
+        .await
+        .expect("query trade");
+        assert_eq!(side, "Short");
+        assert!((qty - 20.0).abs() < 1e-9);
+        assert!((price - 2.0).abs() < 1e-9);
+        assert_eq!(status, "open");
+
+        let found_side = open_trade_side_for_symbol(&state, "XRPUSDT")
+            .await
+            .expect("query open side")
+            .expect("side should exist");
+        assert_eq!(found_side, "Short");
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&event.event_id)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn paper_close_flow() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-paper-close-{}", now_ms());
+        let paper_order_id = format!("paper-{}", trade_key);
+
+        sqlx::query(
+            "INSERT INTO trades (
+                order_link_id, bybit_order_id, symbol, side, quantity,
+                entry_price, leverage, status, decision_hash,
+                smart_copy_compatible, pipeline_version, paper_trade
+            ) VALUES ($1,$2,'SOLUSDT','Long',15,1.5,2.0,'open',$3,true,'it',true)",
+        )
+        .bind(&trade_key)
+        .bind(&paper_order_id)
+        .bind(format!("hash-{}", trade_key))
+        .execute(&pool)
+        .await
+        .expect("seed trade");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let close_event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": format!("{}-close", trade_key),
+            "source_event_id": format!("{}-src-close", trade_key),
+            "timestamp": "2026-01-01T00:01:00Z",
+            "decision": {
+                "action": "CLOSE_LONG",
+                "symbol": "SOLUSDT",
+                "quantity": 15.0,
+                "leverage": 2.0,
+                "entry_price": 1.6,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it_paper_close",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("close event");
+
+        let res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0)
+            .await
+            .expect("close should work");
+        assert!(
+            matches!(res, CloseReconcileResult::Closed { .. }),
+            "expected Closed result, got {:?}",
+            res
+        );
+
+        let (status, pnl): (String, Option<f64>) = sqlx::query_as(
+            "SELECT status, pnl::double precision FROM trades WHERE order_link_id = $1",
+        )
+        .bind(&trade_key)
+        .fetch_one(&pool)
+        .await
+        .expect("query closed trade");
+        assert_eq!(status, "closed");
+        assert!(
+            (pnl.unwrap_or(0.0) - (1.6 - 1.5) * 15.0).abs() < 1e-6,
+            "expected pnl ~1.5, got {:?}",
+            pnl
+        );
+
+        let duplicate_res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0)
+            .await
+            .expect("duplicate close should not error");
+        assert!(
+            matches!(duplicate_res, CloseReconcileResult::NoLocalOpen),
+            "expected NoLocalOpen for duplicate, got {:?}",
+            duplicate_res
+        );
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&trade_key)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn paper_guard_duplicate_symbol_blocks_entry() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-guard-dup-{}", now_ms());
+        let paper_order_id = format!("paper-{}", trade_key);
+
+        sqlx::query(
+            "INSERT INTO trades (
+                order_link_id, bybit_order_id, symbol, side, quantity,
+                entry_price, leverage, status, decision_hash,
+                smart_copy_compatible, pipeline_version, paper_trade
+            ) VALUES ($1,$2,'ADAUSDT','Long',10,0.5,2.0,'open',$3,true,'it',true)",
+        )
+        .bind(&trade_key)
+        .bind(&paper_order_id)
+        .bind(format!("hash-{}", trade_key))
+        .execute(&pool)
+        .await
+        .expect("seed trade");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let existing_side = open_trade_side_for_symbol(&state, "ADAUSDT")
+            .await
+            .expect("query open side")
+            .expect("should have open trade");
+        assert_eq!(
+            existing_side, "Long",
+            "open_trade_side_for_symbol should return the side"
+        );
+
+        let count = count_open_trades(&state).await.expect("count trades");
+        assert!(count >= 1);
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&trade_key)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn paper_guard_max_positions_respected() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let symbol_a = format!("SYMA-{}", now_ms());
+        let symbol_b = format!("SYMB-{}", now_ms());
+        let key_a = format!("it-maxpos-a-{}", now_ms());
+        let key_b = format!("it-maxpos-b-{}", now_ms());
+
+        sqlx::query(
+            "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity, entry_price, leverage, status, decision_hash, smart_copy_compatible, pipeline_version, paper_trade)
+             VALUES ($1,$2,$3,'Long',10,1.0,2.0,'open',$4,true,'it',true)",
+        )
+        .bind(&key_a).bind(format!("bybit-{}", key_a)).bind(&symbol_a).bind(format!("hash-{}", key_a))
+        .execute(&pool).await.expect("seed trade a");
+
+        sqlx::query(
+            "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity, entry_price, leverage, status, decision_hash, smart_copy_compatible, pipeline_version, paper_trade)
+             VALUES ($1,$2,$3,'Long',10,1.0,2.0,'open',$4,true,'it',true)",
+        )
+        .bind(&key_b).bind(format!("bybit-{}", key_b)).bind(&symbol_b).bind(format!("hash-{}", key_b))
+        .execute(&pool).await.expect("seed trade b");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let open_count = count_open_trades(&state).await.expect("count open");
+        assert!(
+            open_count >= 2,
+            "expected at least 2 open trades, got {}",
+            open_count
+        );
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&key_a)
+            .execute(&pool)
+            .await
+            .expect("cleanup a");
+        sqlx::query("DELETE FROM trades WHERE order_link_id = $1")
+            .bind(&key_b)
+            .execute(&pool)
+            .await
+            .expect("cleanup b");
+    }
+
+    #[tokio::test]
+    async fn handle_decision_hold_is_ignored() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-hold-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": trade_key,
+            "source_event_id": format!("{}-src", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "HOLD",
+                "symbol": "DOGEUSDT",
+                "quantity": 0.0,
+                "leverage": 0.0,
+                "entry_price": 0.0,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it_hold",
+                "smart_copy_compatible": false
+            }
+        }))
+        .expect("event");
+
+        let cfg = ExecutorConfig {
+            redis_url: "redis://localhost:6379".to_string(),
+            db_url: db_url.clone(),
+            trading_mode: TradingMode::Paper,
+            bybit_env: "mainnet".to_string(),
+            bybit_api_key: String::new(),
+            bybit_api_secret: String::new(),
+            recv_window: "5000".to_string(),
+            bybit_account_type: "UNIFIED".to_string(),
+            executor_default_enabled: true,
+            live_orders_enabled: false,
+            live_symbol_allowlist: HashSet::new(),
+            reconcile_fix: false,
+            paper_max_open_positions: 2,
+            strategy_config_path: "".to_string(),
+            trading_profile: "MEDIUM".to_string(),
+        };
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let http = reqwest::Client::new();
+        handle_decision_event(&state, &http, &cfg, event.clone())
+            .await
+            .expect("handle HOLD should succeed");
+
+        let trade_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM trades WHERE order_link_id = $1")
+                .bind(&event.event_id)
+                .fetch_one(&pool)
+                .await
+                .expect("query trades");
+        assert_eq!(trade_count, 0, "HOLD must not create a trade");
+
+        let audit_status: Option<String> = sqlx::query_scalar(
+            "SELECT executor_status FROM strategy_decision_audit WHERE decision_event_id = $1",
+        )
+        .bind(&event.event_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("query audit")
+        .flatten();
+        assert_eq!(
+            audit_status.as_deref(),
+            Some("ignored_hold"),
+            "expected ignored_hold audit status, got {:?}",
+            audit_status
+        );
+
+        sqlx::query("DELETE FROM strategy_decision_audit WHERE decision_event_id = $1")
+            .bind(&event.event_id)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM system_events WHERE data->>'source_event_id' = $1")
+            .bind(format!("{}-src", trade_key))
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    #[tokio::test]
+    async fn handle_decision_invalid_action_rejected() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-invalid-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": trade_key,
+            "source_event_id": format!("{}-src", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "INVALID_ACTION",
+                "symbol": "DOGEUSDT",
+                "quantity": 10.0,
+                "leverage": 2.0,
+                "entry_price": 1.0,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "reason": "it_invalid",
+                "smart_copy_compatible": false
+            }
+        }))
+        .expect("event");
+
+        let cfg = ExecutorConfig {
+            redis_url: "redis://localhost:6379".to_string(),
+            db_url: db_url.clone(),
+            trading_mode: TradingMode::Paper,
+            bybit_env: "mainnet".to_string(),
+            bybit_api_key: String::new(),
+            bybit_api_secret: String::new(),
+            recv_window: "5000".to_string(),
+            bybit_account_type: "UNIFIED".to_string(),
+            executor_default_enabled: true,
+            live_orders_enabled: false,
+            live_symbol_allowlist: HashSet::new(),
+            reconcile_fix: false,
+            paper_max_open_positions: 2,
+            strategy_config_path: "".to_string(),
+            trading_profile: "MEDIUM".to_string(),
+        };
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let http = reqwest::Client::new();
+        handle_decision_event(&state, &http, &cfg, event.clone())
+            .await
+            .expect("handle invalid action should not panic");
+
+        let audit_status: Option<String> = sqlx::query_scalar(
+            "SELECT executor_status FROM strategy_decision_audit WHERE decision_event_id = $1",
+        )
+        .bind(&event.event_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("query audit")
+        .flatten();
+        assert_eq!(
+            audit_status.as_deref(),
+            Some("error"),
+            "expected error audit status, got {:?}",
+            audit_status
+        );
+
+        sqlx::query("DELETE FROM strategy_decision_audit WHERE decision_event_id = $1")
+            .bind(&event.event_id)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM system_events WHERE data->>'source_event_id' = $1")
+            .bind(format!("{}-src", trade_key))
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    #[tokio::test]
+    async fn claim_processed_event_idempotent() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let trade_key = format!("it-claim-{}", now_ms());
+        let event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "event_id": trade_key,
+            "source_event_id": format!("{}-src", trade_key),
+            "timestamp": "2026-01-01T00:00:00Z",
+            "decision": {
+                "action": "ENTER_LONG",
+                "symbol": "DOGEUSDT",
+                "quantity": 10.0,
+                "leverage": 2.0,
+                "entry_price": 1.0,
+                "stop_loss": 0.98,
+                "take_profit": 1.04,
+                "reason": "it_claim",
+                "smart_copy_compatible": true
+            }
+        }))
+        .expect("event");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let idem_key = idempotency_key(&event);
+        let first_claim = claim_processed_event(&state, idem_key, &event)
+            .await
+            .expect("first claim");
+        assert!(first_claim, "first claim must return true");
+
+        let second_claim = claim_processed_event(&state, idem_key, &event)
+            .await
+            .expect("second claim");
+        assert!(!second_claim, "duplicate claim must return false");
+
+        sqlx::query("DELETE FROM strategy_decision_audit WHERE decision_event_id = $1")
+            .bind(&event.event_id)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM system_events WHERE data->>'source_event_id' = $1")
+            .bind(format!("{}-src", trade_key))
+            .execute(&pool)
+            .await
+            .ok();
     }
 }

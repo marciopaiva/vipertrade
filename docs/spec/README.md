@@ -4,8 +4,7 @@ This folder contains the modularized technical specification.
 
 ## Current Status
 
-- Legacy source reference: `docs/legacy/VIPERTRADE_SPEC.md`
-- Modular docs completed:
+Modular docs completed:
   - `01-overview.md` - updated for v0.8.1 with services table
   - `02-architecture.md` - updated with Kind/K8s section
   - `03-risk-and-profiles.md`
@@ -26,7 +25,4 @@ This folder contains the modularized technical specification.
 - `07-configuration.md`
 - `08-strategy-execution-model.md`
 
-## Migration Rule
 
-- Move sections incrementally from `docs/legacy/VIPERTRADE_SPEC.md`.
-- Keep references to original line ranges while migrating.

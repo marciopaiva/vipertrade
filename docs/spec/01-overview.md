@@ -1,7 +1,5 @@
 # 01 - Overview
 
-Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 1.1-1.4).
-
 ## Objective
 
 ViperTrade is a Lead Trader Bot for Bybit Copy Trading Classic.
@@ -52,6 +50,4 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 | testnet | Bybit testnet with real orders |
 | mainnet | Bybit mainnet with real orders |
 
-## Reference Original
 
-- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 42-85.

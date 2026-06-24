@@ -1,7 +1,5 @@
 # 06 - Validation and Checklists
 
-Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
-
 ## Pre-Deploy Validation
 
 - Security: `security-check` passes, `compose/.env` uses restricted permissions,
@@ -31,6 +29,4 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 18-20).
 - Copy trading and leader profile endpoints.
 - WebSocket events for portfolio, positions, trades, and alerts.
 
-## Original Reference
 
-- `docs/legacy/VIPERTRADE_SPEC.md`, approximately lines 1768-1980.

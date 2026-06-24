@@ -136,9 +136,6 @@ fi
 if ! grep -q '^RUST_RUNTIME_IMAGE=' compose/.env; then
     echo "RUST_RUNTIME_IMAGE=vipertrade-base-rust-runtime:bookworm" >> compose/.env
 fi
-if ! grep -q '^STRATEGY_BUILDER_IMAGE=' compose/.env; then
-    echo "STRATEGY_BUILDER_IMAGE=vipertrade-base-strategy-builder:1.83" >> compose/.env
-fi
 if ! grep -q '^STRATEGY_RUNTIME_IMAGE=' compose/.env; then
     echo "STRATEGY_RUNTIME_IMAGE=vipertrade-base-strategy-runtime:3.12-bookworm" >> compose/.env
 fi
@@ -155,7 +152,7 @@ echo ""
 echo -e "${BLUE}🤖 Tupa configuration:${NC}"
 echo "   Version: ${TUPA_VERSION:-0.8.0-rc}"
 echo "   Backend: ${TUPA_BACKEND:-hybrid}"
-echo "   Pipeline: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_smart_copy.tp}"
+echo "   Pipeline: ViperSmartCopy (compiled in-process via tupa! macro)"
 echo "   Audit Path: ${TUPA_AUDIT_PATH:-/app/logs/audit}"
 
 # 9. Display trading config

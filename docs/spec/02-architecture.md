@@ -1,7 +1,5 @@
 # 02 - Architecture
 
-Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
-
 ## Topology
 
 - `market-data`
@@ -15,9 +13,7 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 - `analytics`
   - market analysis and strategy performance insights
 - `ai-analyst`
-  - optional LLM-powered market analysis
-- `backtest`
-  - historical strategy validation
+  - heuristic diagnostics and deterministic backtest sweep
 - `api`
   - REST endpoints for status, trades, positions, controls
 - `web`
@@ -62,6 +58,4 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (section 2).
 - Local registry at `localhost:5001` accessible via `kind` network
 - See `k8s/kind/README.md` for deployment instructions
 
-## Original reference
 
-- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 87-161.

@@ -5,7 +5,6 @@
 - Ensure clean workspace: `git status --short`
 - Run local CI parity: `./scripts/validate-workspace.sh ci`
 - Optional strict docs lint: `CI_LOCAL_STRICT_DOCS=1 ./scripts/ci-local.sh`
-- Validate pipeline: `./scripts/validate-pipeline.sh`
 - Runtime baseline: `./scripts/validate-workspace.sh all`
 
 ## Runtime Validation

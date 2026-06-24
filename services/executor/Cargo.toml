@@ -14,7 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+reqwest = { workspace = true }
 redis = { workspace = true, features = ["tokio-comp"] }
 futures-util = "0.3"
 viper-domain = { workspace = true }
