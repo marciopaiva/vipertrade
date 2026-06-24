@@ -44,7 +44,6 @@ Phase 1 closure evidence:
 
 Phase 3 closure evidence:
 
-- Validation report published: `docs/operations/evidence/PHASE3_VALIDATION_2026-03-08.md`.
 - `/api/v1` operational read endpoints validated in runtime and CI.
 - Performance parity check script passing against DB aggregates.
 - Kill-switch API validated with deny-by-default (`403`) and positive operator flow (`enable`/`disable`) with DB audit evidence.

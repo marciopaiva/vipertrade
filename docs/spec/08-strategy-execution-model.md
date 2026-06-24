@@ -14,7 +14,7 @@ The strategy runtime now operates in three layers:
    - defines the validated pipeline shape
    - defines structured step outputs and expected fields
 2. Rust-side policy and runtime orchestration
-   - `services/strategy/src/main.rs`
+   - `services/strategy/src/lib.rs`
    - executes the current trading semantics
    - enriches step results with scores, reasons, and breakdowns
 3. Stateful runtime integration
@@ -87,10 +87,10 @@ The following areas remain intentionally Rust-driven:
 
 This is acceptable today because these areas depend on runtime state and side effects.
 
-## Role of the `.tp` pipeline today
+## Role of the Tupa pipeline today
 
-The `.tp` file is already part of the real production path, but its role is still narrower than
-"full strategy ownership".
+The pipeline is compiled into the binary via the `pipeline!` macro (no `.tp` file at
+runtime). Its role is still narrower than "full strategy ownership".
 
 Today it primarily provides:
 
@@ -99,7 +99,10 @@ Today it primarily provides:
 - structured output expectations for the runtime
 - a safer review surface for policy evolution
 
-It does **not** yet contain the full semantics of:
+A human-readable reference of the pipeline is kept at
+`docs/spec/viper_smart_copy.reference.tp` (documentation only).
+
+The pipeline does **not** yet own the full semantics of:
 
 - entry gating
 - sizing
@@ -116,10 +119,10 @@ The largest remaining gap in this phase is test depth, not runtime structure.
 
 The strategy service currently has most of its trading semantics in:
 
-- `services/strategy/src/main.rs`
+- `services/strategy/src/lib.rs`
 
 The strategy service now has focused coverage for some of the newer structured outputs directly in
-`services/strategy/src/main.rs`, including:
+`services/strategy/src/lib.rs`, including:
 
 - trailing score and reason summary
 - open trade exit trigger selection

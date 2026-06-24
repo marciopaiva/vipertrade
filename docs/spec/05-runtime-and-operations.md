@@ -2,67 +2,62 @@
 
 ## Error Handling and Resilience
 
-- Error matrix by domain: Bybit REST, WebSocket, database, and risk engine.
-- Retry policy with exponential backoff and jitter.
-- Critical failures must pause new entries and trigger immediate alerting.
-- Operational fallback: REST polling when WebSocket becomes unavailable.
+- Error domains: Bybit REST, cross-exchange REST (Binance/OKX), database, Redis, and the
+  risk/decision engine.
+- Retry with bounded backoff for transient REST failures.
+- Critical failures pause new entries and surface through health/observability.
+- Market-data is **REST-poll based** (no exchange WebSocket): a failed fetch for one
+  symbol skips that symbol for the cycle and the rest still publish; a failed BTC macro
+  refresh skips the whole cycle and retries on the next tick.
 
-## WebSocket Reconnection Strategy
+## Ingestion Resilience (REST polling)
 
-- Progressive reconnection for public and private channels.
-- Heartbeat with timeout and automatic resubscription.
-- State recovery after reconnect.
-- Validate positions and orders, then reconcile via REST.
+- `market-data` runs a fixed-cadence cycle (~5s); each tick re-fetches klines for every
+  enabled symbol across bybit ∩ binance ∩ okx and recomputes signals.
+- Stale/incomplete cross-exchange data drops the affected symbol rather than emitting a
+  half-formed signal (signal `validate()` gate before publish).
+- Reconciliation against exchange truth is periodic and REST-based (see `monitor`).
 
 ## Disaster Recovery
 
 - Incident classification: critical, high, medium, low.
-- Operational SLOs defined by RTO/RPO.
-- Mandatory procedures.
-- `kill_switch` to contain losses.
-- Database restore followed by reconciliation.
+- `kill_switch` (persisted in Postgres, read by the executor) contains losses immediately.
+- Database restore followed by reconciliation against the exchange.
 - API key revocation when compromise is suspected.
-- Mandatory post-mortem for critical and high incidents.
+- Post-mortem for critical and high incidents.
 
 ## Secrets and Security Operations
 
-- Secrets stored in `compose/.env` and `secrets/` with restricted permissions.
-- Key rotation on a regular cadence (for example, every 90 days) with testnet validation.
-- Pre-mainnet checklist includes minimum API key permissions, 2FA, IP allowlists, and no secrets committed to Git.
+- Secrets in `compose/.env` and `secrets/` with restricted permissions; never committed
+  (enforced by `.gitignore` + `./scripts/security-check.sh`).
+- Mode-scoped Bybit credentials; key rotation on a regular cadence with testnet validation.
+- Pre-mainnet checklist: minimum API key permissions, 2FA, IP allowlists, no secrets in Git.
 
 ## Notifications and Monitoring
 
-- Webhook alerts with `critical`, `warning`, and `info` levels.
-- Deduplication and batching to reduce operational noise.
-- Main alert types: circuit breaker, stop loss, trailing stop, and daily summary.
-- Operational alerts target the bot operator; copy-trading events for followers remain controlled by Bybit.
+- Alert levels: `critical`, `warning`, `info`.
+- Main alert types: circuit breaker, stop loss, trailing stop, daily summary.
+- Operator-facing alerts; follower copy events remain controlled by Bybit.
 
 ## Tupa Integration Model
 
-- Strategy integration via a versioned `.tp` pipeline.
-- The strategy service loads the pipeline in-process through the Tupa parser, typechecker, and codegen layers.
-- The `.tp` file currently defines the validated plan shape and structured step contracts used by the runtime.
-- Runtime state, exchange data, guard state, and some trading semantics still live in Rust.
-- The current migration goal is to move more policy semantics into Tupa-native structured outputs over time.
+- The `ViperSmartCopy` strategy pipeline is **compiled into the strategy binary** via the
+  `pipeline! { name: ViperSmartCopy, … }` macro in `services/strategy/src/lib.rs`
+  (`tupa_core` + `tupa_engine::Executor`, runtime mode `in_process_tupa`). There is **no
+  `.tp` file loaded at runtime** and no `TUPA_PIPELINE_PATH`.
+- The macro defines the validated pipeline shape and structured step contracts; Rust steps
+  reproduce the trading semantics and enrich step outputs with scores, reasons, and
+  breakdowns.
+- A canonical, human-readable spec of the pipeline is kept for reference only at
+  `docs/spec/viper_smart_copy.reference.tp` (documentation, not loaded by the runtime).
 
 ## Trading Operations and Validation Modes
 
-- Operate as Lead Trader in Bybit Copy Trading Classic.
-- Smart Copy optimization with predictable sizing, slippage control, and profile-based leverage limits.
-- Self-unfollow protection via reduced failed copies and smaller sizing variance.
-- Validation modes before production: stress backtest and paper trading with real data and simulated execution.
+- Operates as Lead Trader in Bybit Copy Trading Classic with Smart Copy sizing constraints.
+- Validation before production: deterministic backtest sweep (`/sweep`) + paper trading
+  with real prices and simulated execution.
 
 ## Dynamic Trailing Stop
 
-- Activation by minimum profit and progressive adjustment (ratcheting).
-- Trail never loosens; only maintains or tightens.
-- Parameters by risk profile to balance protection and trend capture.
-- Integration with decision flow and strategy service runtime state.
-
-## Development Blocks
-
-- Blocks 1-15 structure incremental delivery.
-- Base project and compose.
-- Core services (market-data, strategy, executor, monitor, analytics, ai-analyst).
-- Error handling and tests.
-- Documentation, micro deploy and Smart Copy/trailing optimizations.
+- Activation by minimum profit and progressive ratcheting; the trail only tightens.
+- Driven by strategy runtime state; mirrored to Bybit native trailing on testnet/mainnet.

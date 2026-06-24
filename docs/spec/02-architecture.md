@@ -32,14 +32,22 @@
 - `api` and `web`
   - read and control surface for operators
 
+All eight services are roles of a single unified `viper` binary, selected at runtime via
+`VIPER_ROLE`. Redis transport is **pub/sub** (not Streams) on two channels:
+`viper:market_data` (market-data → strategy) and `viper:decisions` (strategy → executor).
+
 ## Decision flow
 
-1. market data enters `market-data`
-2. normalized events are published through `redis`
-3. `strategy` parses, typechecks, and loads the Tupa-backed plan in-process, then combines that plan with runtime state to publish a decision
-4. `executor` validates and executes the exchange-side action based on `TRADING_MODE` (paper/testnet/mainnet)
-5. execution results are persisted and exposed to observability surfaces
-6. `monitor` runs periodic reconciliation and drift checks
+1. `market-data` polls klines over REST (~5s cycle) across bybit ∩ binance ∩ okx and
+   normalizes them into validated `MarketSignal` events
+2. signals are published to Redis channel `viper:market_data`
+3. `strategy` evaluates the `ViperSmartCopy` pipeline (compiled in-process via the
+   `pipeline!` macro — no `.tp` at runtime), combines it with runtime state, and publishes
+   a decision to `viper:decisions`
+4. `executor` validates and executes the exchange-side action based on `TRADING_MODE`
+   (paper = DB-simulated; testnet/mainnet = real REST orders)
+5. execution results are persisted to Postgres and exposed to observability surfaces
+6. `monitor` runs periodic REST reconciliation and drift checks
 
 ## Local runtime
 

@@ -44,12 +44,13 @@ with disconnected logic.
 | --- | --- | --- |
 | `config/strategies/viper_smart_copy.tp` | 485 lines, orphaned (runtime load already removed) | Removed — pipeline is compiled in-process via the `pipeline!` macro in `services/strategy/src/lib.rs`; canonical spec kept at `docs/spec/viper_smart_copy.reference.tp` |
 | `docs/legacy/` | old `VIPERTRADE_SPEC.md` + README | Removed |
-| `ANALYSIS_DEEP_DIVE.md` (40 KB, root) | likely stale analysis | Evaluate (kept for now) |
+| `ANALYSIS_DEEP_DIVE.md` (40 KB, root) | stale analysis | Removed (2026-06-23) |
 | dead decision logic in `strategy` | `execute_strategy_step` produces ENTER_LONG/SHORT but is bypassed by stub steps | Business decision (issue #33) |
 | `backtest` stub | empty service | Removed from workspace + k8s + compose + scripts |
 
-Historical operational evidence (`docs/operations/evidence/PHASE4_BACKTEST_*`) is a
-record and is intentionally retained.
+Historical operational evidence (the former `docs/operations/evidence/` set and the dated
+2026-03/04 operation notes) was removed from the repo on 2026-06-23; it remains in git
+history.
 
 ## 4. Business-rules reassessment
 

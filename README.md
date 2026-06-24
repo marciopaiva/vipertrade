@@ -110,6 +110,12 @@ make build    # build all service images and push to the local registry
 make deploy   # apply the Kubernetes manifests
 ```
 
+> **Trading config**: `config/trading/pairs.yaml` is the single source of truth for
+> strategy tuning and the symbol universe, and is **gitignored** (private tuning).
+> `init-secrets.sh` seeds it from the public template `config/trading/pairs.example.yaml`
+> on first run — tune your local copy before any live use. The strategy reads the file
+> at `STRATEGY_CONFIG` (default `/app/config/pairs.yaml` in the container).
+
 Open:
 
 - Web dashboard: `http://localhost:3000`

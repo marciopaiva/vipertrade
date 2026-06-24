@@ -70,6 +70,16 @@ fi
 chmod 600 compose/.env
 echo -e "${GREEN}✓ compose/.env permissions set to 600${NC}"
 
+# 3.1 Bootstrap the tuned trading config from the public template.
+# config/trading/pairs.yaml is gitignored (private tuning); a fresh clone only
+# has pairs.example.yaml. Seed it so builds/deploys have a config to read.
+if [[ ! -f config/trading/pairs.yaml ]]; then
+    cp config/trading/pairs.example.yaml config/trading/pairs.yaml
+    echo -e "${GREEN}✓ config/trading/pairs.yaml seeded from pairs.example.yaml — tune it before live use${NC}"
+else
+    echo -e "${GREEN}✓ Keeping existing config/trading/pairs.yaml${NC}"
+fi
+
 # 4. Create secrets directory
 mkdir -p secrets
 chmod 700 secrets
