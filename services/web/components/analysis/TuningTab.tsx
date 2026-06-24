@@ -173,6 +173,19 @@ export default function TuningTab({ tuning }: { tuning: TuningState }) {
               <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
                 {data.ai.report_md}
               </pre>
+            ) : data.cached_ai ? (
+              <>
+                <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+                  Narração ao vivo falhou{data.ai_error ? ` (${data.ai_error})` : ''}. Mostrando a
+                  última narração de{' '}
+                  {new Date(data.cached_ai.generated_at).toLocaleString()} ({data.cached_ai.model}) —
+                  o grid acima é atual; o texto abaixo pode referir um corpus anterior (
+                  {data.cached_ai.corpus_ticks.toLocaleString()} ticks).
+                </div>
+                <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                  {data.cached_ai.report_md}
+                </pre>
+              </>
             ) : (
               <p className="text-xs text-muted-foreground">
                 Narração indisponível{data.ai_error ? ` — ${data.ai_error}` : ''}. O grid
