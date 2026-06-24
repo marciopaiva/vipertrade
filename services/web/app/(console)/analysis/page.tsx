@@ -1,7 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { cn } from '@/lib/utils';
+import TuningTab from '@/components/analysis/TuningTab';
+import SymbolTab from '@/components/analysis/SymbolTab';
+import { useTuning } from '@/components/analysis/tuningShared';
 
 type Summary = {
   closed_trades?: number;
@@ -189,7 +193,11 @@ function Hypotheses({ rows }: { rows: Hypothesis[] }) {
   );
 }
 
+type TabId = 'tuning' | 'symbol' | 'diag';
+
 export default function AnalysisPage() {
+  const [tab, setTab] = useState<TabId>('tuning');
+  const tuning = useTuning();
   const { data, loading, error } = useDashboard<Analysis>('/api/analysis', {
     refreshInterval: 30000,
   });
@@ -199,33 +207,66 @@ export default function AnalysisPage() {
   const blockers = (data?.top_entry_blockers ?? []).slice(0, 6);
   const unavailable = data?.tupa_error && !summary?.closed_trades;
 
+  const tabs: Array<{ id: TabId; label: string }> = [
+    { id: 'tuning', label: 'Tuning (IA)' },
+    { id: 'symbol', label: 'Por Token' },
+    { id: 'diag', label: 'Diagnóstico' },
+  ];
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Analysis</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Descriptive diagnostics over the last {data?.lookback_hours ?? 24}h —
-          deterministic, LLM-free. Evidence, attribution, and advisory
-          recommendations. Tuning is applied manually via the backtest engine.
-          {data?.generated_at && ` · updated ${relTime(data.generated_at)}`}
+          Tuning assistido por IA sobre o grid de backtest determinístico, performance
+          por token, e diagnóstico descritivo. Mudanças são aplicadas manualmente.
         </p>
       </div>
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      <div className="flex gap-1 border-b border-border">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={cn(
+              '-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors',
+              tab === t.id
+                ? 'border-accent text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {loading && !data ? (
-        <div className="h-72 animate-pulse rounded-xl border border-border bg-card" />
-      ) : unavailable ? (
-        <div className="flex h-48 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
-          Analyst unavailable — no closed trades in the window yet.
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {tab === 'tuning' && <TuningTab tuning={tuning} />}
+
+      {tab === 'symbol' && <SymbolTab tuning={tuning} />}
+
+      {tab === 'diag' && (
+        <div className="space-y-5">
+          <p className="text-xs text-muted-foreground">
+            Diagnóstico descritivo dos últimos {data?.lookback_hours ?? 24}h — determinístico,
+            sem LLM.{data?.generated_at && ` · atualizado ${relTime(data.generated_at)}`}
+          </p>
+
+          {error && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          {loading && !data ? (
+            <div className="h-72 animate-pulse rounded-xl border border-border bg-card" />
+          ) : unavailable ? (
+            <div className="flex h-48 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+              Analyst unavailable — no closed trades in the window yet.
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Kpi label="Closed trades" value={num(summary?.closed_trades, 0)} />
             <Kpi
               label="Win rate"
@@ -278,7 +319,9 @@ export default function AnalysisPage() {
               </div>
             </section>
           )}
-        </>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

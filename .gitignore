@@ -59,3 +59,5 @@ viper_smart_copy.plan.json
 .env.testnet
 # AI execution prompt (generated, not tracked)
 /prompt.md
+# Daily backtest-sweep prompt for OpenCode (local, not tracked)
+/backtest.md
