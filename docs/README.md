@@ -12,8 +12,6 @@ This folder is organized by purpose so the current project state stays easy to n
   - dated validation reports, baselines, regressions, and decision packages
 - `releases/`
   - release checklists and release notes
-- `legacy/`
-  - historical source material retained for traceability
 - `assets/`
   - static documentation assets such as images
 
@@ -24,7 +22,6 @@ This folder is organized by purpose so the current project state stays easy to n
 - `spec/08-strategy-execution-model.md`
 - `operations/RUNBOOK.md` - includes both Compose and Kind workflows
 - `releases/RELEASE_CHECKLIST.md`
-- `legacy/README.md`
 
 ## Archive policy
 
@@ -37,6 +34,5 @@ Keep only live documentation in:
 Move dated or historical material to:
 
 - `docs/operations/evidence/`
-- `docs/legacy/`
 
 Do not add closed planning documents back into the top-level `docs/` surface.

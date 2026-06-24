@@ -9,7 +9,6 @@ cd "$ROOT_DIR"
 
 STRICT_DOCS="${CI_LOCAL_STRICT_DOCS:-0}"
 SKIP_COMPOSE="${CI_LOCAL_SKIP_COMPOSE:-0}"
-SKIP_PIPELINE="${CI_LOCAL_SKIP_PIPELINE:-0}"
 SKIP_EXECUTOR_DB="${CI_LOCAL_SKIP_EXECUTOR_DB:-0}"
 SKIP_WEB_BUILD="${CI_LOCAL_SKIP_WEB_BUILD:-0}"
 RUST_VERSION="${RUST_VERSION:-1.83}"
@@ -24,7 +23,6 @@ show_help() {
    echo "Environment:"
    echo "  CI_LOCAL_STRICT_DOCS=1        enable markdown lint"
    echo "  CI_LOCAL_SKIP_COMPOSE=1       skip compose config validation"
-   echo "  CI_LOCAL_SKIP_PIPELINE=1      skip pipeline validation"
    echo "  CI_LOCAL_SKIP_EXECUTOR_DB=1   skip executor DB tests (requires PostgreSQL)"
    echo "  CI_LOCAL_SKIP_WEB_BUILD=1     skip web build (requires Node.js/Yarn)"
    echo "  EXECUTOR_TEST_DATABASE_URL    PostgreSQL connection URL for executor tests"
@@ -78,17 +76,6 @@ run_rust_check "Rust format check" cargo fmt --all -- --check
 run_rust_check "Rust clippy (deny warnings)" cargo clippy --workspace --all-targets -- -D warnings
 run_rust_check "Rust check" cargo check --workspace --locked
 run_rust_check "Rust tests" cargo test --workspace --locked
-
-# Pipeline validation
-if [[ "$SKIP_PIPELINE" == "1" ]]; then
-   vt_warn "Pipeline validation skipped (CI_LOCAL_SKIP_PIPELINE=1)"
-elif [[ -x scripts/validate-pipeline.sh ]]; then
-   vt_step "Tupa pipeline validation"
-   ./scripts/validate-pipeline.sh
-   vt_ok "Tupa pipeline validation"
-else
-   vt_warn "scripts/validate-pipeline.sh not found; skipping pipeline validation"
-fi
 
 # Compose config validation (GitHub CI: not in rust job, but in local parity)
 if [[ "$SKIP_COMPOSE" != "1" ]] && vt_compose_available; then

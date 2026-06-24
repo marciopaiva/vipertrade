@@ -2371,3 +2371,166 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
     );
     Ok(reply)
 }
+
+#[cfg(test)]
+mod analyst_tests {
+    use super::*;
+
+    // ── comparative_metric ─────────────────────────────────────────────
+    #[test]
+    fn comparative_metric_computes_delta() {
+        let m = comparative_metric(100.0, 80.0);
+        assert!((m.current - 100.0).abs() < 1e-9);
+        assert!((m.previous - 80.0).abs() < 1e-9);
+        assert!((m.delta - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn comparative_metric_negative_delta() {
+        let m = comparative_metric(50.0, 70.0);
+        assert!((m.delta - (-20.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn comparative_metric_zero_delta() {
+        let m = comparative_metric(42.0, 42.0);
+        assert!((m.delta - 0.0).abs() < 1e-9);
+    }
+
+    // ── breakdown_metric ───────────────────────────────────────────────
+    fn sample_breakdown() -> Vec<BreakdownItem> {
+        vec![
+            BreakdownItem {
+                name: "trailing_stop".to_string(),
+                trades: 30,
+                pnl_usdt: 5.0,
+                avg_pnl_pct: 2.0,
+                avg_duration_s: 300.0,
+            },
+            BreakdownItem {
+                name: "thesis_invalidated".to_string(),
+                trades: 70,
+                pnl_usdt: -3.0,
+                avg_pnl_pct: -1.0,
+                avg_duration_s: 600.0,
+            },
+        ]
+    }
+
+    #[test]
+    fn breakdown_metric_finds_by_name() {
+        let items = sample_breakdown();
+        let trades = breakdown_metric(&items, "trailing_stop", |item| item.trades as f64);
+        assert!((trades - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn breakdown_metric_case_insensitive() {
+        let items = sample_breakdown();
+        let pnl = breakdown_metric(&items, "THESIS_INVALIDATED", |item| item.pnl_usdt);
+        assert!((pnl - (-3.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn breakdown_metric_returns_zero_for_unknown() {
+        let items = sample_breakdown();
+        let v = breakdown_metric(&items, "unknown_reason", |item| item.trades as f64);
+        assert!((v - 0.0).abs() < 1e-9);
+    }
+
+    // ── estimate_position_pnl_pct ──────────────────────────────────────
+    fn sample_position(side: &str, entry_price: f64) -> PositionItem {
+        PositionItem {
+            symbol: "BTCUSDT".to_string(),
+            side: side.to_string(),
+            quantity: 1.0,
+            notional_usdt: entry_price,
+            entry_price,
+            opened_at: DateTime::from_timestamp_millis(1_700_000_000_000).unwrap(),
+            trailing_stop_activated: false,
+            trailing_stop_peak_price: None,
+            trailing_stop_final_distance_pct: None,
+            stop_loss_price: None,
+            trailing_activation_price: None,
+            fixed_take_profit_price: None,
+            break_even_price: None,
+        }
+    }
+
+    fn sample_signal(current_price: f64) -> Value {
+        serde_json::json!({
+            "bybit_price": current_price,
+            "current_price": current_price,
+        })
+    }
+
+    #[test]
+    fn estimate_pnl_long_profit() {
+        let pos = sample_position("Long", 100.0);
+        let signal = sample_signal(110.0);
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        assert!((pnl - 10.0).abs() < 1e-9, "expected 10%, got {pnl}");
+    }
+
+    #[test]
+    fn estimate_pnl_long_loss() {
+        let pos = sample_position("Long", 100.0);
+        let signal = sample_signal(90.0);
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        assert!((pnl - (-10.0)).abs() < 1e-9, "expected -10%, got {pnl}");
+    }
+
+    #[test]
+    fn estimate_pnl_short_profit() {
+        // formula: (entry_price / current_price - 1) * 100
+        // (100/90 - 1) * 100 = 11.111...
+        let pos = sample_position("Short", 100.0);
+        let signal = sample_signal(90.0);
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        let expected_short_profit = (100.0 / 90.0 - 1.0) * 100.0;
+        assert!(
+            (pnl - expected_short_profit).abs() < 1e-9,
+            "expected {expected_short_profit}%, got {pnl}"
+        );
+    }
+
+    #[test]
+    fn estimate_pnl_short_loss() {
+        // formula: (entry_price / current_price - 1) * 100
+        // (100/110 - 1) * 100 = -9.0909...
+        let pos = sample_position("Short", 100.0);
+        let signal = sample_signal(110.0);
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        assert!(
+            (pnl - (100.0 / 110.0 - 1.0) * 100.0).abs() < 1e-9,
+            "expected ~-9.09%, got {pnl}"
+        );
+    }
+
+    #[test]
+    fn estimate_pnl_zero_when_no_signal() {
+        let pos = sample_position("Long", 100.0);
+        let pnl = estimate_position_pnl_pct(&pos, None);
+        assert!((pnl - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_pnl_zero_when_entry_price_zero() {
+        let pos = sample_position("Long", 0.0);
+        let signal = sample_signal(100.0);
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        assert!((pnl - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_pnl_bybit_price_preferred_over_current() {
+        let pos = sample_position("Long", 100.0);
+        let signal = serde_json::json!({
+            "bybit_price": 120.0,
+            "current_price": 110.0,
+        });
+        let pnl = estimate_position_pnl_pct(&pos, Some(&signal));
+        // bybit_price (120) is higher, so it's used: (120/100 - 1) * 100 = 20%
+        assert!((pnl - 20.0).abs() < 1e-9, "expected 20%, got {pnl}");
+    }
+}

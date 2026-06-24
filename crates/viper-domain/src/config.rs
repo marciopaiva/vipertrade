@@ -309,13 +309,32 @@ pub fn parse_trading_pairs_from_config(path: &str) -> Option<Vec<String>> {
 /// 3. panic with actionable message
 pub fn parse_trading_pairs() -> Vec<String> {
     if let Ok(raw) = env::var("TRADING_PAIRS") {
-        let pairs: Vec<String> = raw
+        let parsed: Vec<String> = raw
             .split(',')
             .map(|s| s.trim().to_uppercase())
             .filter(|s| !s.is_empty())
             .collect();
-        if !pairs.is_empty() {
-            return pairs;
+
+        if !parsed.is_empty() {
+            let mut valid = Vec::new();
+            let mut rejected = Vec::new();
+            for pair in parsed {
+                if is_valid_trading_pair(&pair) {
+                    valid.push(pair);
+                } else {
+                    eprintln!("WARN: ignoring invalid trading pair from TRADING_PAIRS: {pair:?}");
+                    rejected.push(pair);
+                }
+            }
+
+            if valid.is_empty() {
+                panic!(
+                    "TRADING_PAIRS was set but all pairs are invalid (rejected: {}); \
+                     pairs must end with USDT, be 7-15 chars, and contain no '/' or spaces",
+                    rejected.join(", ")
+                );
+            }
+            return valid;
         }
     }
 
@@ -325,9 +344,25 @@ pub fn parse_trading_pairs() -> Vec<String> {
     }
 
     panic!(
-        "no trading pairs configured: set TRADING_PAIRS or provide enabled symbols in {}",
+        "no trading pairs configured: set TRADING_PAIRS (valid USDT pairs) \
+         or provide enabled symbols in {}",
         config_path
     );
+}
+
+/// Validate a trading pair symbol.
+///
+/// Rules: must end with "USDT" (case-insensitive), length 7-15, and contain
+/// neither '/' nor whitespace.
+pub fn is_valid_trading_pair(pair: &str) -> bool {
+    let len = pair.len();
+    if !(7..=15).contains(&len) {
+        return false;
+    }
+    if pair.contains('/') || pair.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+    pair.to_uppercase().ends_with("USDT")
 }
 
 // --- Utility: parse numeric from string ---

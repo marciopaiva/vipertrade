@@ -2,7 +2,7 @@
 
 Modern, real-time trading dashboard for ViperTrade Lead Trader Bot.
 
-## 🚀 Features
+## Features
 
 - **Real-time Data**: WebSocket connections for live market data
 - **Responsive Design**: Mobile-first with Tailwind CSS
@@ -11,7 +11,7 @@ Modern, real-time trading dashboard for ViperTrade Lead Trader Bot.
 - **Loading States**: Skeleton screens and spinners
 - **Type Safe**: Full TypeScript support
 
-## 📁 Structure
+## Structure
 
 ```
 services/web/
@@ -33,7 +33,7 @@ services/web/
 └── types/                  # TypeScript types
 ```
 
-## 🛠️ Development
+## Development
 
 ### Prerequisites
 
@@ -80,7 +80,7 @@ npm run docker:logs      # View logs
 npm run docker:stop      # Stop containers
 ```
 
-## 🎨 Components
+## Components
 
 ### UI Components (shadcn/ui)
 
@@ -97,7 +97,7 @@ npm run docker:stop      # Stop containers
 - TradeHistory
 - DecisionMatrix
 
-## 🔌 API Integration
+## API Integration
 
 ### Environment Variables
 
@@ -138,7 +138,7 @@ function Component() {
 }
 ```
 
-## 🐳 Docker
+## Docker
 
 ### Build
 
@@ -164,17 +164,14 @@ npm run docker:dev
 docker-compose up -d
 ```
 
-## 📊 Routes
+## Routes
 
 | Route         | Description    |
 | ------------- | -------------- |
 | `/`           | Main dashboard |
-| `/trades`     | Trade history  |
-| `/positions`  | Open positions |
-| `/settings`   | Settings       |
 | `/api/health` | Health check   |
 
-## 🎯 Performance
+## Performance
 
 ### Optimizations
 
@@ -190,14 +187,14 @@ docker-compose up -d
 npm run analyze
 ```
 
-## 🔒 Security
+## Security
 
 - **Non-root user**: Container runs as `nextjs:1001`
 - **Security Headers**: HSTS, XSS, Frame-Options
 - **Environment Variables**: Sensitive data in `.env.local`
 - **TypeScript Strict Mode**: Type safety enabled
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Watch mode
@@ -210,7 +207,7 @@ npm run test:ui
 npm run test:coverage
 ```
 
-## 📝 Code Style
+## Code Style
 
 ### ESLint + Prettier
 
@@ -224,7 +221,7 @@ npm run lint:fix
 npm run format
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Create feature branch from `feature/web-v2`
 2. Make changes
@@ -232,11 +229,11 @@ npm run format
 4. Create PR to `feature/web-v2`
 5. Review and merge
 
-## 📄 License
+## License
 
 MIT
 
-## 🔗 Links
+## Links
 
 - [ViperTrade Main Repo](https://github.com/marciopaiva/vipertrade)
 - [Next.js Docs](https://nextjs.org/docs)

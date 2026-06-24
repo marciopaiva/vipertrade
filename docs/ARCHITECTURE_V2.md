@@ -88,7 +88,7 @@ Operational trade-profile labels:
   - local trailing remains the fallback control plane
   - exchange-native trailing gives direct protection and exchange-side visibility
 
-## Non-Goals (Phase 1)
+## Non-Goals
 
 - Full strategy alpha tuning.
 - Multi-exchange orchestration.

@@ -47,7 +47,7 @@ if want viper; then
   vt_step "Building $KIND_REGISTRY/vipertrade:$IMAGE_TAG (unified viper)"
   vt_container build -t "$KIND_REGISTRY/vipertrade:$IMAGE_TAG" -f services/viper/Dockerfile \
     --build-arg TUPA_VERSION="${TUPA_VERSION:-v0.10.0}" \
-    --build-arg BUILDER_IMAGE="${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}" \
+    --build-arg BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}" \
     --build-arg RUNTIME_IMAGE="${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}" \
     .
   vt_step "Pushing $KIND_REGISTRY/vipertrade:$IMAGE_TAG"

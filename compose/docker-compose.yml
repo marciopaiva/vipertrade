@@ -101,7 +101,7 @@ services:
       dockerfile: services/viper/Dockerfile
       args:
         TUPA_VERSION: ${TUPA_VERSION:-v0.10.0}
-        BUILDER_IMAGE: ${STRATEGY_BUILDER_IMAGE:-vipertrade-base-strategy-builder:1.83}
+        BUILDER_IMAGE: ${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:1.83}
         RUNTIME_IMAGE: ${STRATEGY_RUNTIME_IMAGE:-vipertrade-base-strategy-runtime:3.12-bookworm}
     command:
     - wait-for-deps.sh
@@ -168,7 +168,6 @@ services:
       # paper: live orders are off, fills are DB-simulated.
       STRATEGY_REAL_DECISIONS: ${STRATEGY_REAL_DECISIONS:-true}
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: ${PYO3_USE_ABI3_FORWARD_COMPATIBILITY:-1}
-      TUPA_PIPELINE_PATH: ${TUPA_PIPELINE_PATH:-/app/config/strategies/viper_smart_copy.tp}
       TUPA_AUDIT_PATH: /app/logs/audit
       REDIS_URL: redis://redis:6379
       TUPA_SEED: ${TUPA_SEED:-42}

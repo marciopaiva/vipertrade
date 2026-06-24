@@ -1,7 +1,5 @@
 # 04 - Bybit Integration
 
-Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 6 and 8).
-
 ## Integration Channels
 
 - REST API for order execution, position queries, and account state.
@@ -38,7 +36,3 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 6 and 8).
 
 - After successful entry, executor configures Bybit native trailing via `POST /v5/position/trading-stop`.
 - Local trailing state remains as backup when Bybit rejects native trailing setup.
-
-## Reference Original
-
-- `docs/legacy/VIPERTRADE_SPEC.md`, sections 6 and 8.
