@@ -28,5 +28,3 @@
 - System status and kill switch.
 - Copy trading and leader profile endpoints.
 - WebSocket events for portfolio, positions, trades, and alerts.
-
-

@@ -49,5 +49,3 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 | paper | Mainnet prices, simulated wallet/positions in DB |
 | testnet | Bybit testnet with real orders |
 | mainnet | Bybit mainnet with real orders |
-
-

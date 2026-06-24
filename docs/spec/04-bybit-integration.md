@@ -36,5 +36,3 @@
 
 - After successful entry, executor configures Bybit native trailing via `POST /v5/position/trading-stop`.
 - Local trailing state remains as backup when Bybit rejects native trailing setup.
-
-

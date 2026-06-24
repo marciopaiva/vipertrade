@@ -66,5 +66,3 @@
 - Core services (market-data, strategy, executor, monitor, analytics, ai-analyst).
 - Error handling and tests.
 - Documentation, micro deploy and Smart Copy/trailing optimizations.
-
-

@@ -57,5 +57,3 @@
 - WSL2 + Podman rootless configuration
 - Local registry at `localhost:5001` accessible via `kind` network
 - See `k8s/kind/README.md` for deployment instructions
-
-
