@@ -67,6 +67,9 @@ pub async fn narrate(
         // OpenRouter ranking/attribution headers (optional but recommended).
         .header("HTTP-Referer", "https://github.com/marciopaiva/vipertrade")
         .header("X-Title", "ViperTrade")
+        // Bound a slow/hung free-tier model so it can't hang the whole endpoint —
+        // on timeout the caller falls back to the cached narration.
+        .timeout(std::time::Duration::from_secs(90))
         .json(&body)
         .send()
         .await?
