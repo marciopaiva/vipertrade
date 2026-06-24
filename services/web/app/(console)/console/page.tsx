@@ -108,7 +108,7 @@ export default function ConsolePage() {
           explanation + Long/Short ratio on the right. */}
       <MarketSentiment />
 
-      {/* Open positions — vertical risk-rail gauges (full width). */}
+      {/* Open positions — horizontal risk-rail rows, one per token (full width). */}
       <PositionGauge
         positions={openPositions}
         guardedSetups={guardedSetups}

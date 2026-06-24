@@ -25,7 +25,6 @@ Define a deterministic run interface and evidence artifact format for Phase 4.
 
 - Stable run key derived from `(window_start, window_end, seed, profile, git_sha)`.
 - Input file hashes captured in artifact:
-  - `config/strategies/viper_smart_copy.tp`
   - `config/trading/pairs.yaml`
   - `config/system/profiles.yaml`
 - Run must fail if required input files are missing.

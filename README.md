@@ -102,15 +102,12 @@ That gives us a cleaner split:
 ## Quickstart (Kind/K8s)
 
 ```bash
-git clone https://github.com/marciopaiva/vipertrade.git
-cd vipertrade
-cp compose/.env.example compose/.env   # add your Bybit API credentials (TESTNET recommended first)
 # Prerequisites: setup-k8s-wsl2/setup.sh executed; base images built via scripts/build-base-images.sh
 ./scripts/init-secrets.sh
 ./scripts/kind/prepare-wsl.sh
+make start    # start the Kind cluster and local registry
 make build    # build all service images and push to the local registry
 make deploy   # apply the Kubernetes manifests
-make start    # start the cluster and local registry
 ```
 
 Open:
@@ -236,25 +233,6 @@ Start here:
 - [Documentation Index](docs/README.md)
 - [Spec Index](docs/spec/README.md)
 - [Release Notes](docs/releases/README.md)
-
-## Repository Interface
-
-`make` covers the Kind cluster lifecycle only:
-
-- `make build` — build + push all service images to the local registry
-- `make deploy` — apply the Kubernetes manifests
-- `make start` — start the cluster + local registry
-- `make stop` — stop the cluster + local registry
-- `make wipe` — wipe paper trading data + restart services (`CONFIRM=yes` to skip prompt)
-
-Everything else lives under `scripts/`:
-
-- `./scripts/health-check.sh all` · `./scripts/kind/health-check.sh` — health
-- `./scripts/kind/status.sh` · `./scripts/kind/delete.sh` — cluster status / teardown
-- `./scripts/validate-workspace.sh {quick|all|ci}` · `./scripts/ci-local.sh` — validation
-- `./scripts/build-base-images.sh` — base images
-- `./scripts/kill-switch-control.sh {status|enable|disable}` — execution kill switch
-- `./scripts/compose.sh {up -d|down}` — Podman Compose (alternative local runtime)
 
 ## Status
 

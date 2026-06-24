@@ -1650,7 +1650,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         };
 
         let mut cycle_signals = HashMap::<String, MarketSignal>::new();
-        let mut cycle_failed = false;
 
         for symbol in universe.iter() {
             match fetch_market_signal(&http, &base_url, symbol, &weights).await {
@@ -1672,27 +1671,36 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             reason = %drop.reason,
                             "Invalid market signal dropped"
                         );
-                        cycle_failed = true;
-                        break;
+                        continue;
                     }
                     cycle_signals.insert(symbol.clone(), signal);
                 }
                 Err(err) => {
-                    cycle_failed = true;
                     tracing::warn!(symbol = %symbol, error = %err, "Failed to fetch market data");
-                    break;
+                    continue;
                 }
             }
         }
 
-        if cycle_failed || cycle_signals.len() != universe.len() {
+        if cycle_signals.is_empty() {
             latest_signals.write().await.clear();
             tracing::warn!(
                 expected_symbols = universe.len(),
-                got_symbols = cycle_signals.len(),
-                "Skipping market-data publish cycle because signals are incomplete"
+                got_symbols = 0,
+                skipped_symbols = universe.len(),
+                "Skipping market-data publish cycle because no symbols produced a valid signal"
             );
         } else {
+            let processed = cycle_signals.len();
+            let skipped = universe.len().saturating_sub(processed);
+            if skipped > 0 {
+                tracing::warn!(
+                    processed_symbols = processed,
+                    skipped_symbols = skipped,
+                    expected_symbols = universe.len(),
+                    "Publishing partial market-data cycle; some symbols were skipped"
+                );
+            }
             *latest_signals.write().await = cycle_signals.clone();
             for (symbol, signal) in cycle_signals {
                 let event = MarketSignalEvent::new(signal);
@@ -1995,5 +2003,435 @@ mod indicator_tests {
         assert!(approx(b.rsi_14, 100.0, 1e-9)); // flat => avg_loss 0 branch
         assert!(approx(b.macd_histogram, 0.0, 1e-9));
         assert!(approx(b.volume_ratio, 1.0, 1e-9));
+    }
+
+    // ── consensus side latch (state machine) ───────────────────────────────
+    fn msig(symbol: &str, side: &str) -> MarketSignal {
+        MarketSignal {
+            symbol: symbol.to_string(),
+            current_price: 100.0,
+            bybit_price: 100.0,
+            atr_14: 1.0,
+            adx_14: 25.0,
+            volume_24h: 1_000_000,
+            funding_rate: 0.01,
+            trend_score: 0.5,
+            spread_pct: 0.05,
+            consensus_atr_14: 1.0,
+            consensus_adx_14: 25.0,
+            consensus_volume_24h: 1_000_000,
+            consensus_funding_rate: 0.01,
+            consensus_trend_score: 0.5,
+            consensus_spread_pct: 0.05,
+            consensus_trend_slope: 0.0,
+            ema_fast: 100.0,
+            ema_slow: 99.0,
+            bollinger_upper: 110.0,
+            bollinger_middle: 100.0,
+            bollinger_lower: 90.0,
+            bollinger_bandwidth: 0.2,
+            bollinger_percent_b: 0.5,
+            consensus_ema_fast: 100.0,
+            consensus_ema_slow: 99.0,
+            consensus_bollinger_upper: 110.0,
+            consensus_bollinger_middle: 100.0,
+            consensus_bollinger_lower: 90.0,
+            consensus_bollinger_bandwidth: 0.2,
+            consensus_bollinger_percent_b: 0.5,
+            rsi_14: 50.0,
+            consensus_rsi_14: 50.0,
+            macd_line: 0.0,
+            macd_signal: 0.0,
+            macd_histogram: 0.0,
+            consensus_macd_line: 0.0,
+            consensus_macd_signal: 0.0,
+            consensus_macd_histogram: 0.0,
+            volume_ratio: 1.0,
+            consensus_volume_ratio: 1.0,
+            btc_regime: "neutral".to_string(),
+            btc_trend_score: 0.0,
+            btc_consensus_count: 0,
+            btc_volume_ratio: 1.0,
+            regime: side.to_string(),
+            consensus_side: side.to_string(),
+            consensus_count: 1,
+            exchanges_available: 1,
+            consensus_ratio: 1.0,
+            trend_slope: 0.0,
+            bybit_regime: side.to_string(),
+            bullish_exchanges: 0,
+            bearish_exchanges: 0,
+        }
+    }
+
+    #[test]
+    fn latch_initial_side_is_applied_immediately() {
+        let mut signal = msig("BTCUSDT", "bullish");
+        let mut state = HashMap::new();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(signal.consensus_side, "bullish");
+        assert_eq!(signal.regime, "bullish");
+    }
+
+    #[test]
+    fn latch_needs_two_cycles_to_confirm_switch() {
+        let mut state = HashMap::new();
+        let mut signal = msig("BTCUSDT", "bullish");
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(signal.consensus_side, "bullish");
+
+        // First cycle observing "bearish" → pending, not yet stable
+        // stabilize_consensus_side overrides signal.consensus_side, so re-set it before each call
+        signal.consensus_side = "bearish".to_string();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(
+            signal.consensus_side, "bullish",
+            "still latched after 1 bearish cycle"
+        );
+
+        // Second consecutive bearish → confirmed
+        signal.consensus_side = "bearish".to_string();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(signal.consensus_side, "bearish", "confirmed after 2 cycles");
+    }
+
+    #[test]
+    fn latch_switch_before_confirmation_resets_counter() {
+        let mut state = HashMap::new();
+        let mut signal = msig("BTCUSDT", "bullish");
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(signal.consensus_side, "bullish");
+
+        signal.consensus_side = "bearish".to_string();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(
+            signal.consensus_side, "bullish",
+            "still latched after 1 bearish"
+        );
+
+        // Switch to neutral before confirming bearish → counter resets
+        signal.consensus_side = "neutral".to_string();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(
+            signal.consensus_side, "bullish",
+            "still latched after 1 neutral"
+        );
+
+        // Second neutral confirms
+        signal.consensus_side = "neutral".to_string();
+        stabilize_consensus_side(&mut signal, &mut state);
+        assert_eq!(
+            signal.consensus_side, "neutral",
+            "neutral confirmed after 2 cycles"
+        );
+    }
+
+    #[test]
+    fn latch_multiple_symbols_independent() {
+        let mut state = HashMap::new();
+        let mut btc = msig("BTCUSDT", "bullish");
+        let mut eth = msig("ETHUSDT", "bearish");
+
+        stabilize_consensus_side(&mut btc, &mut state);
+        stabilize_consensus_side(&mut eth, &mut state);
+        assert_eq!(btc.consensus_side, "bullish");
+        assert_eq!(eth.consensus_side, "bearish");
+
+        // Flip ETH once → still latched to bearish
+        eth.consensus_side = "bullish".to_string();
+        eth.bybit_regime = "bullish".to_string();
+        stabilize_consensus_side(&mut eth, &mut state);
+        assert_eq!(
+            eth.consensus_side, "bearish",
+            "ETH still latched after 1 bullish"
+        );
+        assert_eq!(btc.consensus_side, "bullish", "BTC unchanged");
+    }
+
+    // ── aggregate_signals (weighted consensus) ─────────────────────────────
+    fn esig(source: &'static str, price: f64, trend: f64, regime: &'static str) -> ExchangeSignal {
+        ExchangeSignal {
+            source,
+            current_price: price,
+            atr_14: 1.0,
+            adx_14: 25.0,
+            volume_24h: 1_000_000,
+            funding_rate: 0.01,
+            trend_score: trend,
+            spread_pct: 0.05,
+            ema_fast: 100.0,
+            ema_slow: 99.0,
+            bollinger_upper: 110.0,
+            bollinger_middle: 100.0,
+            bollinger_lower: 90.0,
+            bollinger_bandwidth: 0.2,
+            bollinger_percent_b: 0.5,
+            rsi_14: 50.0,
+            macd_line: 0.0,
+            macd_signal: 0.0,
+            macd_histogram: 0.0,
+            volume_ratio: 1.0,
+            regime,
+            trend_slope: 0.0,
+        }
+    }
+
+    #[test]
+    fn aggregate_empty_signals_returns_error() {
+        let err = aggregate_signals("BTCUSDT", &[], &HashMap::new()).unwrap_err();
+        assert!(err.contains("no exchange signal"));
+    }
+
+    #[test]
+    fn aggregate_single_exchange_with_default_weight() {
+        let signals = vec![esig("bybit", 100.0, 0.5, "bullish")];
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        assert!(approx(result.consensus_trend_score, 0.5, 1e-9));
+        assert_eq!(result.consensus_side, "bullish");
+        assert_eq!(result.current_price, 100.0);
+    }
+
+    #[test]
+    fn aggregate_three_exchanges_equal_weight() {
+        let signals = vec![
+            esig("bybit", 100.0, 0.6, "bullish"),
+            esig("binance", 101.0, 0.4, "bullish"),
+            esig("okx", 99.0, 0.2, "bullish"),
+        ];
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        // Equal default weights (1.0 each): avg = (0.6+0.4+0.2)/3
+        assert!(approx(result.consensus_trend_score, 0.4, 1e-9));
+        // All bullish => consensus bullish
+        assert_eq!(result.consensus_side, "bullish");
+        // Bybit price used
+        assert_eq!(result.current_price, 100.0);
+    }
+
+    #[test]
+    fn aggregate_custom_weights_affect_consensus() {
+        let signals = vec![
+            esig("bybit", 100.0, 0.8, "bullish"),
+            esig("binance", 101.0, 0.2, "bearish"),
+        ];
+        let mut weights = HashMap::new();
+        weights.insert("bybit:BTCUSDT".to_string(), 1.5);
+        weights.insert("binance:BTCUSDT".to_string(), 0.5);
+        let result = aggregate_signals("BTCUSDT", &signals, &weights).unwrap();
+        // weighted avg = (1.5*0.8 + 0.5*0.2) / (1.5+0.5) = (1.2+0.1)/2.0 = 0.65
+        assert!(approx(result.consensus_trend_score, 0.65, 1e-9));
+    }
+
+    #[test]
+    fn aggregate_mixed_regime_is_neutral_consensus() {
+        let signals = vec![
+            esig("bybit", 100.0, 0.5, "bullish"),
+            esig("binance", 101.0, 0.5, "bearish"),
+            esig("okx", 99.0, 0.5, "bullish"),
+        ];
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        // Not ALL exchanges agree on the same side
+        assert_eq!(result.consensus_side, "neutral");
+    }
+
+    #[test]
+    fn aggregate_all_bearish_consensus() {
+        let signals = vec![
+            esig("bybit", 100.0, -0.6, "bearish"),
+            esig("binance", 101.0, -0.4, "bearish"),
+        ];
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        assert_eq!(result.consensus_side, "bearish");
+    }
+
+    #[test]
+    fn aggregate_bybit_price_takes_precedence() {
+        let signals = vec![
+            esig("bybit", 100.0, 0.5, "neutral"),
+            esig("binance", 200.0, 0.5, "neutral"),
+        ];
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        assert_eq!(result.current_price, 100.0);
+        assert_eq!(result.bybit_price, 100.0);
+        assert_eq!(result.bybit_regime, "neutral");
+    }
+
+    #[test]
+    fn aggregate_missing_weight_falls_back_to_global_and_default() {
+        let signals = vec![esig("bybit", 100.0, 0.5, "bullish")];
+        // weight for "bybit/BTCUSDT" missing; "bybit/*" missing too => default 1.0
+        let result = aggregate_signals("BTCUSDT", &signals, &HashMap::new()).unwrap();
+        assert!(approx(result.consensus_trend_score, 0.5, 1e-9));
+    }
+
+    #[test]
+    fn aggregate_global_wildcard_weight_applied() {
+        let signals = vec![esig("bybit", 100.0, 0.3, "bullish")];
+        let mut weights = HashMap::new();
+        weights.insert("bybit:*".to_string(), 0.5);
+        let result = aggregate_signals("BTCUSDT", &signals, &weights).unwrap();
+        let expected = 0.5_f64.clamp(0.5, 1.5) * 0.3 / 0.5_f64.clamp(0.5, 1.5);
+        assert!(
+            approx(result.consensus_trend_score, expected, 1e-9),
+            "got {} expected {}",
+            result.consensus_trend_score,
+            expected
+        );
+    }
+
+    // ── apply_btc_context ──────────────────────────────────────────────────
+    #[test]
+    fn btc_context_skips_btcusdt_itself() {
+        let mut btc = msig("BTCUSDT", "neutral");
+        let btc_signal = msig("BTCUSDT", "bullish");
+        btc.btc_regime = "original".to_string();
+
+        apply_btc_context(&mut btc, &btc_signal);
+        // BTCUSDT itself must NOT be modified
+        assert_eq!(btc.btc_regime, "original");
+    }
+
+    #[test]
+    fn btc_context_injects_into_altcoin() {
+        let mut alt = msig("ETHUSDT", "neutral");
+        let btc_signal = MarketSignal {
+            regime: "bearish".to_string(),
+            consensus_trend_score: -0.6,
+            consensus_count: 3,
+            consensus_volume_ratio: 0.8,
+            ..msig("BTCUSDT", "bearish")
+        };
+
+        apply_btc_context(&mut alt, &btc_signal);
+        assert_eq!(alt.btc_regime, "bearish");
+        assert!(approx(alt.btc_trend_score, -0.6, 1e-9));
+        assert_eq!(alt.btc_consensus_count, 3);
+        assert!(approx(alt.btc_volume_ratio, 0.8, 1e-9));
+    }
+
+    #[test]
+    fn btc_context_case_insensitive_skip() {
+        let mut btc = msig("btcusdt", "neutral");
+        apply_btc_context(&mut btc, &msig("BTCUSDT", "bullish"));
+        assert_eq!(btc.btc_regime, "neutral", "case-insensitive skip");
+    }
+
+    // ── align_exchange_candles (cross-exchange alignment) ──────────────────
+    fn candle_ts(ts: i64, price: f64) -> Candle {
+        Candle {
+            open_time_ms: ts,
+            high: price,
+            low: price,
+            close: price,
+            volume_quote: 1.0,
+        }
+    }
+
+    fn make_snapshot(source: &'static str, timestamps: &[i64], price: f64) -> RawExchangeSnapshot {
+        let candles: Vec<Candle> = timestamps.iter().map(|ts| candle_ts(*ts, price)).collect();
+        RawExchangeSnapshot {
+            source,
+            current_price: price,
+            volume_24h: 1_000_000,
+            funding_rate: 0.01,
+            spread_pct: 0.05,
+            candles,
+        }
+    }
+
+    #[test]
+    fn align_empty_snapshots_returns_error() {
+        let err = align_exchange_candles("BTCUSDT", &mut []).unwrap_err();
+        assert!(err.contains("no exchange snapshots"));
+    }
+
+    #[test]
+    fn align_partial_overlap_produces_exact_count() {
+        // Bybit: timestamps 100000, 100060, 100120, ... (210 candles at 60s intervals)
+        // Binance: same but starts 1 period later
+        // OKX: same but starts 2 periods later
+        let interval = 60_000i64;
+        let n = 210usize;
+        let start = unix_time_ms() - (n as i64 * interval) - 3_600_000; // well in the past
+
+        let bybit_ts: Vec<i64> = (0..n).map(|i| start + i as i64 * interval).collect();
+        let binance_ts: Vec<i64> = (1..=n).map(|i| start + i as i64 * interval).collect();
+        let okx_ts: Vec<i64> = (2..=(n + 1)).map(|i| start + i as i64 * interval).collect();
+
+        let mut snapshots = vec![
+            make_snapshot("bybit", &bybit_ts, 100.0),
+            make_snapshot("binance", &binance_ts, 101.0),
+            make_snapshot("okx", &okx_ts, 102.0),
+        ];
+
+        align_exchange_candles("BTCUSDT", &mut snapshots).expect("alignment");
+
+        for snap in &snapshots {
+            assert_eq!(
+                snap.candles.len(),
+                REQUIRED_CANDLE_COUNT,
+                "{} candle count",
+                snap.source
+            );
+        }
+
+        // All three exchanges must have identical timestamps after alignment
+        let ref_ts: Vec<i64> = snapshots[0]
+            .candles
+            .iter()
+            .map(|c| c.open_time_ms)
+            .collect();
+        for snap in &snapshots[1..] {
+            let ts: Vec<i64> = snap.candles.iter().map(|c| c.open_time_ms).collect();
+            assert_eq!(ts, ref_ts, "{} timestamps must match bybit", snap.source);
+        }
+    }
+
+    #[test]
+    fn align_identical_timestamps_keeps_last_200() {
+        let interval = 60_000i64;
+        let n = 220usize;
+        let start = unix_time_ms() - (n as i64 * interval) - 3_600_000;
+
+        let ts: Vec<i64> = (0..n).map(|i| start + i as i64 * interval).collect();
+        let mut snapshots = vec![
+            make_snapshot("bybit", &ts, 100.0),
+            make_snapshot("binance", &ts, 101.0),
+        ];
+
+        align_exchange_candles("BTCUSDT", &mut snapshots).expect("alignment");
+
+        for snap in &snapshots {
+            assert_eq!(snap.candles.len(), REQUIRED_CANDLE_COUNT);
+        }
+        // Verify we kept the most recent 200
+        let last_ts: Vec<i64> = ts[ts.len() - REQUIRED_CANDLE_COUNT..].to_vec();
+        let aligned_ts: Vec<i64> = snapshots[0]
+            .candles
+            .iter()
+            .map(|c| c.open_time_ms)
+            .collect();
+        assert_eq!(aligned_ts, last_ts);
+    }
+
+    #[test]
+    fn align_insufficient_overlap_rejected() {
+        let interval = 60_000i64;
+        let start = unix_time_ms() - (250 * interval) - 3_600_000;
+
+        // Bybit: 210 candles at 0, 60, 120, ...
+        let bybit_ts: Vec<i64> = (0..210).map(|i| start + i as i64 * interval).collect();
+        // Binance: 210 candles but starting 150 periods later → only 60 overlap
+        let binance_ts: Vec<i64> = (150..360).map(|i| start + i as i64 * interval).collect();
+
+        let mut snapshots = vec![
+            make_snapshot("bybit", &bybit_ts, 100.0),
+            make_snapshot("binance", &binance_ts, 101.0),
+        ];
+
+        let err = align_exchange_candles("BTCUSDT", &mut snapshots).unwrap_err();
+        assert!(
+            err.contains("incomplete"),
+            "expected alignment error: {err}"
+        );
     }
 }

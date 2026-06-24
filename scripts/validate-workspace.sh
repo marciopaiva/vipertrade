@@ -11,7 +11,6 @@ vt_prepare_host_rust_env
 MODE="${1:-all}"
 STRICT_DOCS="${CI_LOCAL_STRICT_DOCS:-0}"
 SKIP_COMPOSE="${CI_LOCAL_SKIP_COMPOSE:-0}"
-SKIP_PIPELINE="${CI_LOCAL_SKIP_PIPELINE:-0}"
 RUST_VERSION="${RUST_VERSION:-1.83}"
 RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-vipertrade-base-rust-builder:${RUST_VERSION}}"
 
@@ -76,7 +75,6 @@ show_help() {
   echo "Useful variables:"
   echo "  CI_LOCAL_STRICT_DOCS=1  enable markdown lint"
   echo "  CI_LOCAL_SKIP_COMPOSE=1 skip compose config validation"
-  echo "  CI_LOCAL_SKIP_PIPELINE=1 skip validate-pipeline"
   echo "  PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 keep host-side PyO3 checks compatible"
   echo "  RUST_BUILDER_IMAGE      builder image used when rustfmt/clippy are unavailable"
 }
@@ -112,7 +110,7 @@ run_full_suite() {
   fi
 
   if [[ -x ./scripts/ci-local.sh ]]; then
-    run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" CI_LOCAL_SKIP_PIPELINE="$SKIP_PIPELINE" ./scripts/ci-local.sh
+    run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" ./scripts/ci-local.sh
   else
     print_fail "scripts/ci-local.sh not found"
   fi
@@ -138,7 +136,7 @@ main() {
       ;;
     ci)
       if [[ -x ./scripts/ci-local.sh ]]; then
-        run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" CI_LOCAL_SKIP_PIPELINE="$SKIP_PIPELINE" ./scripts/ci-local.sh
+        run_check "CI local" env CI_LOCAL_STRICT_DOCS="$STRICT_DOCS" CI_LOCAL_SKIP_COMPOSE="$SKIP_COMPOSE" ./scripts/ci-local.sh
       else
         print_fail "scripts/ci-local.sh not found"
       fi

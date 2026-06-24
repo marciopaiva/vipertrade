@@ -24,7 +24,6 @@ data:
 
   # Strategy configuration
   STRATEGY_CONFIG: /app/config/trading/pairs.yaml
-  TUPA_PIPELINE_PATH: /app/config/strategies/viper_smart_copy.tp
   TUPA_AUDIT_PATH: /app/logs/audit
   TUPA_SEED: "42"
   TUPA_BACKEND: hybrid

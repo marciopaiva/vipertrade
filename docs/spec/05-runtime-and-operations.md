@@ -1,7 +1,5 @@
 # 05 - Runtime and Operations
 
-Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
-
 ## Error Handling and Resilience
 
 - Error matrix by domain: Bybit REST, WebSocket, database, and risk engine.
@@ -65,10 +63,6 @@ Source: `docs/legacy/VIPERTRADE_SPEC.md` (sections 7-17).
 
 - Blocks 1-15 structure incremental delivery.
 - Base project and compose.
-- Core services (market-data, strategy, executor, monitor, analytics, ai-analyst, backtest).
+- Core services (market-data, strategy, executor, monitor, analytics, ai-analyst).
 - Error handling and tests.
 - Documentation, micro deploy and Smart Copy/trailing optimizations.
-
-## Reference Original
-
-- `docs/legacy/VIPERTRADE_SPEC.md`, approximate lines 491-1767.

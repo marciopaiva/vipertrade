@@ -37,8 +37,9 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 on transient DB blips, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8081
           initialDelaySeconds: 30
           periodSeconds: 20
@@ -145,8 +146,9 @@ spec:
           initialDelaySeconds: 20
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 on transient DB blips, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8082
           initialDelaySeconds: 45
           periodSeconds: 20
@@ -210,8 +212,9 @@ spec:
           initialDelaySeconds: 20
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 on transient DB blips, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8083
           initialDelaySeconds: 45
           periodSeconds: 20
@@ -265,8 +268,9 @@ spec:
           initialDelaySeconds: 20
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 on transient DB blips, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8084
           initialDelaySeconds: 45
           periodSeconds: 20
@@ -318,8 +322,9 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
+          # TCP, not /health: /health returns 503 on transient DB blips, which
+          # must take the pod OUT OF ROTATION (readiness) — not RESTART it.
+          tcpSocket:
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 20
@@ -435,8 +440,9 @@ spec:
           initialDelaySeconds: 20
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /
+          # TCP, not HTTP: only restart the pod when the process is actually
+          # dead, not on transient HTTP blips from a backend dependency.
+          tcpSocket:
             port: 3000
           initialDelaySeconds: 45
           periodSeconds: 20

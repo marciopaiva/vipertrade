@@ -10,7 +10,7 @@ It is intentionally focused on the current state of the runtime, not the long-te
 The strategy runtime now operates in three layers:
 
 1. Tupa pipeline contract
-   - `config/strategies/viper_smart_copy.tp`
+   - compiled in-process via the `pipeline! { name: ViperSmartCopy, ... }` macro in `services/strategy/src/lib.rs`
    - defines the validated pipeline shape
    - defines structured step outputs and expected fields
 2. Rust-side policy and runtime orchestration

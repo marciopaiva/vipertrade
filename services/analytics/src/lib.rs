@@ -485,7 +485,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
 
-    let database_url = resolve_database_url().expect("DATABASE_URL or DB_* vars must be set");
+    let database_url = resolve_database_url().ok_or("DATABASE_URL or DB_* vars must be set")?;
 
     let pool = Arc::new(
         PgPoolOptions::new()
@@ -559,7 +559,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let symbol_owned = symbol.clone();
 
             tasks.push(tokio::spawn(async move {
-                let _permit = sem_clone.acquire().await.unwrap();
+                let _permit = sem_clone
+                    .acquire()
+                    .await
+                    .expect("analytics semaphore is never closed while permits are held");
 
                 match fetch_bybit_snapshot(&http_bybit, &bybit_base_clone, &symbol_owned).await {
                     Ok((price, trend_score)) => {

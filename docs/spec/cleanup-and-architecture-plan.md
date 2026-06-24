@@ -16,7 +16,7 @@ market-data ──viper:market_data──▶ strategy ──viper:decisions─�
 monitor ──viper:reconciliation──▶ (drift / reconciliation, side path)
 api + web ──▶ operator layer (HTTP, off the hot path)
 ai-analyst ──▶ optional diagnostics (LLM disabled), consumed by the dashboard
-backtest ──▶ STUB (health check only, no logic)
+backtest ──▶ (removed)
 ```
 
 ## 2. Service inventory & verdict
@@ -31,10 +31,10 @@ backtest ──▶ STUB (health check only, no logic)
 | api | 3,034 | operator | recently modularized | Keep |
 | web | — | operator | dashboard; weak auth (issue #32) | Keep |
 | ai-analyst | 2,567 | optional | LLM disabled; DB-driven diagnostics; not in hot path | Re-evaluate |
-| backtest | 71 | no | **pure stub** (health check only) | Remove (Phase 0) |
+| backtest | — | no | **removed** (was pure stub) | Done |
 
 **Takeaway:** there are not "many useless services" — 6 of 9 are real and integrated.
-The questionable ones are `backtest` (empty stub) and `ai-analyst` (2.5k lines with
+The questionable one is `ai-analyst` (2.5k lines with
 LLM disabled, off the hot path). The real growth problem is the `strategy` monolith
 with disconnected logic.
 
@@ -42,11 +42,11 @@ with disconnected logic.
 
 | Residue | What | Action |
 | --- | --- | --- |
-| `config/strategies/viper_smart_copy.tp` | 485 lines, orphaned (runtime load already removed) | Relocate to `docs/spec/` as business-rules reference |
-| `docs/legacy/` | old `VIPERTRADE_SPEC.md` + README | Remove |
+| `config/strategies/viper_smart_copy.tp` | 485 lines, orphaned (runtime load already removed) | Removed — pipeline is compiled in-process via the `pipeline!` macro in `services/strategy/src/lib.rs`; canonical spec kept at `docs/spec/viper_smart_copy.reference.tp` |
+| `docs/legacy/` | old `VIPERTRADE_SPEC.md` + README | Removed |
 | `ANALYSIS_DEEP_DIVE.md` (40 KB, root) | likely stale analysis | Evaluate (kept for now) |
 | dead decision logic in `strategy` | `execute_strategy_step` produces ENTER_LONG/SHORT but is bypassed by stub steps | Business decision (issue #33) |
-| `backtest` stub | empty service | Remove from workspace + k8s + compose + scripts |
+| `backtest` stub | empty service | Removed from workspace + k8s + compose + scripts |
 
 Historical operational evidence (`docs/operations/evidence/PHASE4_BACKTEST_*`) is a
 record and is intentionally retained.
@@ -98,8 +98,7 @@ with no current scale/fault-isolation requirement.
 
 ## 6. Phased execution
 
-- **Phase 0 — low-risk quick wins (this PR):** remove `backtest` stub (code + k8s + compose +
-  scripts), remove `docs/legacy/`, relocate the orphaned `.tp`, audit unused deps.
+- **Phase 0 — low-risk quick wins:** remove `backtest` stub (done), remove `docs/legacy/` (done), relocate the orphaned `.tp`, audit unused deps.
 - **Phase 1 — business rules:** decide revive vs rewrite (#33); document the live rules spec.
 - **Phase 2 — architecture consolidation (if Option A):** merge hot-path services / reduce
   deployments; re-evaluate ai-analyst.

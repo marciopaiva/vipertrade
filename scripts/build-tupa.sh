@@ -11,7 +11,7 @@ show_help() {
   echo "  ./scripts/build-tupa.sh"
   echo ""
   echo "Description:"
-  echo "  Builds the strategy service with Tupa integration and validates the pipeline."
+  echo "  Builds the strategy service with Tupa integration."
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
@@ -49,29 +49,6 @@ if [[ -f target/release/viper-strategy ]]; then
 else
     vt_fail "Build failed"
     exit 1
-fi
-
-vt_step "Validating Tupa pipeline"
-if command -v tupa &> /dev/null; then
-    TUPA_CMD="tupa"
-elif [[ -f "$HOME/.local/bin/tupa" ]]; then
-    TUPA_CMD="$HOME/.local/bin/tupa"
-else
-    TUPA_CMD=""
-fi
-
-if [[ -n "$TUPA_CMD" ]]; then
-    if $TUPA_CMD codegen --check config/strategies/viper_smart_copy.tp 2>/dev/null; then
-        vt_ok "Pipeline is valid"
-    else
-        vt_fail "Pipeline validation failed"
-    fi
-else
-    if cargo run -p tupa-cli -- codegen --check config/strategies/viper_smart_copy.tp 2>/dev/null; then
-        vt_ok "Pipeline is valid"
-    else
-        vt_warn "Pipeline validation skipped (tupa CLI not found)"
-    fi
 fi
 
 echo ""

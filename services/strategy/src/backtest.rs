@@ -7,9 +7,8 @@
 //! reads the exact inputs the strategy consumed and runs the real code paths,
 //! two configs can be compared on identical data (unlike noisy live A/B).
 //!
-//! The core `simulate` is pure (no I/O) and unit-tested; `run_backtest_cli`
-//! wraps it with DB fetch + config load and prints a report. Invoked via
-//! `viper backtest` / `VIPER_ROLE=backtest`.
+//! The core `simulate` is pure (no I/O) and unit-tested. Exposed via the
+//! ai-analyst `/sweep` endpoint and the `SweepResult` / `SweepVariant` API.
 
 use crate::{
     enforce_open_position_thesis_guard, evaluate_open_trade_exit, run_steps_through,
@@ -276,125 +275,6 @@ pub fn run_sweep(
     SweepResult { baseline, variants }
 }
 
-fn print_report(rep: &BacktestReport, cfg_label: &str) {
-    println!("─ Backtest report ({cfg_label}) ───────────────────────");
-    println!("  ticks replayed : {}", rep.ticks);
-    println!("  opened         : {}", rep.opened);
-    println!(
-        "  closed         : {}  (wins {}, losses {})",
-        rep.closed, rep.wins, rep.losses
-    );
-    let wr = if rep.closed > 0 {
-        100.0 * rep.wins as f64 / rep.closed as f64
-    } else {
-        0.0
-    };
-    println!("  win rate       : {wr:.1}%");
-    println!("  net PnL        : {:.4}", rep.net_pnl);
-    println!("  by close_reason:");
-    for (reason, (n, pnl)) in &rep.by_reason {
-        println!("    {reason:<20} n={n:<4} net={pnl:.4}");
-    }
-    // Per-symbol, worst net first — surfaces which symbols bleed under this config.
-    let mut syms: Vec<(&String, &(usize, f64, usize))> = rep.by_symbol.iter().collect();
-    syms.sort_by(|a, b| {
-        a.1 .1
-            .partial_cmp(&b.1 .1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    println!("  by symbol (worst net first):");
-    for (sym, (n, pnl, wins)) in syms {
-        let win = if *n > 0 {
-            100.0 * *wins as f64 / *n as f64
-        } else {
-            0.0
-        };
-        println!("    {sym:<12} n={n:<4} net={pnl:+.4} win={win:.0}%");
-    }
-}
-
-/// CLI entrypoint (role `backtest`). Reads the input corpus from the DB, loads
-/// the same config the strategy uses, runs the simulation and prints a report.
-///
-/// Env: `DATABASE_URL` (or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD),
-/// `BACKTEST_LIMIT` (default 5000), plus the usual STRATEGY_CONFIG /
-/// TRADING_PROFILE / TRADING_MODE.
-pub async fn run_backtest_cli() -> Result<(), Box<dyn std::error::Error>> {
-    let strategy_config = std::env::var("STRATEGY_CONFIG")
-        .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
-    let trading_profile = std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
-    let trading_mode = std::env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
-    let cfg = StrategyConfig::from_files(&strategy_config, &trading_profile, &trading_mode)?;
-
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        let host = std::env::var("DB_HOST").unwrap_or_else(|_| "postgres".to_string());
-        let port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
-        let name = std::env::var("DB_NAME").unwrap_or_else(|_| "vipertrade".to_string());
-        let user = std::env::var("DB_USER").unwrap_or_else(|_| "viper".to_string());
-        let pass = std::env::var("DB_PASSWORD").unwrap_or_default();
-        format!("postgres://{user}:{pass}@{host}:{port}/{name}")
-    });
-    let limit: i64 = std::env::var("BACKTEST_LIMIT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5000);
-
-    // Optional `BACKTEST_SINCE` (RFC3339) restricts the replay to rows at/after a
-    // timestamp — used to isolate a corpus window (e.g. the ADX-plumbed era) so a
-    // gate comparison is apples-to-apples instead of mixing in ticks that predate
-    // the field and would block on missing data.
-    let since: Option<DateTime<Utc>> = std::env::var("BACKTEST_SINCE").ok().and_then(|raw| {
-        match DateTime::parse_from_rfc3339(&raw) {
-            Ok(ts) => Some(ts.with_timezone(&Utc)),
-            Err(e) => {
-                eprintln!("BACKTEST_SINCE='{raw}' is not valid RFC3339 ({e}); ignoring");
-                None
-            }
-        }
-    });
-
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&db_url)
-        .await?;
-
-    if let Some(since) = since {
-        println!("Replaying rows at/after {since}");
-    }
-    let ticks = load_corpus(&pool, since, limit).await?;
-    println!("Loaded {} replay ticks from tupa_audit_logs", ticks.len());
-
-    let base = simulate(&ticks, &cfg);
-    print_report(
-        &base,
-        &format!("{trading_profile}/{trading_mode} [baseline]"),
-    );
-
-    // Optional variant: `--set <dotted.path>=<value>` (repeatable) patches the
-    // config and runs the SAME corpus, for deterministic config comparison.
-    let overrides = parse_set_overrides();
-    if !overrides.is_empty() {
-        let variant = apply_overrides(&cfg, &overrides);
-        println!(
-            "Applied {} override(s) to global + {} per-symbol blocks",
-            overrides.len(),
-            variant.pairs.len()
-        );
-        let label = overrides
-            .iter()
-            .map(|(p, v)| format!("{p}={v}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let var = simulate(&ticks, &variant);
-        print_report(&var, &format!("variant [{label}]"));
-        println!("─ Comparison (variant − baseline) ──────────────────────");
-        println!("  Δ net PnL : {:+.4}", var.net_pnl - base.net_pnl);
-        println!("  Δ opened  : {:+}", var.opened as i64 - base.opened as i64);
-        println!("  Δ closed  : {:+}", var.closed as i64 - base.closed as i64);
-    }
-    Ok(())
-}
-
 /// Parse an audit `input_data` row into a replay tick. Entry rows are a full
 /// `StrategyInput` (nested `signal`); open-position rows store the raw
 /// `MarketSignal` — wrap those so the price tick is still captured.
@@ -424,24 +304,6 @@ fn parse_tick(ts: DateTime<Utc>, json: &str) -> Option<Tick> {
         input,
         entry_eligible,
     })
-}
-
-/// Collect repeated `--set <dotted.path>=<value>` CLI args.
-fn parse_set_overrides() -> Vec<(String, String)> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--set" {
-            if let Some((k, v)) = args.get(i + 1).and_then(|kv| kv.split_once('=')) {
-                out.push((k.to_string(), v.to_string()));
-            }
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
-    out
 }
 
 /// Set a dotted-path value inside a JSON object, creating intermediate objects.

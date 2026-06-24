@@ -1889,6 +1889,35 @@ async fn has_recent_stop_loss_for_symbol(
     Ok(count > 0)
 }
 
+/// Returns true when a CLOSE_* decision for `symbol` was already emitted within
+/// the last `within_minutes` minutes.
+///
+/// The strategy persists every decision to `tupa_audit_logs` synchronously before
+/// publishing it. If the strategy restarts after emitting a CLOSE but before the
+/// executor processes it, the position is still `open`, so the open-trade
+/// re-evaluation would emit the same CLOSE again (duplicate exit). Guarding on a
+/// recently-emitted CLOSE for the symbol prevents that — there is at most one
+/// open position per symbol, so matching by symbol is sufficient.
+async fn has_recent_close_decision_for_symbol(
+    pool: &PgPool,
+    symbol: &str,
+    within_minutes: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM tupa_audit_logs
+            WHERE executed_at >= NOW() - make_interval(mins => $2::int)
+              AND output_data->'final_decision'->>'symbol' = $1
+              AND output_data->'final_decision'->>'action' LIKE 'CLOSE\\_%'
+         )",
+    )
+    .bind(symbol)
+    .bind(within_minutes)
+    .fetch_one(pool)
+    .await
+}
+
 async fn count_open_trades(pool: &PgPool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT COUNT(*)::bigint
@@ -5075,6 +5104,39 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                                 exit_evaluation.trigger, exit_evaluation.reason
                                             ),
                                         )
+                                    };
+
+                                    // Guard against duplicate exits: the position is still open here,
+                                    // so if we already emitted a CLOSE for it that the executor has not
+                                    // processed yet (e.g. after a strategy restart), re-emitting would
+                                    // send a duplicate close. Downgrade to HOLD until it is executed.
+                                    let decision = if decision.action.starts_with("CLOSE_") {
+                                        match has_recent_close_decision_for_symbol(pool, &symbol, 5)
+                                            .await
+                                        {
+                                            Ok(true) => {
+                                                info!(
+                                                    symbol = %symbol,
+                                                    action = %decision.action,
+                                                    "Suppressing duplicate close: a recent CLOSE for this open position is still pending execution"
+                                                );
+                                                create_hold_decision(
+                                                    &symbol,
+                                                    &format!("close_already_pending_{}", decision.reason),
+                                                )
+                                            }
+                                            Ok(false) => decision,
+                                            Err(err) => {
+                                                warn!(
+                                                    symbol = %symbol,
+                                                    err = %err,
+                                                    "Failed to check for a pending close; emitting close decision"
+                                                );
+                                                decision
+                                            }
+                                        }
+                                    } else {
+                                        decision
                                     };
 
                                     if let Err(err) = finalize_strategy_decision(
