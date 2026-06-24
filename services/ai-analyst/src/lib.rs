@@ -14,7 +14,9 @@ use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
+mod openrouter;
 mod trade_diagnostics;
+mod tuning_grid;
 
 #[derive(Clone)]
 struct AppState {
@@ -378,9 +380,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .and_then(handle_sweep);
 
+    let tuning = warp::path!("analyze" / "tuning")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(handle_tuning);
+
     let routes = health
         .or(analyze_recent)
         .or(sweep)
+        .or(tuning)
         .recover(handle_rejection)
         .with(warp::cors().allow_any_origin());
 
@@ -543,6 +552,115 @@ async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Re
             Ok(warp::reply::with_status(
                 warp::reply::json(&ApiError {
                     error: "sweep_failed",
+                    message,
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+/// `POST /analyze/tuning` body. Same corpus window controls as `/sweep`.
+#[derive(Debug, Deserialize)]
+struct TuningRequest {
+    since: Option<String>,
+    limit: Option<i64>,
+}
+
+/// The LLM narration layer of the tuning response (best-effort).
+#[derive(Debug, Serialize)]
+struct TuningAi {
+    model: String,
+    report_md: String,
+}
+
+/// `POST /analyze/tuning` response: the deterministic grid (always present) plus an
+/// optional LLM narration. `ai_error` explains why narration is absent.
+#[derive(Debug, Serialize)]
+struct TuningResponse {
+    #[serde(flatten)]
+    grid: tuning_grid::TuningGridResult,
+    ai: Option<TuningAi>,
+    ai_error: Option<String>,
+}
+
+/// Core of `/analyze/tuning` (Format A): load the baked config + corpus, run the
+/// fixed deterministic grid in Rust, then hand the numbers to OpenRouter for prose.
+/// The grid always returns; narration is best-effort and never blocks the result.
+async fn build_tuning(
+    state: &AppState,
+    req: &TuningRequest,
+) -> Result<TuningResponse, SweepCoreError> {
+    let strategy_config =
+        env::var("STRATEGY_CONFIG").unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
+    let trading_profile = env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
+    let trading_mode = env::var("TRADING_MODE").unwrap_or_else(|_| "paper".to_string());
+
+    let cfg = viper_strategy::StrategyConfig::from_files(
+        &strategy_config,
+        &trading_profile,
+        &trading_mode,
+    )
+    .map_err(|e| SweepCoreError::Internal(format!("config load failed: {e}")))?;
+
+    let since = match req.since.as_deref() {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map_err(|e| SweepCoreError::BadRequest(format!("'since' must be RFC3339: {e}")))?
+                .with_timezone(&chrono::Utc),
+        ),
+        None => None,
+    };
+    let limit = req.limit.unwrap_or(20000).clamp(1, MAX_SWEEP_LIMIT);
+    let ticks = viper_strategy::backtest::load_corpus(&state.db_pool, since, limit)
+        .await
+        .map_err(|e| SweepCoreError::Internal(format!("corpus load failed: {e}")))?;
+
+    let grid = tuning_grid::run(&ticks, &cfg);
+
+    let (ai, ai_error) = match env::var("OPENROUTER_API_KEY")
+        .ok()
+        .filter(|key| !key.is_empty())
+    {
+        None => (
+            None,
+            Some("OPENROUTER_API_KEY not set; returning deterministic grid only".to_string()),
+        ),
+        Some(key) => {
+            let model = env::var("OPENROUTER_MODEL")
+                .unwrap_or_else(|_| "anthropic/claude-sonnet-4".to_string());
+            let payload = serde_json::to_string(&grid)
+                .map_err(|e| SweepCoreError::Internal(format!("serialize grid: {e}")))?;
+            match openrouter::narrate(&state.http_client, &key, &model, &payload).await {
+                Ok(report_md) => (Some(TuningAi { model, report_md }), None),
+                Err(e) => (None, Some(format!("narration failed: {e}"))),
+            }
+        }
+    };
+
+    Ok(TuningResponse { grid, ai, ai_error })
+}
+
+/// `POST /analyze/tuning` — deterministic tuning grid (Format A) + optional LLM
+/// narration. The numbers are computed in Rust; the LLM only writes prose over them.
+async fn handle_tuning(req: TuningRequest, state: Arc<AppState>) -> Result<impl Reply, Rejection> {
+    match build_tuning(&state, &req).await {
+        Ok(resp) => Ok(warp::reply::with_status(
+            warp::reply::json(&resp),
+            StatusCode::OK,
+        )),
+        Err(SweepCoreError::BadRequest(message)) => Ok(warp::reply::with_status(
+            warp::reply::json(&ApiError {
+                error: "invalid_request",
+                message,
+            }),
+            StatusCode::BAD_REQUEST,
+        )),
+        Err(SweepCoreError::Internal(message)) => {
+            error!("tuning failed: {message}");
+            Ok(warp::reply::with_status(
+                warp::reply::json(&ApiError {
+                    error: "tuning_failed",
                     message,
                 }),
                 StatusCode::INTERNAL_SERVER_ERROR,

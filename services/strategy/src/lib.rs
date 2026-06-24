@@ -694,6 +694,23 @@ impl StrategyConfig {
         }
     }
 
+    /// `(symbol, enabled)` for every pair block, regardless of enabled state.
+    /// The enabled set is the live trading universe (these have corpus data);
+    /// the disabled set is the substitution-candidate pool. Exposed for tooling
+    /// (ai-analyst `/analyze/tuning`) — the config is the single source of truth.
+    pub fn symbol_universe(&self) -> Vec<(String, bool)> {
+        let mut universe: Vec<(String, bool)> = self
+            .pairs
+            .iter()
+            .map(|(symbol, cfg)| {
+                let enabled = cfg.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+                (symbol.clone(), enabled)
+            })
+            .collect();
+        universe.sort_by(|a, b| a.0.cmp(&b.0));
+        universe
+    }
+
     fn pair_cfg(&self, symbol: &str) -> Option<&Value> {
         self.pairs.get(&symbol.to_uppercase())
     }
