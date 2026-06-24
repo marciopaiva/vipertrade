@@ -1319,11 +1319,20 @@ impl StrategyConfig {
     }
 
     fn trailing_min_move_threshold_pct(&self) -> f64 {
-        cfg_f64(
-            &self.global,
-            &["trailing_stop", "min_move_threshold_pct"],
-            0.002,
-        )
+        // Read from the mode profile (where the rest of the trailing config lives),
+        // falling back to the legacy global.trailing_stop block, then a small default
+        // matched to the trail geometry. The old 0.002 (0.2%) was coarser than this
+        // strategy's sub-0.2% profit peaks, so it froze the persisted peak and
+        // degraded the trail to a break-even-only guard (see
+        // should_persist_trailing_update).
+        self.mode_cfg()
+            .and_then(|value| cfg_get(value, &["trailing_stop", "min_move_threshold_pct"]))
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                cfg_get(&self.global, &["trailing_stop", "min_move_threshold_pct"])
+                    .and_then(Value::as_f64)
+            })
+            .unwrap_or(0.0002)
     }
 
     fn trailing_runtime_config(&self, symbol: &str) -> TrailingRuntimeConfig {
@@ -1774,22 +1783,30 @@ fn apply_active_position_advice_to_trailing(
         return trailing;
     };
 
+    // Both advice actions must only ever TIGHTEN the trail (smaller distances,
+    // earlier break-even), never loosen it. The multipliers (<1) already tighten;
+    // the previous `.max(...)` floors (0.002–0.003) were sized for the old loose
+    // trailing era (initial_trail ~0.005–0.008) and, after the config was retuned
+    // to a tight trail (~0.0006), those floors inverted the intent — forcing the
+    // trail ~5x WIDER than config and bleeding profit back on every advised
+    // position (the backtest never sees this: it evaluates with advice = None).
+    // Floors removed so advice tightens from the tuned config base; the invariant
+    // is that the live trail is never looser than what the backtest validates.
     match advice.action.as_str() {
         "hold_but_tighten" => {
-            trailing.move_to_break_even_at = (trailing.move_to_break_even_at * 0.85).max(0.005);
-            trailing.initial_trail_pct = (trailing.initial_trail_pct * 0.9).max(0.003);
+            trailing.move_to_break_even_at *= 0.85;
+            trailing.initial_trail_pct *= 0.9;
             for level in &mut trailing.ratchet_levels {
-                level.trail_pct = (level.trail_pct * 0.92).max(0.0025);
+                level.trail_pct *= 0.92;
             }
         }
         "reduce_risk" => {
-            trailing.activate_after_profit_pct =
-                (trailing.activate_after_profit_pct * 0.6).max(0.0025);
-            trailing.move_to_break_even_at = (trailing.move_to_break_even_at * 0.5).max(0.003);
-            trailing.initial_trail_pct = (trailing.initial_trail_pct * 0.65).max(0.002);
+            trailing.activate_after_profit_pct *= 0.6;
+            trailing.move_to_break_even_at *= 0.5;
+            trailing.initial_trail_pct *= 0.65;
             for level in &mut trailing.ratchet_levels {
-                level.at_profit_pct = (level.at_profit_pct * 0.8).max(0.003);
-                level.trail_pct = (level.trail_pct * 0.7).max(0.0018);
+                level.at_profit_pct *= 0.8;
+                level.trail_pct *= 0.7;
             }
         }
         _ => {}
@@ -3258,9 +3275,21 @@ fn should_persist_trailing_update(
         return true;
     }
 
-    let peak_base = open.trailing_stop_peak_price.abs().max(1e-9);
-    let peak_move_pct = (eval.peak_price - open.trailing_stop_peak_price).abs() / peak_base;
-    if peak_move_pct >= min_move_threshold_pct {
+    // The persisted peak is the ONLY cross-tick memory of the trail: each cycle
+    // reloads the position from the trades table, so a dropped peak update freezes
+    // the ratchet near activation and the stop never trails the real peak (it
+    // degrades to a break-even-only guard). The peak only ever moves favorably
+    // (evaluate_trailing clamps it with max/min against the prior peak), so persist
+    // once that favorable move clears the (small) threshold — the gate must never be
+    // coarser than the trail geometry.
+    let prior_peak = open.trailing_stop_peak_price;
+    let favorable_move = if open.side == "Long" {
+        eval.peak_price - prior_peak
+    } else {
+        prior_peak - eval.peak_price
+    };
+    let peak_base = prior_peak.abs().max(1e-9);
+    if favorable_move > 0.0 && favorable_move / peak_base >= min_move_threshold_pct {
         return true;
     }
 
@@ -5634,6 +5663,95 @@ mod tests {
         assert!(eval.reason.contains("trailing_raw_"));
         assert!(eval.reason.contains("activation_progress"));
         assert!(eval.reason.contains("break_even"));
+    }
+
+    #[test]
+    fn persists_small_favorable_peak_move_below_old_threshold() {
+        // A Short whose peak improves ~0.05% — far below the old 0.2% gate that used
+        // to freeze the persisted peak (and degrade the trail to break-even only).
+        // With the geometry-matched threshold it must persist so the trail ratchets.
+        let open = OpenTradeSnapshot {
+            trade_id: "t".to_string(),
+            side: "Short".to_string(),
+            quantity: 1.0,
+            entry_price: 100.0,
+            opened_at: Utc::now(),
+            trailing_stop_activated: true,
+            trailing_stop_peak_price: 100.0,
+            trailing_stop_final_distance_pct: 0.0006,
+        };
+        let eval = TrailingEval {
+            activated: true,
+            peak_price: 99.95, // favorable for a short: lower price = more profit
+            trail_pct: 0.0006,
+            trailing_stop_price: 99.95 * 1.0006,
+            trailing_score: 50,
+            reason: String::new(),
+        };
+        assert!(should_persist_trailing_update(&open, &eval, 0.0002));
+        // The old coarse gate would have dropped this peak update.
+        assert!(!should_persist_trailing_update(&open, &eval, 0.002));
+    }
+
+    #[test]
+    fn skips_persist_when_peak_unchanged_and_no_ratchet() {
+        let open = OpenTradeSnapshot {
+            trade_id: "t".to_string(),
+            side: "Short".to_string(),
+            quantity: 1.0,
+            entry_price: 100.0,
+            opened_at: Utc::now(),
+            trailing_stop_activated: true,
+            trailing_stop_peak_price: 99.95,
+            trailing_stop_final_distance_pct: 0.0006,
+        };
+        let eval = TrailingEval {
+            activated: true,
+            peak_price: 99.95,
+            trail_pct: 0.0006,
+            trailing_stop_price: 99.95 * 1.0006,
+            trailing_score: 50,
+            reason: String::new(),
+        };
+        assert!(!should_persist_trailing_update(&open, &eval, 0.0002));
+    }
+
+    #[test]
+    fn active_position_advice_only_tightens_trailing() {
+        // Invariant: advice must never make the live trail looser than the tuned
+        // config (the backtest validates the config trail with advice = None, so a
+        // looser live trail bleeds profit the backtest never predicts).
+        let base = sample_cfg().trailing_runtime_config("DOGEUSDT");
+        let advice = |action: &str| ActivePositionAdviceSnapshot {
+            symbol: "DOGEUSDT".to_string(),
+            side: "Long".to_string(),
+            action: action.to_string(),
+            confidence: "high".to_string(),
+            maintenance_score: 50,
+            market_state: "trending".to_string(),
+            pnl_pct_estimate: 0.2,
+            duration_minutes: 5,
+            summary: String::new(),
+            evidence: vec![],
+            risk_flags: vec![],
+        };
+        for action in ["hold_but_tighten", "reduce_risk"] {
+            let a = advice(action);
+            let tuned = apply_active_position_advice_to_trailing(base.clone(), Some(&a));
+            assert!(
+                tuned.initial_trail_pct <= base.initial_trail_pct + 1e-12,
+                "{action} loosened initial_trail_pct"
+            );
+            assert!(tuned.initial_trail_pct > 0.0);
+            assert!(tuned.move_to_break_even_at <= base.move_to_break_even_at + 1e-12);
+            for (t, b) in tuned.ratchet_levels.iter().zip(base.ratchet_levels.iter()) {
+                assert!(
+                    t.trail_pct <= b.trail_pct + 1e-12,
+                    "{action} loosened ratchet trail_pct"
+                );
+                assert!(t.trail_pct > 0.0);
+            }
+        }
     }
 
     #[test]
