@@ -6,7 +6,8 @@
   `.env` stays out of Git, API keys have minimum required privileges, and 2FA/IP
   allowlists are enabled.
 - Database: schema is applied, tables and indexes exist, and backups are defined.
-- Services: containers boot correctly, health checks pass, Redis Pub/Sub works, and WebSocket reconnect behavior is validated.
+- Services: containers boot correctly, health checks pass, Redis Pub/Sub works, REST kline
+  ingestion is healthy, and the `api`→web WebSocket stream reconnects.
 - Risk: sizing and limits are validated, stop loss and trailing stop work, and both the circuit breaker and daily-loss protection are tested.
 - Notifications: webhook is configured and both critical and warning alerts are delivered.
 - Testing: paper trading is stable, stress backtests are approved, and both kill switch and error handling are exercised.

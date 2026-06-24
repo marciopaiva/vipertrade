@@ -9,6 +9,10 @@ secrets/*.key
 secrets/*.pem
 secrets/*.secret
 
+# Tuned trading config — private. The public template is pairs.example.yaml;
+# copy it to pairs.yaml and tune locally (see config/trading/pairs.example.yaml).
+config/trading/pairs.yaml
+
 # RUST / TUPLA
 target/
 *.rs.bk

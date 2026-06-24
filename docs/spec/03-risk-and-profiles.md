@@ -10,6 +10,10 @@ surface (paper/testnet/mainnet) and the `TRADING_PROFILE` env is a label only.
 tunables. `MAINNET` inherits from the same anchor (`*paper_profile`) — promotion to
 mainnet is an explicit human action (edit + commit + deploy), not a runtime flag.
 
+`pairs.yaml` is **gitignored** (private tuning). The repository ships a sanitized
+template, `config/trading/pairs.example.yaml`; `scripts/init-secrets.sh` seeds the real
+file from it on first run. The values shown below are the current PAPER defaults.
+
 ## Risk Parameters in Effect
 
 **Position sizing** (`global.risk`):

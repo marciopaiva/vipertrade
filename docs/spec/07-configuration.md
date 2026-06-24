@@ -11,9 +11,16 @@ ViperTrade is configured through two main layers:
 2. `config/trading/pairs.yaml`
    - strategy, risk, and per-token behavior — the single source of truth for all tunables
 
-`config/trading/pairs.yaml` is baked into the service image at build time. Config changes
-require: edit the YAML → commit → `make build && make deploy` → `kubectl rollout restart`
+`config/trading/pairs.yaml` is baked into the service image at build time, and the strategy
+reads the path in `STRATEGY_CONFIG` (default `/app/config/pairs.yaml` in the container).
+Config changes require: edit the YAML → `make build && make deploy` → `kubectl rollout restart`
 the affected deployments. There is no hot-reload and no database config layer.
+
+> **Public template vs private tuning.** `config/trading/pairs.yaml` is **gitignored** (it
+> carries the calibrated strategy values). The repository ships a sanitized template,
+> `config/trading/pairs.example.yaml`, documenting the full schema with neutral defaults.
+> `scripts/init-secrets.sh` seeds `pairs.yaml` from the template on first run; copy and tune
+> it locally before any live use.
 
 ## Runtime mode
 

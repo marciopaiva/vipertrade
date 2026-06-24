@@ -1,0 +1,232 @@
+# config/trading/pairs.example.yaml
+# ──────────────────────────────────────────────────────────────────────────────
+# ViperTrade — Trading Pairs Configuration (EXAMPLE TEMPLATE)
+#
+# This is a SANITIZED template documenting the full config schema. The real,
+# tuned `pairs.yaml` is gitignored (it carries the calibrated strategy values).
+#
+# To run locally:   cp config/trading/pairs.example.yaml config/trading/pairs.yaml
+# then tune the values below. The strategy reads the file pointed to by the
+# STRATEGY_CONFIG env var (default /app/config/pairs.yaml in the container).
+#
+# `pairs.yaml` is the SINGLE SOURCE OF TRUTH for trading config: no DB config,
+# no hot-reload. Edit → commit your private copy → rebuild/redeploy.
+#
+# The values here are NEUTRAL DEFAULTS for illustration only — they are not a
+# tuned configuration. Calibrate them with the backtest sweep before trusting.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════
+# GLOBAL SETTINGS
+# ═══════════════════════════════════════════════════════════
+
+global:
+  mode_profiles:
+    # ── PAPER: the profile you tune. MAINNET inherits it via the YAML anchor. ──
+    PAPER: &paper_profile
+      name: "example_default"
+      permissive_entry: false
+      require_multi_exchange_consensus: true   # require bybit ∩ binance ∩ okx agreement
+      require_btc_macro_alignment: true        # gate entries on BTC macro context
+      min_volume_24h_usdt: 16000000            # liquidity floor per symbol
+      max_spread_pct: 0.0008                   # reject wide-spread books
+      max_atr_pct: 0.035                        # skip over-volatile symbols
+      max_funding_rate_pct: 0.01                # skip expensive funding
+      stop_loss_pct: 0.012                      # hard stop distance from entry
+      fixed_take_profit_enabled: false          # use trailing instead of a fixed TP
+      trailing_enabled: true
+      trailing_stop:
+        activate_after_profit_pct: 0.0015        # arm the trail once this much in profit
+        initial_trail_pct: 0.0006                # initial trail distance
+        # Ratchets must only TIGHTEN (trail_pct <= initial) as profit grows.
+        ratchet_levels:
+          - at_profit_pct: 0.003
+            trail_pct: 0.0005
+          - at_profit_pct: 0.0045
+            trail_pct: 0.0004
+          - at_profit_pct: 0.006
+            trail_pct: 0.0003
+        move_to_break_even_at: 0.0016
+      min_hold_seconds: 300                      # minimum time before any exit
+      min_trend_score_long: 0.50                 # entry trend-score floor (long)
+      min_trend_score_short: 0.55                # entry trend-score floor (short)
+      min_signal_confirmation_ticks_long: 4      # consecutive confirming ticks (long)
+      min_signal_confirmation_ticks_short: 5     # consecutive confirming ticks (short)
+      btc_macro_min_trend_score_long: 0.15
+      btc_macro_min_trend_score_short: 0.20
+      btc_macro_min_consensus_count_long: 2
+      btc_macro_min_consensus_count_short: 3
+      btc_macro_neutral_penalty: 0.05
+      min_volume_ratio_long: 0.25
+      min_volume_ratio_short: 0.25
+      rsi_long_min: 52
+      rsi_long_max: 75
+      rsi_short_min: 28
+      rsi_short_max: 48
+      max_percent_b_long: 0.85                   # Bollinger %B guard: skip longs at band top
+      min_percent_b_short: 0.20                  # ...and shorts at band bottom
+      min_adx: 20                                # ADX(14) gate: skip chop / weak trend
+      stop_loss_cooldown_minutes_long: 5
+      stop_loss_cooldown_minutes_short: 8
+      # Position-sizing DEFAULTS (fallback for any symbol without a per-symbol override).
+      risk:
+        max_position_wallet_pct: 0.08   # cap = 8% of equity
+        atr_multiplier: 0.65            # volatility sizing dampener (applied to live ATR)
+        max_position_usdt: 18           # also bounded by smart_copy.max_position_usdt
+      # Thesis health-score invalidation. Values past ±100 never fire (i.e. disabled).
+      # Set realistic thresholds inside [-100, 100] to enable health-based exits.
+      thesis_health:
+        long_invalidate: -200
+        long_invalidate_confirmed: -200
+        long_no_alignment: -200
+        long_degrading_hard: -200
+        long_degrading_hard_unaligned: -200
+        long_degrading_soft: -200
+        long_degrading_soft_unaligned: -200
+        short_invalidate: 200
+        short_no_alignment: 200
+        short_degrading_hard: 200
+        short_degrading_hard_unaligned: 200
+        short_degrading_soft: 200
+        short_degrading_soft_unaligned: 200
+        # Regime-flip exit: "both" = require consensus_side AND bybit_regime to flip
+        # against the position; "any" = either; "off" = disabled.
+        opposite_side_exit: both
+      entry_filters:
+        thesis_invalidation_confirmation_ticks: 4
+        thesis_invalidation_cooldown_minutes_long: 8
+        thesis_invalidation_cooldown_minutes_short: 10
+    # ── TESTNET: permissive smoke profile (fire often, validate plumbing). ──
+    TESTNET:
+      name: "testnet_smoke"
+      permissive_entry: true
+      require_multi_exchange_consensus: false
+      require_btc_macro_alignment: false
+      min_volume_24h_usdt: 0
+      max_spread_pct: 0.02
+      max_atr_pct: 1.0
+      max_funding_rate_pct: 1.0
+      stop_loss_pct: 0.03
+      fixed_take_profit_enabled: false
+      take_profit_pct: 0.003
+      trailing_enabled: true
+      trailing_stop:
+        activate_after_profit_pct: 0.003
+        initial_trail_pct: 0.003
+        ratchet_levels:
+          - at_profit_pct: 0.004
+            trail_pct: 0.002
+          - at_profit_pct: 0.005
+            trail_pct: 0.001
+        move_to_break_even_at: 0.004
+      min_hold_seconds: 45
+      min_trend_score_long: 0.0
+      min_trend_score_short: 0.0
+      min_signal_confirmation_ticks_long: 1
+      min_signal_confirmation_ticks_short: 1
+      min_volume_ratio_long: 0.0
+      min_volume_ratio_short: 0.0
+      rsi_long_min: 0
+      rsi_long_max: 100
+      rsi_short_min: 0
+      rsi_short_max: 100
+      stop_loss_cooldown_minutes_long: 0
+      stop_loss_cooldown_minutes_short: 0
+    # ── MAINNET: inherits PAPER via the YAML anchor. Tune PAPER, not this. ──
+    MAINNET: *paper_profile
+
+  # Smart Copy constraints (Bybit copy-trade follower sizing bounds).
+  smart_copy:
+    enabled: true
+    min_position_usdt: 5      # below this, followers don't copy well
+    max_position_usdt: 30     # above this, small followers get excluded
+
+  # Trailing Stop (global defaults).
+  trailing_stop:
+    enabled: true
+
+  # Account-level risk limits. risk_per_trade_pct drives the sizing risk budget
+  # (risk_budget = equity * pct).
+  risk:
+    max_daily_loss_pct: 0.03
+    max_consecutive_losses: 3
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
+
+  # Global entry timing filters.
+  entry_filters:
+    min_volume_24h_usdt: 30000000
+    max_spread_pct: 0.001
+    max_atr_pct: 0.05
+    max_funding_rate_pct: 0.015
+    min_trend_score: 0.35
+    min_signal_confirmation_ticks: 4
+    min_volume_ratio: 1.0
+    min_volume_ratio_long: 0.90
+    min_volume_ratio_short: 0.95
+    rsi_long_min: 50
+    rsi_long_max: 80
+    rsi_short_min: 20
+    rsi_short_max: 50
+    btc_macro_min_trend_score_long: 0.15
+    btc_macro_min_trend_score_short: 0.20
+    btc_macro_min_consensus_count_long: 2
+    btc_macro_min_consensus_count_short: 3
+    btc_macro_neutral_penalty: 0.05
+    stop_loss_cooldown_minutes: 5
+    stop_loss_cooldown_minutes_short: 8
+    min_signal_confirmation_ticks_short: 5
+
+# ═══════════════════════════════════════════════════════════
+# PER-SYMBOL OVERRIDES
+# Only two things are honored per symbol:
+#   1. `enabled` — the universe marker (read by market-data + web).
+#   2. position SIZING — `mode_profiles.<MODE>.risk.max_position_wallet_pct`,
+#      `risk.max_position_usdt` (capped at smart_copy.max_position_usdt), and
+#      `risk.atr_multiplier`.
+# ALL signal/entry/exit tuning lives in global.mode_profiles (single source of
+# truth). Per-symbol entry_filters are silently SHADOWED — do not add them.
+#
+# Below is a small EXAMPLE universe. Replace with your own selection (each must
+# be a USDT perp present on bybit ∩ binance ∩ okx for cross-exchange consensus).
+# ═══════════════════════════════════════════════════════════
+
+BTCUSDT:  # example · major
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.10 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.10 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.60
+
+ETHUSDT:  # example · major
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.10 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.10 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.60
+
+SOLUSDT:  # example · L1
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.10 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.10 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.65
+
+XRPUSDT:  # example · large-cap alt (disabled — shows how to park a symbol)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.10 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.10 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.60

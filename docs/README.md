@@ -7,9 +7,7 @@ This folder is organized by purpose so the current project state stays easy to n
 - `spec/`
   - current technical specification and runtime design
 - `operations/`
-  - live runbooks, gates, policies, and operator-facing procedures
-- `operations/evidence/`
-  - dated validation reports, baselines, regressions, and decision packages
+  - live runbooks, policies, and operator-facing procedures
 - `releases/`
   - release checklists and release notes
 - `assets/`
@@ -25,14 +23,7 @@ This folder is organized by purpose so the current project state stays easy to n
 
 ## Archive policy
 
-Keep only live documentation in:
-
-- `docs/spec/`
-- `docs/operations/`
-- `docs/releases/`
-
-Move dated or historical material to:
-
-- `docs/operations/evidence/`
-
-Do not add closed planning documents back into the top-level `docs/` surface.
+Keep only live, current-state documentation under `docs/`. Dated or point-in-time
+material (validation runs, regression snapshots, decision packages) is **not** retained
+in-repo — it lives in git history. Do not add closed planning or dated evidence documents
+back into the `docs/` surface.

@@ -248,7 +248,8 @@ SQL
 
 1. Capture evidence bundle:
 
-- Follow [RECONCILIATION_EVIDENCE](./evidence/RECONCILIATION_EVIDENCE.md)
+- Capture monitor reconciliation output (counts of matched/mismatched positions and any
+  corrective actions) alongside the triggering event.
 - Attach logs + SQL outputs to release/incident notes.
 
 ## 12) API Kill-Switch Playbook

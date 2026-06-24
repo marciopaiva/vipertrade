@@ -5,7 +5,6 @@ This folder contains release-facing documentation that remains relevant across i
 ## Contents
 
 - `RELEASE_CHECKLIST.md`
-- `RELEASE_0.8.0_RC_NOTES.md`
 
 ## Scope
 
@@ -15,4 +14,5 @@ Keep this folder limited to:
 - release notes
 - changelog-style release artifacts
 
-Do not store dated operational evidence here. Use `docs/operations/evidence/` for that material.
+Do not store dated operational evidence here; point-in-time validation material lives in
+git history, not under `docs/`.

@@ -7,11 +7,16 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 
 ## Differentiators
 
-- Tupa engine for deterministic and auditable decisions.
+- Tupa engine for deterministic and auditable decisions — the `ViperSmartCopy` pipeline is
+  compiled in-process via the `pipeline!` macro (no `.tp` file at runtime).
 - Dynamic progressive trailing stop.
 - Optimization for Smart Copy with small and medium followers.
-- Single-file config source of truth (`pairs.yaml`) with deterministic tuning via backtest sweep.
+- Single-file config source of truth (`pairs.yaml`, gitignored; public template
+  `pairs.example.yaml`) with deterministic tuning via backtest sweep.
 - Layered risk management.
+
+All eight services are roles of one unified `viper` binary (selected by `VIPER_ROLE`).
+Service-to-service transport is Redis **pub/sub** (`viper:market_data`, `viper:decisions`).
 
 ## Public Performance Targets
 
@@ -39,8 +44,8 @@ It executes proprietary strategy and enables copy via Smart Copy Mode.
 | ai-analyst | Heuristic diagnostics and deterministic backtest sweep (`/sweep`, `/analyze/recent`) |
 | api | REST endpoints |
 | web | Operator dashboard |
-| postgres | Persistent state |
-| redis | Event transport |
+| postgres | Persistent state (trades, positions, events, audit) |
+| redis | Event transport (pub/sub) |
 
 ## Runtime Modes
 
