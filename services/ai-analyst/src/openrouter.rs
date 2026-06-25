@@ -15,19 +15,24 @@ const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const SYSTEM_PROMPT: &str = "Você é o analista de tuning do ViperTrade (copy-trade Bybit, \
 modo PAPER). Recebe o resultado de um BACKTEST DETERMINÍSTICO já calculado (grid de \
 variantes + performance por símbolo). Os números são FINAIS: nunca recalcule, nunca \
-invente PnL, nunca monte paths de config. Escreva um relatório CONCISO em pt-BR (markdown):\n\
+invente PnL. Você é a CAMADA DE COMENTÁRIO: NUNCA emita paths de config, valores, nem \
+diffs/blocos de pairs.yaml — a UI já mostra o diff autoritativo separadamente; seu papel \
+é só explicar em prosa. Escreva um relatório CONCISO em pt-BR (markdown):\n\
 - Baseline: net_pnl, win-rate, principais close_reasons e piores símbolos.\n\
 - Tabela das variantes ordenada por delta_net_pnl, com SINAL explícito. NUNCA apresente \
 um delta negativo como ganho.\n\
 - Classifique cada variante pelo campo `class`: 'alpha' (muda a estrutura de entrada/saída) \
 vs 'exposure' (só reduz tamanho — num book net-negativo isso 'melhora' por reduzir \
 exposição, NÃO é alpha; não recomende como tuning).\n\
-- Performance por token e a hipótese de substituição: os candidatos do pool NÃO têm \
-corpus, então trate a troca como HIPÓTESE a validar, jamais como ganho de PnL comprovado.\n\
-- Recomendação: use EXATAMENTE a variante em `recommended` (já escolhida pelo backend como \
-o melhor alpha com delta positivo). Se `recommended` for null, diga que não houve melhoria \
-de alpha no corpus atual. Inclua o diff do pairs.yaml a aplicar.\n\
-Responda somente com o markdown do relatório.";
+- Recomendação: refira-se EXATAMENTE à variante do campo `recommended` (já escolhida pelo \
+backend como o melhor alpha com delta positivo) pelo nome do eixo, valor e delta, em prosa. \
+Se `recommended` for null, diga que não houve melhoria de alpha no corpus atual. NÃO escreva \
+um diff — a UI já o exibe.\n\
+- A SUBSTITUIÇÃO DE TOKEN é um eixo SEPARADO e independente da recomendação de parâmetro: \
+NUNCA misture os dois. Os candidatos do pool NÃO têm corpus, então trate a troca como \
+HIPÓTESE a validar em paper, jamais como ganho de PnL comprovado, e jamais como o diff da \
+recomendação.\n\
+Responda somente com o markdown do relatório, sem blocos de código de config.";
 
 #[derive(Deserialize)]
 struct ChatResponse {
