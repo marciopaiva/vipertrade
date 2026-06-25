@@ -370,14 +370,15 @@ spec:
         ports:
         - containerPort: 8087
         resources:
-          # Larger than the other services: /sweep loads up to 60k audit rows
-          # (input_data jsonb) into memory for the deterministic backtest; 256Mi
-          # OOM-kills it past ~20k rows.
+          # Larger than the other services: /sweep and /analyze/tuning load up to
+          # 60k audit rows (input_data jsonb) into memory for the deterministic
+          # backtest. /analyze/tuning runs the full 16-variant grid over that corpus,
+          # which OOM-killed the old 1Gi limit at ~53k rows (exit 137) — bumped to 2Gi.
           requests:
-            memory: 512Mi
+            memory: 1Gi
             cpu: 500m
           limits:
-            memory: 1Gi
+            memory: 2Gi
             cpu: 500m
         readinessProbe:
           httpGet:

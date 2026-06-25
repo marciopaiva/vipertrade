@@ -30,7 +30,10 @@ export async function POST(req: Request) {
 
   for (const baseUrl of baseUrls) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 190_000);
+    // Generous: the deterministic grid over the full corpus is heavy (O(n²) hot path,
+    // #88) and the free-tier narration is bounded at 90s server-side. The grid always
+    // returns even if narration falls back to cache.
+    const timeout = setTimeout(() => controller.abort(), 290_000);
     try {
       const response = await fetch(`${baseUrl}/analyze/tuning`, {
         method: 'POST',
