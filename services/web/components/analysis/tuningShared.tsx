@@ -41,13 +41,6 @@ export type Baseline = {
   by_reason: Record<string, [number, number]>;
 };
 
-export type CachedAi = {
-  model: string;
-  report_md: string;
-  corpus_ticks: number;
-  generated_at: string;
-};
-
 export type TuningResponse = {
   corpus_ticks: number;
   baseline: Baseline;
@@ -55,9 +48,6 @@ export type TuningResponse = {
   by_symbol: SymbolPerf[];
   substitution: Substitution;
   recommended: GridVariant | null;
-  ai: { model: string; report_md: string } | null;
-  ai_error: string | null;
-  cached_ai: CachedAi | null;
 };
 
 export const signed = (v: number, d = 4) =>

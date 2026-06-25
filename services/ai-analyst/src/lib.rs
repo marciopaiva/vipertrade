@@ -14,7 +14,6 @@ use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
-mod openrouter;
 mod trade_diagnostics;
 mod tuning_grid;
 
@@ -350,12 +349,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&db_url)
         .await?;
 
-    // Best-effort: ensure the tuning-narration cache table exists (single row) so
-    // /analyze/tuning can fall back to the last good narration on a free-tier 429.
-    if let Err(e) = ensure_tuning_cache_table(&db_pool).await {
-        error!("failed to ensure tuning_analysis_cache table: {e}");
-    }
-
     let engine = Executor::new();
 
     let state = Arc::new(AppState {
@@ -566,56 +559,6 @@ async fn handle_sweep(req: SweepRequest, state: Arc<AppState>) -> Result<impl Re
     }
 }
 
-/// Single-row cache of the last successful tuning narration. Idempotent; safe on a
-/// live DB and re-created after a wipe (structural, not paper data).
-async fn ensure_tuning_cache_table(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS tuning_analysis_cache (
-            id smallint PRIMARY KEY DEFAULT 1,
-            model text NOT NULL,
-            report_md text NOT NULL,
-            corpus_ticks bigint NOT NULL,
-            generated_at timestamptz NOT NULL DEFAULT now(),
-            CONSTRAINT tuning_cache_single_row CHECK (id = 1)
-        )",
-    )
-    .execute(pool)
-    .await
-    .map(|_| ())
-}
-
-async fn save_tuning_narration(
-    pool: &PgPool,
-    model: &str,
-    report_md: &str,
-    corpus_ticks: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO tuning_analysis_cache (id, model, report_md, corpus_ticks, generated_at)
-         VALUES (1, $1, $2, $3, now())
-         ON CONFLICT (id) DO UPDATE SET
-             model = EXCLUDED.model,
-             report_md = EXCLUDED.report_md,
-             corpus_ticks = EXCLUDED.corpus_ticks,
-             generated_at = EXCLUDED.generated_at",
-    )
-    .bind(model)
-    .bind(report_md)
-    .bind(corpus_ticks)
-    .execute(pool)
-    .await
-    .map(|_| ())
-}
-
-async fn load_tuning_narration(pool: &PgPool) -> Result<Option<CachedAi>, sqlx::Error> {
-    sqlx::query_as::<_, CachedAi>(
-        "SELECT model, report_md, corpus_ticks, generated_at \
-         FROM tuning_analysis_cache WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-}
-
 /// `POST /analyze/tuning` body. Same corpus window controls as `/sweep`.
 #[derive(Debug, Deserialize)]
 struct TuningRequest {
@@ -623,33 +566,14 @@ struct TuningRequest {
     limit: Option<i64>,
 }
 
-/// The LLM narration layer of the tuning response (best-effort).
-#[derive(Debug, Serialize)]
-struct TuningAi {
-    model: String,
-    report_md: String,
-}
-
-/// A persisted past narration (Postgres `tuning_analysis_cache`, single row), served
-/// as a fallback when live narration fails (e.g. free-tier 429).
-#[derive(Debug, Serialize, sqlx::FromRow)]
-struct CachedAi {
-    model: String,
-    report_md: String,
-    corpus_ticks: i64,
-    generated_at: DateTime<Utc>,
-}
-
-/// `POST /analyze/tuning` response: the deterministic grid (always present) plus an
-/// optional LLM narration. `ai_error` explains why narration is absent; `cached_ai`
-/// is the last good narration (its prose may describe an earlier corpus).
+/// `POST /analyze/tuning` response: the deterministic backtest grid (Format A) —
+/// fixed `mode_profiles.PAPER.*` sweep, alpha/exposure classes, per-symbol perf,
+/// substitution, and the in-code `recommended` variant. No LLM layer: the numbers
+/// are the product; the web "What-if" tab renders the grid directly.
 #[derive(Debug, Serialize)]
 struct TuningResponse {
     #[serde(flatten)]
     grid: tuning_grid::TuningGridResult,
-    ai: Option<TuningAi>,
-    ai_error: Option<String>,
-    cached_ai: Option<CachedAi>,
 }
 
 /// Core of `/analyze/tuning` (Format A): load the baked config + corpus, run the
@@ -686,49 +610,7 @@ async fn build_tuning(
 
     let grid = tuning_grid::run(&ticks, &cfg);
 
-    let corpus_ticks = grid.corpus_ticks as i64;
-    let (ai, ai_error) = match env::var("OPENROUTER_API_KEY")
-        .ok()
-        .filter(|key| !key.is_empty())
-    {
-        None => (
-            None,
-            Some("OPENROUTER_API_KEY not set; returning deterministic grid only".to_string()),
-        ),
-        Some(key) => {
-            let model = env::var("OPENROUTER_MODEL")
-                .unwrap_or_else(|_| "anthropic/claude-sonnet-4".to_string());
-            let payload = serde_json::to_string(&grid)
-                .map_err(|e| SweepCoreError::Internal(format!("serialize grid: {e}")))?;
-            match openrouter::narrate(&state.http_client, &key, &model, &payload).await {
-                Ok(report_md) => {
-                    // Persist as the fallback for future failed runs (best-effort).
-                    if let Err(e) =
-                        save_tuning_narration(&state.db_pool, &model, &report_md, corpus_ticks)
-                            .await
-                    {
-                        error!("failed to cache tuning narration: {e}");
-                    }
-                    (Some(TuningAi { model, report_md }), None)
-                }
-                Err(e) => (None, Some(format!("narration failed: {e}"))),
-            }
-        }
-    };
-
-    // When live narration is unavailable, surface the last good one (clearly stale).
-    let cached_ai = if ai.is_none() {
-        load_tuning_narration(&state.db_pool).await.unwrap_or(None)
-    } else {
-        None
-    };
-
-    Ok(TuningResponse {
-        grid,
-        ai,
-        ai_error,
-        cached_ai,
-    })
+    Ok(TuningResponse { grid })
 }
 
 /// `POST /analyze/tuning` — deterministic tuning grid (Format A) + optional LLM
