@@ -85,7 +85,7 @@ pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
 
             // Exit precedence mirrors live: SL/TP/trailing first (replay tick time
             // so min_hold is faithful), then stateful thesis invalidation.
-            let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None, t.ts);
+            let eval = evaluate_open_trade_exit(&symbol, price, pos, cfg, None);
             let close_reason = match eval.decision.as_ref() {
                 // SL/TP/trailing fired.
                 Some(d) if d.action.starts_with("CLOSE_") => Some(eval.trigger.clone()),
