@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
+import { SectionCard } from '@/components/ui/SectionCard';
 
 export type VariantClass = 'alpha' | 'exposure';
 
@@ -50,9 +52,6 @@ export type TuningResponse = {
   recommended: GridVariant | null;
 };
 
-export const signed = (v: number, d = 4) =>
-  `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`;
-
 export const tone = (v: number) =>
   v > 0 ? 'text-accent' : v < 0 ? 'text-destructive' : 'text-muted-foreground';
 
@@ -72,25 +71,21 @@ export function ClassBadge({ klass }: { klass: VariantClass }) {
 }
 
 export function SubstitutionCard({ sub }: { sub: Substitution }) {
+  const t = useT('whatif');
   if (!sub.drop_candidate && sub.pool.length === 0) return null;
   return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-        Substituição de token · hipótese (candidatos sem corpus, não backtestados)
-      </div>
+    <SectionCard title={t('subTitle')}>
       {sub.drop_candidate ? (
         <p className="text-sm text-foreground">
-          Pior símbolo: <span className="font-mono text-destructive">{sub.drop_candidate}</span>
+          {t('subWorst', { symbol: sub.drop_candidate })}
           {sub.drop_reason && <span className="text-muted-foreground"> — {sub.drop_reason}</span>}
         </p>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Nenhum candidato a drop com trades suficientes.
-        </p>
+        <p className="text-sm text-muted-foreground">{t('subNone')}</p>
       )}
       {sub.pool.length > 0 && (
         <p className="mt-2 text-xs text-muted-foreground">
-          Pool de substitutos (desabilitados, validar em paper antes):{' '}
+          {t('subPool')}{' '}
           {sub.pool.map(s => (
             <span
               key={s}
@@ -101,7 +96,7 @@ export function SubstitutionCard({ sub }: { sub: Substitution }) {
           ))}
         </p>
       )}
-    </section>
+    </SectionCard>
   );
 }
 
@@ -112,8 +107,7 @@ export type TuningState = {
   run: () => Promise<void>;
 };
 
-// Shared tuning fetch state — lifted to the page so the Tuning (IA) and Por Token
-// tabs render from ONE on-demand result (no duplicate slow LLM call).
+// Shared on-demand fetch state for the deterministic /analyze/tuning grid (What-if tab).
 export function useTuning(): TuningState {
   const [data, setData] = useState<TuningResponse | null>(null);
   const [loading, setLoading] = useState(false);

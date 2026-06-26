@@ -1,0 +1,103 @@
+import type { Messages } from './en';
+
+// Portuguese (Brazil) catalog. Must match the shape of en.ts (the type source).
+const ptBR: Messages = {
+  nav: {
+    console: 'Console',
+    strategy: 'Estratégia',
+    trades: 'Trades',
+    analysis: 'Análise',
+    system: 'Sistema',
+  },
+  common: {
+    language: 'Idioma',
+    density: 'Densidade',
+    logout: 'Sair',
+    loading: 'Carregando…',
+    error: 'Erro',
+    generate: 'Gerar análise',
+    regenerate: 'Gerar novamente',
+    running: 'Rodando…',
+    copy: 'copiar',
+    copied: 'copiado ✓',
+  },
+  analysis: {
+    title: 'Análise',
+    subtitle:
+      'Qualidade de operação ao vivo (trades realizados) e simulação determinística de tuning (what-if). Mudanças de config são aplicadas manualmente.',
+    tabLive: 'Ao Vivo',
+    tabWhatif: 'What-if (grid)',
+  },
+  live: {
+    blurb:
+      'Qualidade de operação sobre trades realizados (fechados, paper) — dados reais, não backtest. Atualiza a cada 30s.',
+    kpiNet: 'Net PnL realizado',
+    kpiWin: 'Win rate',
+    kpiClosed: 'Trades fechados',
+    kpiCapture: 'Captura do pico',
+    empty: 'Sem trades fechados nos últimos {days}d.',
+    followTitle: 'Follow-through de entrada · armou o trailing vs morreu flat',
+    followArmed: 'Armou o trailing (andou ≥ +0,1%)',
+    followNotArmed: 'Nunca armou (entrou e não andou)',
+    peakTitle: 'Captura do pico · trailing exits ({n})',
+    peakAvg: 'pico médio',
+    peakRealized: 'realizado',
+    peakLocked: 'travado',
+    reasonsTitle: 'Atribuição por motivo de saída',
+    bySymbolTitle: 'Por token · pior primeiro',
+    colSymbol: 'Símbolo',
+    colNet: 'net PnL',
+    colTrades: 'Trades',
+    colWin: 'Win%',
+    statTrades: '{n} trades',
+    statWins: '{n} wins',
+    statAvg: 'avg',
+  },
+  whatif: {
+    blurb:
+      'Grid de backtest determinístico (paths/PnL calculados no Rust) sobre o corpus de auditoria. On-demand. ⚠️ O backtest NÃO modela o trailing ao vivo (advice/min_hold) — confie nos eixos de entrada; valide trailing pela aba Ao Vivo.',
+    kpiCorpus: 'Corpus ticks',
+    kpiBaseline: 'Baseline net PnL',
+    kpiWin: 'Win rate',
+    kpiClosed: 'Closed',
+    recTitle: 'Recomendação · aplicar manualmente (sem auto-apply)',
+    recBest:
+      'Melhor variante alpha com delta positivo no corpus. Variantes exposure (só reduzem tamanho) nunca são recomendadas como tuning.',
+    recNone:
+      'Nenhuma melhoria de alpha no corpus atual — manter a config. (Variantes de exposição não contam como melhoria de estratégia.)',
+    gridTitle: 'Grid determinístico · ordenado por Δ net PnL (sinal explícito)',
+    colAxis: 'Eixo',
+    colValue: 'Valor',
+    colClass: 'Classe',
+    colDelta: 'Δ net PnL',
+    colNet: 'net PnL',
+    colWL: 'W/L',
+    subTitle: 'Substituição de token · hipótese (candidatos sem corpus, não backtestados)',
+    subWorst: 'Pior símbolo: {symbol}',
+    subPool: 'Pool de substitutos (desabilitados, validar em paper antes):',
+    subNone: 'Nenhum candidato a drop com trades suficientes.',
+    empty: 'Clique em “Gerar análise” para rodar o grid de tuning.',
+  },
+  positions: {
+    title: 'Posições Abertas',
+    titleCount: 'Posições Abertas ({n})',
+    flatNoPos: 'Sem posições abertas',
+    flatGuards: 'Flat — guards segurando {n} setups',
+    flatNote:
+      'A estratégia está monitorando o mercado; entradas abrem quando o consenso entre exchanges e os guards de entrada se alinham.',
+    stop: 'stop',
+    peak: 'pico',
+    trail: 'trail',
+    trailArmed: '🔒 trail armado',
+    trailLocked: '🔒 trava {pct}',
+    tpAt: 'TP em {pct}',
+    tpBeyond: 'TP ✓ {pct} além',
+    tpMax: ' · máx {pct}',
+    cushion: 'folga até o stop',
+    entry: 'entry',
+    mark: 'mark',
+    tpArm: 'TP-arm',
+  },
+};
+
+export default ptBR;
