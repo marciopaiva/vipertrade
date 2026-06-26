@@ -2,32 +2,36 @@
 
 import { useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
+import {
+  useT,
+  useLocale,
+  formatNumber,
+  formatUsd,
+  formatPct,
+  type Locale,
+} from '@/lib/i18n';
+import { reasonLabel } from './reasonLabel';
 import type { Trade } from '@/types/trading';
+
+type T = ReturnType<typeof useT<'trades'>>;
+type TKey = Parameters<T>[0];
 
 type SortKey = 'closed_at' | 'symbol' | 'pnl' | 'duration_seconds';
 type SortDir = 'asc' | 'desc';
 
 const PAGE_SIZE = 25;
 
-function titleCase(value?: string | null) {
-  if (!value) return '—';
-  return value
-    .replaceAll('_', ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, c => c.toUpperCase());
+function fmtPrice(locale: Locale, v?: number | null) {
+  return typeof v === 'number' ? `$${formatNumber(locale, v, 6)}` : '—';
 }
 
-function fmtPrice(v?: number | null) {
-  return typeof v === 'number' ? `$${v.toFixed(6)}` : '—';
-}
-
-function fmtWhen(iso?: string | null) {
+function fmtWhen(locale: Locale, iso?: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return {
-    date: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-    time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    date: d.toLocaleDateString(locale, { month: 'short', day: 'numeric' }),
+    time: d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
   };
 }
 
@@ -48,21 +52,23 @@ function pnlPct(t: Trade) {
 
 const COLUMNS: {
   key: SortKey | null;
-  label: string;
+  label: TKey;
   className: string;
   align?: 'right';
 }[] = [
-  { key: 'symbol', label: 'Asset', className: 'w-[140px]' },
-  { key: null, label: 'Side', className: 'w-[64px]' },
-  { key: 'pnl', label: 'PnL', className: 'w-[110px]', align: 'right' },
-  { key: null, label: 'Entry', className: 'w-[120px]' },
-  { key: null, label: 'Exit', className: 'w-[120px]' },
-  { key: null, label: 'Reason', className: 'flex-1 min-w-[120px]' },
-  { key: 'closed_at', label: 'Closed', className: 'w-[110px]' },
-  { key: 'duration_seconds', label: 'Held', className: 'w-[80px]' },
+  { key: 'symbol', label: 'colAsset', className: 'w-[140px]' },
+  { key: null, label: 'colSide', className: 'w-[64px]' },
+  { key: 'pnl', label: 'colPnl', className: 'w-[110px]', align: 'right' },
+  { key: null, label: 'colEntry', className: 'w-[120px]' },
+  { key: null, label: 'colExit', className: 'w-[120px]' },
+  { key: null, label: 'colReason', className: 'flex-1 min-w-[120px]' },
+  { key: 'closed_at', label: 'colClosed', className: 'w-[110px]' },
+  { key: 'duration_seconds', label: 'colHeld', className: 'w-[80px]' },
 ];
 
 export function TradesTable({ trades }: { trades: Trade[] }) {
+  const t = useT('trades');
+  const locale = useLocale();
   const [sortKey, setSortKey] = useState<SortKey>('closed_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
@@ -108,7 +114,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   if (trades.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card px-3 py-12 text-center text-sm text-muted-foreground">
-        No trades match the current filters.
+        {t('emptyFiltered')}
       </div>
     );
   }
@@ -135,7 +141,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                     sortKey === col.key && 'text-foreground'
                   )}
                 >
-                  {col.label}
+                  {t(col.label)}
                   <span className="text-[9px]">
                     {sortKey === col.key
                       ? sortDir === 'asc'
@@ -145,7 +151,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   </span>
                 </button>
               ) : (
-                col.label
+                t(col.label)
               )}
             </div>
           ))}
@@ -153,20 +159,20 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
         {/* rows */}
         <div>
-          {pageRows.map(t => {
-            const pnl = t.pnl ?? 0;
+          {pageRows.map(row => {
+            const pnl = row.pnl ?? 0;
             const win = pnl >= 0;
-            const isLong = t.side.toLowerCase() === 'long';
-            const pct = pnlPct(t);
-            const closed = fmtWhen(t.closed_at);
-            const open = t.status !== 'closed';
+            const isLong = row.side.toLowerCase() === 'long';
+            const pct = pnlPct(row);
+            const closed = fmtWhen(locale, row.closed_at);
+            const open = row.status !== 'closed';
             return (
               <div
-                key={t.trade_id}
+                key={row.trade_id}
                 className="flex flex-col gap-2 border-b border-border/50 px-4 py-2.5 text-sm last:border-b-0 lg:flex-row lg:items-center lg:gap-4"
               >
                 <div className="w-[140px] font-semibold text-foreground">
-                  {t.symbol}
+                  {row.symbol}
                 </div>
                 <div
                   className={cn(
@@ -174,11 +180,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                     isLong ? 'text-accent' : 'text-destructive'
                   )}
                 >
-                  {isLong ? 'Long' : 'Short'}
+                  {isLong ? t('long') : t('short')}
                 </div>
                 <div className="w-[110px] text-right">
                   {open ? (
-                    <span className="text-muted-foreground">open</span>
+                    <span className="text-muted-foreground">{t('rowOpen')}</span>
                   ) : (
                     <>
                       <div
@@ -187,7 +193,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                           win ? 'text-accent' : 'text-destructive'
                         )}
                       >
-                        {win ? '+' : '−'}${Math.abs(pnl).toFixed(2)}
+                        {formatUsd(locale, pnl)}
                       </div>
                       {pct !== null && (
                         <div
@@ -196,24 +202,23 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                             win ? 'text-accent/80' : 'text-destructive/80'
                           )}
                         >
-                          {win ? '+' : '−'}
-                          {Math.abs(pct * 100).toFixed(2)}%
+                          {formatPct(locale, pct * 100)}
                         </div>
                       )}
                     </>
                   )}
                 </div>
                 <div className="w-[120px] font-mono text-xs tabular-nums text-muted-foreground">
-                  {fmtPrice(t.entry_price)}
+                  {fmtPrice(locale, row.entry_price)}
                 </div>
                 <div className="w-[120px] font-mono text-xs tabular-nums text-muted-foreground">
-                  {fmtPrice(t.exit_price)}
+                  {fmtPrice(locale, row.exit_price)}
                 </div>
                 <div className="flex-1 min-w-[120px] truncate text-xs text-foreground/90">
                   {open ? (
                     <span className="text-muted-foreground">—</span>
                   ) : (
-                    titleCase(t.close_reason)
+                    reasonLabel(t, row.close_reason)
                   )}
                 </div>
                 <div className="w-[110px] font-mono text-xs tabular-nums text-muted-foreground">
@@ -227,7 +232,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   )}
                 </div>
                 <div className="w-[80px] font-mono text-xs tabular-nums text-muted-foreground">
-                  {fmtDuration(t.duration_seconds)}
+                  {fmtDuration(row.duration_seconds)}
                 </div>
               </div>
             );
@@ -239,7 +244,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span className="font-mono tabular-nums">
-            {sorted.length} trades · page {safePage + 1}/{totalPages}
+            {t('pageInfo', {
+              n: sorted.length,
+              page: safePage + 1,
+              total: totalPages,
+            })}
           </span>
           <div className="flex gap-2">
             <button
@@ -248,7 +257,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               disabled={safePage === 0}
               className="rounded-md border border-border px-2.5 py-1 transition-colors hover:border-primary/40 disabled:opacity-40"
             >
-              Prev
+              {t('prev')}
             </button>
             <button
               type="button"
@@ -256,7 +265,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               disabled={safePage >= totalPages - 1}
               className="rounded-md border border-border px-2.5 py-1 transition-colors hover:border-primary/40 disabled:opacity-40"
             >
-              Next
+              {t('next')}
             </button>
           </div>
         </div>

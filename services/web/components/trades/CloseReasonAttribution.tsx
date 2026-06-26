@@ -2,20 +2,9 @@
 
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { useT, useLocale, formatUsd } from '@/lib/i18n';
+import { reasonLabel } from './reasonLabel';
 import type { Trade } from '@/types/trading';
-
-function titleCase(value?: string | null) {
-  if (!value) return 'Unknown';
-  return value
-    .replaceAll('_', ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function usd(value: number) {
-  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
-  return `${sign}$${Math.abs(value).toFixed(2)}`;
-}
 
 interface ReasonStat {
   reason: string;
@@ -39,6 +28,8 @@ export function CloseReasonAttribution({
   activeReason: string | null;
   onSelectReason: (reason: string | null) => void;
 }) {
+  const t = useT('trades');
+  const locale = useLocale();
   const stats = useMemo<ReasonStat[]>(() => {
     const byReason = new Map<string, ReasonStat>();
     for (const t of trades) {
@@ -61,7 +52,7 @@ export function CloseReasonAttribution({
   return (
     <section className="space-y-2">
       <h2 className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-        PnL by close reason
+        {t('attributionTitle')}
       </h2>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {stats.map(s => {
@@ -82,7 +73,7 @@ export function CloseReasonAttribution({
               )}
             >
               <span className="truncate text-xs font-medium text-foreground">
-                {titleCase(s.reason)}
+                {reasonLabel(t, s.reason)}
               </span>
               <span
                 className={cn(
@@ -90,7 +81,7 @@ export function CloseReasonAttribution({
                   positive ? 'text-accent' : 'text-destructive'
                 )}
               >
-                {usd(s.net)}
+                {formatUsd(locale, s.net)}
               </span>
               <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
                 <div
@@ -102,7 +93,10 @@ export function CloseReasonAttribution({
                 />
               </div>
               <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                {s.count} {s.count === 1 ? 'trade' : 'trades'} · {winRate.toFixed(0)}% win
+                {t(s.count === 1 ? 'cardTrade' : 'cardTrades', {
+                  n: s.count,
+                  win: Math.round(winRate),
+                })}
               </span>
             </button>
           );

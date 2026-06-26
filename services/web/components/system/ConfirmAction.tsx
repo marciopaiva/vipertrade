@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Two-step guard for consequential actions (kill-switch, executor). First click
@@ -10,7 +11,7 @@ import { cn } from '@/lib/utils';
  */
 export function ConfirmAction({
   label,
-  confirmLabel = 'Confirm',
+  confirmLabel,
   onConfirm,
   tone = 'default',
   disabled = false,
@@ -25,6 +26,7 @@ export function ConfirmAction({
   disabledReason?: string;
   className?: string;
 }) {
+  const tc = useT('common');
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export function ConfirmAction({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">Sure?</span>
+      <span className="text-xs text-muted-foreground">{tc('sure')}</span>
       <button
         type="button"
         disabled={pending}
@@ -88,7 +90,7 @@ export function ConfirmAction({
             : 'bg-primary hover:bg-primary/90'
         )}
       >
-        {pending ? '…' : confirmLabel}
+        {pending ? '…' : (confirmLabel ?? tc('confirm'))}
       </button>
       <button
         type="button"
@@ -99,7 +101,7 @@ export function ConfirmAction({
         }}
         className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
       >
-        Cancel
+        {tc('cancel')}
       </button>
       {error && <span className="text-xs text-destructive">{error}</span>}
     </span>
