@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { useT } from '@/lib/i18n';
+
+const TONE_KEY = { down: 'flowDown', slow: 'flowSlow', live: 'flowLive' } as const;
 
 interface ServiceFlowDiagramProps {
   services?: Array<{ name: string; ok: boolean; latency_ms: number }>;
@@ -113,6 +116,7 @@ function StageCard({
   hero?: boolean;
   animated?: boolean;
 }) {
+  const t = useT('system');
   return (
     <div
       className={[
@@ -136,7 +140,7 @@ function StageCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            Stage
+            {t('flowStage')}
           </div>
           <div
             className={`mt-1 font-semibold text-foreground ${hero ? 'text-base' : 'text-sm'}`}
@@ -148,14 +152,14 @@ function StageCard({
           className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-          {tone.label}
+          {t(TONE_KEY[tone.label as keyof typeof TONE_KEY])}
         </div>
       </div>
 
       <div className="mt-5 flex items-end justify-between gap-3">
         <div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Latency
+            {t('flowLatency')}
           </div>
           <div
             className={`mt-1 font-semibold ${hero ? 'text-2xl' : 'text-xl'} ${color.accent}`}
@@ -165,7 +169,7 @@ function StageCard({
         </div>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            Role
+            {t('flowRole')}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
         </div>
@@ -291,6 +295,7 @@ export default function ServiceFlowDiagram({
   openPositionsCount = 0,
   closedTradesCount = 0,
 }: ServiceFlowDiagramProps) {
+  const t = useT('system');
   const serviceState = useMemo(() => {
     const bybit = getService(services, 'bybit');
     const binance = getService(services, 'binance');
@@ -338,18 +343,27 @@ export default function ServiceFlowDiagram({
     serviceState.executor?.latency_ms
   );
   const showMultiSource = executionMode !== 'testnet';
-  const marketStatusLine = `${activeSignalsCount} active ${activeSignalsCount === 1 ? 'symbol' : 'symbols'} · ${showMultiSource ? 'multi venue' : 'single venue'}`;
+  const marketStatusLine = t(
+    activeSignalsCount === 1 ? 'flowSymbolLine' : 'flowSymbolsLine',
+    {
+      n: activeSignalsCount,
+      venue: t(showMultiSource ? 'flowVenueMulti' : 'flowVenueSingle'),
+    }
+  );
   const strategyStatusLine = flowContext?.strategySymbol
-    ? `${flowContext.strategySymbol} · ${flowContext.strategyState || 'Scanning'}`
-    : 'Scanning market conditions';
+    ? `${flowContext.strategySymbol} · ${flowContext.strategyState || t('flowScanningState')}`
+    : t('flowScanning');
   const strategyDetailLine =
     flowContext?.strategyContext ||
-    `${closedTradesCount} closed trades observed`;
+    t('flowClosedObserved', { n: closedTradesCount });
   const executorStatusLine = flowContext?.executorSymbol
-    ? `${flowContext.executorSymbol} · ${flowContext.executorAction || 'idle'}`
-    : `${openPositionsCount} open ${openPositionsCount === 1 ? 'position' : 'positions'}`;
+    ? `${flowContext.executorSymbol} · ${flowContext.executorAction || t('flowIdle')}`
+    : t(
+        openPositionsCount === 1 ? 'flowPositionLine' : 'flowPositionsLine',
+        { n: openPositionsCount }
+      );
   const executorDetailLine =
-    flowContext?.executorContext || 'Awaiting valid execution pressure';
+    flowContext?.executorContext || t('flowAwaiting');
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
@@ -391,14 +405,14 @@ export default function ServiceFlowDiagram({
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Sources
+              {t('flowSources')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              {showMultiSource ? 'Exchange Feeds' : 'Execution Venue'}
+              {showMultiSource ? t('flowExchangeFeeds') : t('flowExecutionVenue')}
             </div>
           </div>
           <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            {showMultiSource ? '3 venues' : 'single venue'}
+            {showMultiSource ? t('flowVenues3') : t('flowSingleVenue')}
           </div>
         </div>
 
@@ -431,7 +445,7 @@ export default function ServiceFlowDiagram({
       <BlockConnector
         from="from-secondary/15 via-primary/55"
         to="to-violet-400/35"
-        mobileLabel="market flow"
+        mobileLabel={t('flowMarketFlow')}
         dotClass={strategyTone.dot}
       />
 
@@ -439,14 +453,14 @@ export default function ServiceFlowDiagram({
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Core pipeline
+              {t('flowCorePipeline')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              Market Data to Execution
+              {t('flowMarketToExec')}
             </div>
           </div>
           <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            runtime path
+            {t('flowRuntimePath')}
           </div>
         </div>
 
@@ -454,23 +468,23 @@ export default function ServiceFlowDiagram({
 
         <div className="grid gap-3 lg:grid-cols-3">
           <StageCard
-            title="Market"
+            title={t('flowStageMarket')}
             latency={serviceState.marketData?.latency_ms}
-            subtitle="normalize + publish"
+            subtitle={t('flowRoleNormalize')}
             statusLine={marketStatusLine}
             detailLine={
               serviceState.marketData?.ok === false
-                ? 'Feed normalization degraded'
-                : 'Venue telemetry is flowing into the runtime path'
+                ? t('flowFeedDegraded')
+                : t('flowVenueTelemetry')
             }
             color={STAGE_COLORS.marketData}
             tone={marketTone}
             animated
           />
           <StageCard
-            title="Strategy"
+            title={t('flowStageStrategy')}
             latency={serviceState.strategy?.latency_ms}
-            subtitle="score + decide"
+            subtitle={t('flowRoleDecide')}
             statusLine={strategyStatusLine}
             detailLine={strategyDetailLine}
             color={STAGE_COLORS.strategy}
@@ -478,12 +492,12 @@ export default function ServiceFlowDiagram({
             animated
           />
           <StageCard
-            title="Executor"
+            title={t('flowStageExecutor')}
             latency={serviceState.executor?.latency_ms}
             subtitle={
               executorState === 'paused'
-                ? 'orders paused'
-                : 'orders + reconcile'
+                ? t('flowRoleOrdersPaused')
+                : t('flowRoleOrders')
             }
             statusLine={executorStatusLine}
             detailLine={executorDetailLine}
@@ -498,7 +512,7 @@ export default function ServiceFlowDiagram({
       <BlockConnector
         from="from-violet-400/35 via-accent/55"
         to="to-primary/25"
-        mobileLabel="execution fan-out"
+        mobileLabel={t('flowFanOut')}
         dotClass={executorTone.dot}
       />
 
@@ -506,14 +520,14 @@ export default function ServiceFlowDiagram({
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Sidecars
+              {t('flowSidecars')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              State and Analysis
+              {t('flowStateAnalysis')}
             </div>
           </div>
           <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            observers
+            {t('flowObservers')}
           </div>
         </div>
 

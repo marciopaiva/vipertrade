@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
+import { useT, useLocale, formatUsd, formatNumber } from '@/lib/i18n';
 import { CloseReasonAttribution } from '@/components/trades/CloseReasonAttribution';
 import { TradesTable } from '@/components/trades/TradesTable';
+import { reasonLabel } from '@/components/trades/reasonLabel';
 import { cn } from '@/lib/utils';
 import type { Trade } from '@/types/trading';
 
@@ -91,6 +93,8 @@ function Select({
 }
 
 export default function TradesPage() {
+  const t = useT('trades');
+  const locale = useLocale();
   const { data, loading, error } = useDashboard<{ items: Trade[] }>(
     '/api/v1/trades?limit=200',
     { refreshInterval: 10000 }
@@ -152,25 +156,26 @@ export default function TradesPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Trades
+            {t('title')}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The ledger with PnL attribution by close-reason — where the edge and
-            the bleed come from.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-5 font-mono text-sm tabular-nums">
           <span className="text-muted-foreground">
-            net{' '}
+            {t('net')}{' '}
             <span className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}>
-              {netPnl >= 0 ? '+' : '−'}${Math.abs(netPnl).toFixed(2)}
+              {formatUsd(locale, netPnl)}
             </span>
           </span>
           <span className="text-muted-foreground">
-            <span className="text-foreground">{closed.length}</span> closed
+            <span className="text-foreground">{closed.length}</span>{' '}
+            {t('closed')}
           </span>
           <span className="text-muted-foreground">
-            <span className="text-foreground">{winRate.toFixed(0)}%</span> win
+            <span className="text-foreground">
+              {formatNumber(locale, winRate, 0)}%
+            </span>{' '}
+            {t('win')}
           </span>
         </div>
       </div>
@@ -178,49 +183,49 @@ export default function TradesPage() {
       {/* filters */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
         <Select
-          label="Symbol"
+          label={t('fSymbol')}
           value={symbol}
           onChange={setSymbol}
           options={[
-            { value: 'all', label: 'All' },
+            { value: 'all', label: t('all') },
             ...symbols.map(s => ({ value: s, label: s })),
           ]}
         />
         <Select
-          label="Side"
+          label={t('fSide')}
           value={side}
           onChange={v => setSide(v as SideFilter)}
           options={[
-            { value: 'all', label: 'All' },
-            { value: 'long', label: 'Long' },
-            { value: 'short', label: 'Short' },
+            { value: 'all', label: t('all') },
+            { value: 'long', label: t('long') },
+            { value: 'short', label: t('short') },
           ]}
         />
         <Select
-          label="Status"
+          label={t('fStatus')}
           value={status}
           onChange={v => setStatus(v as StatusFilter)}
           options={[
-            { value: 'all', label: 'All' },
-            { value: 'closed', label: 'Closed' },
-            { value: 'open', label: 'Open' },
+            { value: 'all', label: t('all') },
+            { value: 'closed', label: t('statusClosed') },
+            { value: 'open', label: t('statusOpen') },
           ]}
         />
         <DateField
-          label="From"
+          label={t('fFrom')}
           value={dateFrom}
           onChange={setDateFrom}
           max={dateTo || today}
         />
-        <DateField label="To" value={dateTo} onChange={setDateTo} max={today} />
+        <DateField label={t('fTo')} value={dateTo} onChange={setDateTo} max={today} />
         <div className="flex items-center gap-1">
           {[
-            { label: 'Today', days: 0 },
-            { label: '7d', days: 7 },
-            { label: '30d', days: 30 },
+            { label: t('rangeToday'), days: 0 },
+            { label: t('range7d'), days: 7 },
+            { label: t('range30d'), days: 30 },
           ].map(p => (
             <button
-              key={p.label}
+              key={p.days}
               type="button"
               onClick={() => setRange(p.days)}
               className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
@@ -237,7 +242,7 @@ export default function TradesPage() {
               }}
               className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
             >
-              clear dates ✕
+              {t('clearDates')}
             </button>
           )}
         </div>
@@ -247,7 +252,7 @@ export default function TradesPage() {
             onClick={() => setReason(null)}
             className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
           >
-            reason: {reason.replaceAll('_', ' ')} ✕
+            {t('reasonChip', { reason: reasonLabel(t, reason) })}
           </button>
         )}
       </div>

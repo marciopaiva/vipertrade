@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
+import { useT } from '@/lib/i18n';
 import { ConfirmAction } from '@/components/system/ConfirmAction';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { cn } from '@/lib/utils';
@@ -87,6 +88,7 @@ function StateDot({ ok, label }: { ok: boolean; label: string }) {
 }
 
 export default function SystemPage() {
+  const t = useT('system');
   const { data: control, refresh } = useDashboard<ControlState>(
     '/api/v1/control/state',
     { refreshInterval: 10000 }
@@ -97,8 +99,7 @@ export default function SystemPage() {
   const [copied, setCopied] = useState(false);
 
   const opEnabled = control?.operator_controls_enabled ?? false;
-  const opReason =
-    'Operator controls disabled — set OPERATOR_API_TOKEN (auth mode "token") on the api.';
+  const opReason = t('opDisabled');
   const killed = control?.kill_switch?.enabled ?? false;
   const executorOn = control?.executor?.enabled ?? false;
   const mode = (dash?.status?.trading_mode || 'paper').toLowerCase();
@@ -118,27 +119,28 @@ export default function SystemPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          System
+          {t('title')}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Runtime controls and service health — operate the strategy without
-          reaching for <code className="text-foreground/80">kubectl</code>.
+          {t('subtitlePre')}
+          <code className="text-foreground/80">kubectl</code>
+          {t('subtitlePost')}
         </p>
       </div>
 
       {!opEnabled && (
         <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
-          {opReason} Controls below are read-only until then.
+          {opReason} {t('opReadonly')}
         </div>
       )}
 
       {/* runtime */}
       <section className="rounded-xl border border-border bg-card p-5">
         <h2 className="mb-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          Runtime
+          {t('runtime')}
         </h2>
 
-        <Row label="Trading mode" hint="Set at deploy (env) — read-only here">
+        <Row label={t('tradingMode')} hint={t('tradingModeHint')}>
           <span
             className={cn(
               'rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide',
@@ -150,18 +152,20 @@ export default function SystemPage() {
         </Row>
 
         <Row
-          label="Kill-switch"
+          label={t('killSwitch')}
           hint={
             killed
-              ? `Tripped${control?.kill_switch?.actor ? ` by ${control.kill_switch.actor}` : ''} — trading blocked`
-              : 'Armed — trading allowed'
+              ? control?.kill_switch?.actor
+                ? t('killTrippedBy', { actor: control.kill_switch.actor })
+                : t('killTripped')
+              : t('killArmed')
           }
         >
-          <StateDot ok={!killed} label={killed ? 'TRIPPED' : 'ARMED'} />
+          <StateDot ok={!killed} label={killed ? t('stTripped') : t('stArmed')} />
           {killed ? (
             <ConfirmAction
-              label="Restore"
-              confirmLabel="Restore trading"
+              label={t('restore')}
+              confirmLabel={t('restoreTrading')}
               disabled={!opEnabled}
               disabledReason={opReason}
               onConfirm={async () => {
@@ -174,8 +178,8 @@ export default function SystemPage() {
             />
           ) : (
             <ConfirmAction
-              label="Trip kill-switch"
-              confirmLabel="Trip now"
+              label={t('tripKill')}
+              confirmLabel={t('tripNow')}
               tone="danger"
               disabled={!opEnabled}
               disabledReason={opReason}
@@ -191,13 +195,15 @@ export default function SystemPage() {
         </Row>
 
         <Row
-          label="Executor"
-          hint={executorOn ? 'Processing decisions' : 'Paused'}
+          label={t('executor')}
+          hint={executorOn ? t('executorProcessing') : t('executorPaused')}
         >
-          <StateDot ok={executorOn} label={executorOn ? 'ON' : 'OFF'} />
+          <StateDot ok={executorOn} label={executorOn ? t('stOn') : t('stOff')} />
           <ConfirmAction
-            label={executorOn ? 'Disable' : 'Enable'}
-            confirmLabel={executorOn ? 'Disable executor' : 'Enable executor'}
+            label={executorOn ? t('disable') : t('enable')}
+            confirmLabel={
+              executorOn ? t('disableExecutor') : t('enableExecutor')
+            }
             tone={executorOn ? 'danger' : 'default'}
             disabled={!opEnabled}
             disabledReason={opReason}
@@ -213,14 +219,14 @@ export default function SystemPage() {
 
         <Row
           label="STRATEGY_REAL_DECISIONS"
-          hint="Runtime configmap patch — not exposed by the API; apply via kubectl"
+          hint={t('realDecisionsHint')}
         >
           <button
             type="button"
             onClick={copyCmd}
             className="inline-flex items-center rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40"
           >
-            {copied ? 'Copied ✓' : 'Copy command'}
+            {copied ? t('copiedCmd') : t('copyCommand')}
           </button>
         </Row>
         <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
@@ -231,11 +237,11 @@ export default function SystemPage() {
       {/* service health — the architecture-flow pipeline (moved from /console) */}
       <section className="rounded-xl border border-border bg-card p-5">
         <h2 className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          Service health
+          {t('serviceHealth')}
         </h2>
         {services.length === 0 ? (
           <div className="py-6 text-center text-sm text-muted-foreground">
-            No service health reported.
+            {t('noServiceHealth')}
           </div>
         ) : (
           <ServiceFlowDiagram
