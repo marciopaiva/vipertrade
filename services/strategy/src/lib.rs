@@ -3319,7 +3319,6 @@ fn evaluate_open_trade_exit(
     open: &OpenTradeSnapshot,
     cfg: &StrategyConfig,
     active_position_advice: Option<&ActivePositionAdviceSnapshot>,
-    now: DateTime<Utc>,
 ) -> ExitEvaluation {
     if current_price <= 0.0 || open.entry_price <= 0.0 {
         return ExitEvaluation {
@@ -3330,32 +3329,13 @@ fn evaluate_open_trade_exit(
         };
     }
 
-    let min_hold_seconds = cfg.min_hold_seconds();
-    if min_hold_seconds > 0 {
-        let held_for = now
-            .signed_duration_since(open.opened_at)
-            .num_seconds()
-            .max(0);
-        if held_for < min_hold_seconds {
-            // Don't EXIT during the hold window, but DO track the trailing peak: a
-            // profit spike in the first min_hold seconds must still arm/ratchet the
-            // trail. The old `trailing: None` skipped peak tracking entirely, so a
-            // spike here was lost — the trail never armed and the gain bled away
-            // (e.g. SOL hit +0.19% inside min_hold, never armed). Exit stays
-            // suppressed via the HOLD decision; only peak state is updated.
-            let trailing_cfg = apply_active_position_advice_to_trailing(
-                cfg.trailing_runtime_config(symbol),
-                active_position_advice,
-            );
-            let reason = format!("min_hold_{}s", min_hold_seconds);
-            return ExitEvaluation {
-                decision: Some(create_hold_decision(symbol, &reason)),
-                trailing: evaluate_trailing(open, current_price, &trailing_cfg),
-                trigger: "min_hold".to_string(),
-                reason,
-            };
-        }
-    }
+    // min_hold does NOT gate exits here: the protective price stops (hard stop-loss,
+    // fixed TP, and the armed trailing stop) are risk management and must fire
+    // regardless of position age — gating them let profit bleed back through an armed
+    // trail (and a fresh position blow past its hard stop) in the first minutes.
+    // min_hold now only DEFERS the discretionary thesis-invalidation exit (applied in
+    // the live loop via min_hold_active). Trailing peak tracking happens in the normal
+    // trailing eval below, from t=0.
 
     let side = open.side.as_str();
     let sl_pct = cfg.stop_loss_pct(symbol);
@@ -5114,7 +5094,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                                 &symbol,
                                                 &open.side,
                                             ),
-                                            Utc::now(),
                                         );
                                     let close_decision = exit_evaluation.decision.clone();
                                     let trailing_eval = exit_evaluation.trailing.clone();
@@ -5138,16 +5117,33 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                             }
                                         }
                                     }
+                                    // min_hold defers ONLY the discretionary thesis exit
+                                    // (give a fresh position room before cutting on a
+                                    // consensus/regime blip). Protective stops (SL/TP/
+                                    // trailing) already fired in evaluate_open_trade_exit
+                                    // regardless of age.
+                                    let min_hold_secs = cfg.min_hold_seconds();
+                                    let min_hold_active = min_hold_secs > 0
+                                        && Utc::now()
+                                            .signed_duration_since(open.opened_at)
+                                            .num_seconds()
+                                            .max(0)
+                                            < min_hold_secs;
+                                    let thesis_decision = if min_hold_active {
+                                        None
+                                    } else {
+                                        enforce_open_position_thesis_guard(
+                                            &symbol,
+                                            &signal_event.signal,
+                                            &open,
+                                            cfg.as_ref(),
+                                            &mut thesis_invalidations,
+                                        )
+                                    };
                                     let decision = if let Some(decision) = close_decision {
                                         thesis_invalidations.remove(&symbol);
                                         decision
-                                    } else if let Some(decision) = enforce_open_position_thesis_guard(
-                                        &symbol,
-                                        &signal_event.signal,
-                                        &open,
-                                        cfg.as_ref(),
-                                        &mut thesis_invalidations,
-                                    ) {
+                                    } else if let Some(decision) = thesis_decision {
                                         if decision.action != "HOLD" {
                                             thesis_invalidations.remove(&symbol);
                                         }
@@ -5800,7 +5796,7 @@ mod tests {
         let open = sample_open_trade();
         let cfg = sample_cfg();
 
-        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg, None, Utc::now());
+        let eval = evaluate_open_trade_exit("DOGEUSDT", 102.5, &open, &cfg, None);
 
         assert_eq!(eval.trigger, "take_profit");
         assert!(eval.reason.contains("take_profit_triggered"));
@@ -5810,10 +5806,11 @@ mod tests {
     }
 
     #[test]
-    fn trailing_peak_tracked_during_min_hold() {
-        // A profit spike WITHIN the min_hold window must still arm the trailing
-        // (track the peak) — the old early-return with trailing:None lost it, so the
-        // trail never armed and the gain bled (the SOL +0.19%-in-min_hold bug).
+    fn trailing_stop_fires_during_min_hold() {
+        // A protective trailing-stop exit must fire even WITHIN the min_hold window —
+        // min_hold defers only the discretionary thesis exit, never the risk stops.
+        // (The bug: an armed trail's locked profit bled back during min_hold because
+        // the exit was suppressed; e.g. WIF peaked +0.71%, fell through the lock, no SL.)
         let cfg = StrategyConfig {
             profile: "TEST".to_string(),
             trading_mode: "PAPER".to_string(),
@@ -5836,31 +5833,22 @@ mod tests {
             bollinger_std_dev_multiplier: 2.0,
             bollinger_invalidation_threshold: 0.7,
         };
-        // Long opened 10s ago (inside the 300s hold), price +0.2% (> +0.1% arm).
+        // Long opened 10s ago (inside the 300s hold), trailing already armed at a
+        // +0.5% peak; price has fallen below the trailing stop (100.5*(1-0.001)=100.3995).
         let open = OpenTradeSnapshot {
             trade_id: "t".to_string(),
             side: "Long".to_string(),
             quantity: 1.0,
             entry_price: 100.0,
             opened_at: Utc::now() - ChronoDuration::seconds(10),
-            trailing_stop_activated: false,
-            trailing_stop_peak_price: 0.0,
-            trailing_stop_final_distance_pct: 0.0,
+            trailing_stop_activated: true,
+            trailing_stop_peak_price: 100.5,
+            trailing_stop_final_distance_pct: 0.001,
         };
-        let eval = evaluate_open_trade_exit("SOLUSDT", 100.2, &open, &cfg, None, Utc::now());
-        // Still in the hold window: must NOT exit...
-        assert_eq!(eval.trigger, "min_hold");
-        assert_eq!(eval.decision.expect("hold decision").action, "HOLD");
-        // ...but the trailing peak IS now tracked/armed (the fix).
-        let tr = eval.trailing.expect("trailing tracked during min_hold");
-        assert!(
-            tr.activated,
-            "trailing should arm on the in-hold profit spike"
-        );
-        assert!(
-            tr.peak_price >= 100.2 - 1e-9,
-            "peak should capture the spike"
-        );
+        let eval = evaluate_open_trade_exit("SOLUSDT", 100.20, &open, &cfg, None);
+        // Inside min_hold, but the trailing stop still triggers the close.
+        assert_eq!(eval.trigger, "trailing_stop");
+        assert_eq!(eval.decision.expect("close decision").action, "CLOSE_LONG");
     }
 
     #[test]
