@@ -49,7 +49,7 @@ interface DashboardData {
   trades?: { items: TradeItem[] };
   daily_trades_summary?: { count?: number };
   wallet?: { total_equity?: number };
-  // Loosely typed: PositionTable narrows these to its own MarketSignal shape.
+  // Loosely typed: PositionGauge narrows these to its own MarketSignal shape.
   market_signals?: { items?: unknown[] | Record<string, unknown> };
 }
 
@@ -63,7 +63,7 @@ export default function ConsolePage() {
     '/api/dashboard',
     { refreshInterval: 5000, enabled: true }
   );
-  // Live decisions power the PositionTable's "guards holding N setups" empty
+  // Live decisions power the PositionGauge's "guards holding N setups" empty
   // state — the same %B gate the /strategy screen surfaces.
   const { decisions } = useDecisions();
 
