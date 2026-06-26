@@ -2,8 +2,10 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useT } from '@/lib/i18n';
 
 export default function LogoutButton() {
+  const t = useT('auth');
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -34,7 +36,7 @@ export default function LogoutButton() {
       disabled={loggingOut}
       className="text-sm text-slate-400 hover:text-red-400 disabled:opacity-50"
     >
-      {loggingOut ? 'Logging out...' : 'Logout'}
+      {loggingOut ? t('loggingOut') : t('logout')}
     </button>
   );
 }

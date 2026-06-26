@@ -1,13 +1,24 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import type { DecisionItem } from '@/types/trading';
 import { MiniGauge } from './MiniGauge';
+
+type T = ReturnType<typeof useT<'strategy'>>;
 
 const LONG_PB_CEILING = 0.85;
 const SHORT_PB_FLOOR = 0.15;
 const ADX_WEAK = 20;
 const ADX_STRONG = 25;
+
+/** Translate a consensus side label; falls back to n/a for missing values. */
+function sideLabel(t: T, side?: string | null): string {
+  if (side === 'bullish') return t('sideBullish');
+  if (side === 'bearish') return t('sideBearish');
+  if (side === 'neutral') return t('sideNeutral');
+  return t('na');
+}
 
 // Shared grid template so the header and every row align. Scrolls on narrow
 // screens via the parent's overflow-x-auto.
@@ -22,7 +33,10 @@ function actionStyle(action: string) {
 }
 
 /** Plain-language "why" — %B is a real gate, ADX is trend-strength context. */
-function explain(d: DecisionItem): { kind: 'enter' | 'hold'; text: string } {
+function explain(
+  d: DecisionItem,
+  t: T
+): { kind: 'enter' | 'hold'; text: string } {
   const pb = d.consensus_bollinger_percent_b;
   const adx = d.consensus_adx_14;
   const side = d.consensus_side ?? 'neutral';
@@ -32,26 +46,31 @@ function explain(d: DecisionItem): { kind: 'enter' | 'hold'; text: string } {
     const dir = d.action.replace('ENTER_', '').toLowerCase();
     return {
       kind: 'enter',
-      text: `Entering ${dir} — consensus ${side}, entry guards clear.`,
+      text: t('whyEnter', { dir, side: sideLabel(t, side) }),
     };
   }
   const reasons: string[] = [];
-  if (side === 'neutral' || count === 0) reasons.push('no directional consensus');
+  if (side === 'neutral' || count === 0) reasons.push(t('rNoConsensus'));
   if (typeof pb === 'number' && pb > LONG_PB_CEILING)
-    reasons.push(`%B ${pb.toFixed(2)} > ${LONG_PB_CEILING} guards longs`);
+    reasons.push(
+      t('rPbLong', { pb: pb.toFixed(2), ceil: LONG_PB_CEILING })
+    );
   if (typeof pb === 'number' && pb < SHORT_PB_FLOOR)
-    reasons.push(`%B ${pb.toFixed(2)} < ${SHORT_PB_FLOOR} guards shorts`);
+    reasons.push(
+      t('rPbShort', { pb: pb.toFixed(2), floor: SHORT_PB_FLOOR })
+    );
   if (typeof adx === 'number' && adx < ADX_WEAK)
-    reasons.push(`weak trend (ADX ${adx.toFixed(0)})`);
+    reasons.push(t('rWeakTrend', { adx: adx.toFixed(0) }));
   return {
     kind: 'hold',
     text: reasons.length
-      ? `Holding — ${reasons.join('; ')}.`
-      : `Holding — consensus ${side}, conditions not yet aligned.`,
+      ? t('whyHolding', { reasons: reasons.join('; ') })
+      : t('whyHoldingDefault', { side: sideLabel(t, side) }),
   };
 }
 
 export function DecisionRow({ d }: { d: DecisionItem }) {
+  const t = useT('strategy');
   const available = d.exchanges_available ?? 0;
   const bull = d.bullish_exchanges ?? 0;
   const bear = d.bearish_exchanges ?? 0;
@@ -68,7 +87,7 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
       : undefined;
   const adxTone =
     typeof adx === 'number' && adx < ADX_WEAK ? 'warn' : undefined;
-  const why = explain(d);
+  const why = explain(d, t);
 
   return (
     <div
@@ -111,7 +130,7 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
               !d.consensus_side && 'text-muted-foreground'
             )}
           >
-            {d.consensus_side ?? 'n/a'}
+            {sideLabel(t, d.consensus_side)}
           </span>{' '}
           <span className="text-muted-foreground">
             {d.consensus_count ?? 0}/{available}

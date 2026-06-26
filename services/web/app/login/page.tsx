@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/i18n';
 
 export default function LoginPage() {
+  const t = useT('auth');
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -27,10 +29,10 @@ export default function LoginPage() {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Invalid credentials');
+        setError(data.error || t('invalidCredentials'));
       }
     } catch {
-      setError('Authentication failed');
+      setError(t('authFailed'));
     } finally {
       setLoading(false);
     }
@@ -39,11 +41,11 @@ export default function LoginPage() {
   return (
     <div className="flex h-screen items-center justify-center bg-gray-900">
       <div className="w-96 rounded-lg bg-gray-800 p-8 shadow-lg">
-        <h1 className="mb-6 text-2xl font-bold text-white">ViperTrade — Local Access</h1>
+        <h1 className="mb-6 text-2xl font-bold text-white">{t('loginTitle')}</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-300">
-              Username
+              {t('username')}
             </label>
             <input
               id="username"
@@ -58,7 +60,7 @@ export default function LoginPage() {
           </div>
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-300">
-              Password
+              {t('password')}
             </label>
             <input
               id="password"
@@ -77,11 +79,13 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full rounded bg-viper-cyan py-2 px-4 font-bold text-gray-900 hover:bg-cyan-400 disabled:opacity-50"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? t('signingIn') : t('signIn')}
           </button>
         </form>
         <p className="mt-4 text-xs text-gray-500">
-          Local development — use <code className="rounded bg-gray-700 px-1">viperadmin</code> / <code className="rounded bg-gray-700 px-1">1234</code>
+          {t('localDevPre')}
+          <code className="rounded bg-gray-700 px-1">viperadmin</code> /{' '}
+          <code className="rounded bg-gray-700 px-1">1234</code>
         </p>
       </div>
     </div>
