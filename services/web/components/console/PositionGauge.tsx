@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useLocale, useT, formatPrice, formatPct, formatUsd, formatNumber } from '@/lib/i18n';
 
 interface MarketSignal {
   symbol: string;
@@ -32,10 +33,6 @@ interface PositionGaugeProps {
   className?: string;
 }
 
-const fmtPrice = (v: number) => (v >= 100 ? v.toFixed(2) : v.toFixed(4));
-const fmtPct = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
-const fmtUsd = (v: number) => `${v >= 0 ? '+' : ''}$${v.toFixed(2)}`;
-
 /**
  * One open position as a horizontal "risk rail": left = stop (danger), right =
  * peak (best favorable price), filled left→right up to the current mark and
@@ -46,6 +43,8 @@ const fmtUsd = (v: number) => `${v >= 0 ? '+' : ''}$${v.toFixed(2)}`;
  * shorts read the same way (right = good, left = toward the stop).
  */
 function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
+  const t = useT('positions');
+  const locale = useLocale();
   const isLong = p.side.toLowerCase() === 'long';
   const entry =
     p.entry_price || (p.quantity > 0 ? p.notional_usdt / p.quantity : 0);
@@ -115,6 +114,12 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
   const peakOverTriggerPct =
     tpTrigger !== null ? Math.max(0, (f(peak) - f(tpTrigger)) / entry) : null;
 
+  // Backend trailing state (peak persisted). When the trailing stop sits beyond
+  // entry in the favorable direction it is LOCKING profit (lockedPct > 0); the
+  // stop has stopped being a loss-cutter and become a profit-protector.
+  const lockedPct = (f(stop) - fEntry) / entry;
+  const trailLocking = trailing && lockedPct > 0;
+
   return (
     <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5">
       {/* header: symbol/side · TP status · PnL */}
@@ -145,12 +150,26 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
               title="TP trigger = trailing-stop activation"
             >
               {armed
-                ? `TP ✓ ${fmtPct(overTriggerPct ?? 0)} além${
+                ? `${t('tpBeyond', { pct: formatPct(locale, (overTriggerPct ?? 0) * 100) })}${
                     peakOverTriggerPct && peakOverTriggerPct > 0
-                      ? ` · máx ${fmtPct(peakOverTriggerPct)}`
+                      ? t('tpMax', { pct: formatPct(locale, peakOverTriggerPct * 100) })
                       : ''
                   }`
-                : `TP em ${fmtPct(tpProfitPct ?? 0)}`}
+                : t('tpAt', { pct: formatPct(locale, (tpProfitPct ?? 0) * 100) })}
+            </span>
+          )}
+          {trailing && (
+            <span
+              className={cn(
+                'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
+                trailLocking
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-amber-400/15 text-amber-400'
+              )}
+            >
+              {trailLocking
+                ? t('trailLocked', { pct: formatPct(locale, lockedPct * 100) })
+                : t('trailArmed')}
             </span>
           )}
           <span
@@ -159,7 +178,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
               pnlClass
             )}
           >
-            {fmtPct(unrealizedPct)}
+            {formatPct(locale, unrealizedPct * 100)}
           </span>
           <span
             className={cn(
@@ -167,20 +186,30 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
               pnlClass
             )}
           >
-            {fmtUsd(unrealizedPnl)}
+            {formatUsd(locale, unrealizedPnl)}
           </span>
         </div>
       </div>
 
       {/* horizontal risk rail */}
       <div className="mt-2 flex items-center gap-2">
-        <span className="w-8 shrink-0 text-right text-[9px] uppercase tracking-wide text-destructive/70">
-          stop
+        <span
+          className={cn(
+            'w-8 shrink-0 text-right text-[9px] uppercase tracking-wide',
+            trailLocking ? 'text-accent/80' : 'text-destructive/70'
+          )}
+        >
+          {trailing ? t('trail') : t('stop')}
         </span>
         <div className="relative h-7 flex-1 overflow-hidden rounded-md border border-border bg-background/60">
-          {/* faint zone tints: left = toward stop, right = toward profit/peak */}
+          {/* faint zone tints: left = toward stop, right = toward profit/peak.
+              When the trail is armed and locking profit the left zone is no longer
+              danger — tint it accent to show the downside is protected. */}
           <div
-            className="absolute inset-y-0 left-0 bg-destructive/5"
+            className={cn(
+              'absolute inset-y-0 left-0',
+              trailLocking ? 'bg-accent/10' : 'bg-destructive/5'
+            )}
             style={{ width: `${C * 100}%` }}
           />
           <div
@@ -237,26 +266,30 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           />
         </div>
         <span className="w-8 shrink-0 text-[9px] uppercase tracking-wide text-muted-foreground/70">
-          peak
+          {t('peak')}
         </span>
       </div>
 
       {/* numeric strip */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-10 text-[11px] text-muted-foreground">
-        <Stat label="entry" value={fmtPrice(entry)} dashed />
+        <Stat label={t('entry')} value={formatPrice(locale, entry)} dashed />
         <Stat
-          label="mark"
-          value={fmtPrice(mark)}
+          label={t('mark')}
+          value={formatPrice(locale, mark)}
           dotClass={inProfit ? 'bg-accent' : 'bg-destructive'}
         />
         {tpTrigger !== null && (
-          <Stat label="TP-arm" value={fmtPrice(tpTrigger)} tpFlag />
+          <Stat label={t('tpArm')} value={formatPrice(locale, tpTrigger)} tpFlag />
         )}
-        <Stat label="stop" value={fmtPrice(stop)} barClass="bg-destructive/70" />
+        <Stat
+          label={trailing ? t('trail') : t('stop')}
+          value={formatPrice(locale, stop)}
+          barClass={trailLocking ? 'bg-accent/70' : 'bg-destructive/70'}
+        />
         <span className="ml-auto">
-          cushion to stop{' '}
+          {t('cushion')}{' '}
           <span className="font-mono font-semibold tabular-nums text-foreground">
-            {(cushionPct * 100).toFixed(2)}%
+            {formatNumber(locale, cushionPct * 100, 2)}%
           </span>
         </span>
       </div>
@@ -312,27 +345,23 @@ export function PositionGauge({
   guardedSetups,
   className,
 }: PositionGaugeProps) {
+  const t = useT('positions');
   if (positions.length === 0) {
     return (
       <Card
         className={cn('border-0 bg-transparent shadow-none [&>*]:px-0', className)}
       >
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-foreground">
-            Open Positions
-          </CardTitle>
+          <CardTitle className="text-lg text-foreground">{t('title')}</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="py-8 text-center">
             <p className="font-medium text-foreground/80">
               {guardedSetups && guardedSetups > 0
-                ? `Flat — guards holding ${guardedSetups} setup${guardedSetups === 1 ? '' : 's'}`
-                : 'Flat — no open positions'}
+                ? t('flatGuards', { n: guardedSetups })
+                : t('flatNoPos')}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              The strategy is monitoring the market; entries open when exchange
-              consensus and the entry guards align.
-            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{t('flatNote')}</p>
           </div>
         </CardContent>
       </Card>
@@ -345,7 +374,7 @@ export function PositionGauge({
     <Card className={cn('border-border bg-card', className)}>
       <CardHeader className="pb-2">
         <CardTitle className="text-lg text-foreground">
-          Open Positions ({positions.length})
+          {t('titleCount', { n: positions.length })}
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">

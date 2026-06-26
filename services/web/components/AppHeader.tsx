@@ -6,20 +6,22 @@ import { ViperTradeLogo } from './ViperTradeLogo';
 import { HealthPill } from './HealthPill';
 import LogoutButton from './auth/LogoutButton';
 import { DensityToggle } from './console/DensityToggle';
+import { LanguageToggle } from './console/LanguageToggle';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
-// Only real destinations live in the nav; the Trades/System screens join as they
-// ship (see docs/design/web-experience-proposal.md).
+// Only real destinations live in the nav; labels come from the i18n `nav` namespace.
 const NAV = [
-  { href: '/console', label: 'Console' },
-  { href: '/strategy', label: 'Strategy' },
-  { href: '/trades', label: 'Trades' },
-  { href: '/analysis', label: 'Analysis' },
-  { href: '/system', label: 'System' },
-];
+  { href: '/console', key: 'console' },
+  { href: '/strategy', key: 'strategy' },
+  { href: '/trades', key: 'trades' },
+  { href: '/analysis', key: 'analysis' },
+  { href: '/system', key: 'system' },
+] as const;
 
 export function AppHeader() {
   const pathname = usePathname();
+  const t = useT('nav');
 
   return (
     <header className="border-b border-border/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
@@ -43,7 +45,7 @@ export function AppHeader() {
                       : 'text-muted-foreground hover:text-viper-cyan'
                   )}
                 >
-                  {item.label}
+                  {t(item.key)}
                 </Link>
               );
             })}
@@ -57,6 +59,7 @@ export function AppHeader() {
             >
               ⌘K
             </button>
+            <LanguageToggle />
             <DensityToggle />
             <HealthPill className="ml-1" />
             <LogoutButton />

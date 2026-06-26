@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import LiveQualityTab from '@/components/analysis/LiveQualityTab';
 import TuningTab from '@/components/analysis/TuningTab';
 import { useTuning } from '@/components/analysis/tuningShared';
@@ -11,21 +12,18 @@ type TabId = 'live' | 'whatif';
 export default function AnalysisPage() {
   const [tab, setTab] = useState<TabId>('live');
   const tuning = useTuning();
+  const t = useT('analysis');
 
   const tabs: Array<{ id: TabId; label: string }> = [
-    { id: 'live', label: 'Ao Vivo' },
-    { id: 'whatif', label: 'What-if (grid)' },
+    { id: 'live', label: t('tabLive') },
+    { id: 'whatif', label: t('tabWhatif') },
   ];
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Analysis</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Qualidade de operação <strong>ao vivo</strong> (trades realizados) e simulação
-          determinística de tuning (<strong>what-if</strong>). Mudanças de config são aplicadas
-          manualmente.
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">{t('title')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
       </div>
 
       <div className="flex gap-1 border-b border-border">

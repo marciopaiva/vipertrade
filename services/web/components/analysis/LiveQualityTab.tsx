@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { cn } from '@/lib/utils';
+import { useLocale, useT, formatSigned, formatRate, formatPct, formatNumber } from '@/lib/i18n';
+import { Kpi } from '@/components/ui/Kpi';
+import { SectionCard } from '@/components/ui/SectionCard';
 
 type CloseReasonStat = {
   reason: string;
@@ -43,26 +46,19 @@ type TradeQuality = {
   worst_symbols: SymbolStat[];
 };
 
-const signed = (v: number, d = 4) =>
-  `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`;
 const tone = (v: number) =>
   v > 0 ? 'text-accent' : v < 0 ? 'text-destructive' : 'text-muted-foreground';
-const title = (s: string) =>
+// Close reasons are technical data values (thesis_invalidated, trailing_stop, …);
+// prettify rather than translate.
+const prettyReason = (s: string) =>
   s.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-function Kpi({ label, value, tone: t }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-3">
-      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 font-mono text-lg tabular-nums', t ?? 'text-foreground')}>{value}</div>
-    </div>
-  );
-}
 
 const WINDOWS = [7, 30, 90];
 
 export default function LiveQualityTab() {
   const [days, setDays] = useState(7);
+  const t = useT('live');
+  const locale = useLocale();
   const { data, loading, error } = useDashboard<TradeQuality>(
     `/api/analysis/trade-quality?days=${days}`,
     { refreshInterval: 30000 }
@@ -75,10 +71,7 @@ export default function LiveQualityTab() {
   return (
     <div className="space-y-5">
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-5">
-        <p className="max-w-2xl text-xs text-muted-foreground">
-          Qualidade de operação sobre trades <strong>realizados</strong> (fechados, paper) — dados
-          reais, não backtest. Atualiza a cada 30s.
-        </p>
+        <p className="max-w-2xl text-xs text-muted-foreground">{t('blurb')}</p>
         <div className="flex gap-1">
           {WINDOWS.map(w => (
             <button
@@ -108,30 +101,26 @@ export default function LiveQualityTab() {
         <div className="h-72 animate-pulse rounded-xl border border-border bg-card" />
       ) : data && data.closed_trades === 0 ? (
         <div className="flex h-40 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
-          Sem trades fechados nos últimos {data.window_days}d.
+          {t('empty', { days: data.window_days })}
         </div>
       ) : data ? (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Kpi label="Net PnL realizado" value={signed(data.net_pnl)} tone={tone(data.net_pnl)} />
+            <Kpi label={t('kpiNet')} value={formatSigned(locale, data.net_pnl, 4)} tone={tone(data.net_pnl)} />
             <Kpi
-              label="Win rate"
-              value={`${(data.win_rate * 100).toFixed(1)}%`}
+              label={t('kpiWin')}
+              value={formatRate(locale, data.win_rate)}
               tone={data.win_rate >= 0.5 ? 'text-accent' : 'text-foreground'}
             />
-            <Kpi label="Trades fechados" value={String(data.closed_trades)} />
+            <Kpi label={t('kpiClosed')} value={String(data.closed_trades)} />
             <Kpi
-              label="Captura do pico"
-              value={cap ? `${cap.pct_captured.toFixed(1)}%` : '—'}
+              label={t('kpiCapture')}
+              value={cap ? `${formatNumber(locale, cap.pct_captured, 1)}%` : '—'}
               tone={cap && cap.pct_captured >= 50 ? 'text-accent' : 'text-foreground'}
             />
           </div>
 
-          {/* Follow-through: the headline insight — never-armed entries are the losses */}
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Follow-through de entrada · armou o trailing vs morreu flat
-            </div>
+          <SectionCard title={t('followTitle')}>
             <div className="grid gap-3 sm:grid-cols-2">
               {[armed, notArmed].map((f, i) =>
                 f ? (
@@ -139,24 +128,22 @@ export default function LiveQualityTab() {
                     key={i}
                     className={cn(
                       'rounded-lg border p-3',
-                      f.armed
-                        ? 'border-accent/30 bg-accent/5'
-                        : 'border-destructive/30 bg-destructive/5'
+                      f.armed ? 'border-accent/30 bg-accent/5' : 'border-destructive/30 bg-destructive/5'
                     )}
                   >
                     <div className="text-sm font-medium text-foreground">
-                      {f.armed ? 'Armou o trailing (andou ≥ +0,1%)' : 'Nunca armou (entrou e não andou)'}
+                      {f.armed ? t('followArmed') : t('followNotArmed')}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted-foreground">
                       <span>
-                        net <span className={cn('font-mono', tone(f.net_pnl))}>{signed(f.net_pnl)}</span>
+                        net <span className={cn('font-mono', tone(f.net_pnl))}>{formatSigned(locale, f.net_pnl, 4)}</span>
                       </span>
-                      <span>{f.trades} trades</span>
-                      <span>{f.wins} wins</span>
+                      <span>{t('statTrades', { n: f.trades })}</span>
+                      <span>{t('statWins', { n: f.wins })}</span>
                       <span>
-                        avg{' '}
+                        {t('statAvg')}{' '}
                         <span className={cn('font-mono', tone(f.avg_pnl_pct))}>
-                          {signed(f.avg_pnl_pct, 2)}%
+                          {formatPct(locale, f.avg_pnl_pct, 2)}
                         </span>
                       </span>
                     </div>
@@ -164,55 +151,44 @@ export default function LiveQualityTab() {
                 ) : null
               )}
             </div>
-          </section>
+          </SectionCard>
 
-          {/* Trailing peak-capture */}
           {cap && cap.trailing_exits > 0 && (
-            <section className="rounded-xl border border-border bg-card p-5">
-              <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                Captura do pico · trailing exits ({cap.trailing_exits})
-              </div>
+            <SectionCard title={t('peakTitle', { n: cap.trailing_exits })}>
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
                 <span className="text-muted-foreground">
-                  pico médio{' '}
-                  <span className="font-mono text-foreground">{signed(cap.avg_peak_pct, 3)}%</span>
+                  {t('peakAvg')}{' '}
+                  <span className="font-mono text-foreground">{formatPct(locale, cap.avg_peak_pct, 3)}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  realizado{' '}
+                  {t('peakRealized')}{' '}
                   <span className={cn('font-mono', tone(cap.avg_realized_pct))}>
-                    {signed(cap.avg_realized_pct, 3)}%
+                    {formatPct(locale, cap.avg_realized_pct, 3)}
                   </span>
                 </span>
                 <span className="text-muted-foreground">
-                  travado{' '}
+                  {t('peakLocked')}{' '}
                   <span
                     className={cn(
                       'font-mono font-semibold',
                       cap.pct_captured >= 50 ? 'text-accent' : 'text-foreground'
                     )}
                   >
-                    {cap.pct_captured.toFixed(1)}%
+                    {formatNumber(locale, cap.pct_captured, 1)}%
                   </span>
                 </span>
               </div>
-            </section>
+            </SectionCard>
           )}
 
-          {/* Close-reason attribution */}
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Atribuição por motivo de saída
-            </div>
+          <SectionCard title={t('reasonsTitle')}>
             <div className="space-y-1.5">
               {data.by_close_reason.map(r => {
                 const max = Math.max(1, ...data.by_close_reason.map(x => Math.abs(x.net_pnl)));
                 const up = r.net_pnl >= 0;
                 return (
-                  <div
-                    key={r.reason}
-                    className="grid grid-cols-[150px_1fr_140px] items-center gap-3 text-xs"
-                  >
-                    <span className="truncate text-foreground">{title(r.reason)}</span>
+                  <div key={r.reason} className="grid grid-cols-[150px_1fr_140px] items-center gap-3 text-xs">
+                    <span className="truncate text-foreground">{prettyReason(r.reason)}</span>
                     <div className="h-2 rounded-full bg-background/60">
                       <div
                         className={cn('h-full rounded-full', up ? 'bg-accent/70' : 'bg-destructive/70')}
@@ -220,28 +196,23 @@ export default function LiveQualityTab() {
                       />
                     </div>
                     <span className="text-right font-mono tabular-nums text-muted-foreground">
-                      <span className={tone(r.net_pnl)}>{signed(r.net_pnl)}</span> · {r.trades}t ·{' '}
-                      {r.wins}w
+                      <span className={tone(r.net_pnl)}>{formatSigned(locale, r.net_pnl, 4)}</span> · {r.trades}t · {r.wins}w
                     </span>
                   </div>
                 );
               })}
             </div>
-          </section>
+          </SectionCard>
 
-          {/* Worst symbols */}
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              Por token · pior primeiro
-            </div>
+          <SectionCard title={t('bySymbolTitle')}>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="pb-2 pr-3 font-medium">Símbolo</th>
-                    <th className="pb-2 pr-3 text-right font-medium">net PnL</th>
-                    <th className="pb-2 pr-3 text-right font-medium">Trades</th>
-                    <th className="pb-2 text-right font-medium">Win%</th>
+                    <th className="pb-2 pr-3 font-medium">{t('colSymbol')}</th>
+                    <th className="pb-2 pr-3 text-right font-medium">{t('colNet')}</th>
+                    <th className="pb-2 pr-3 text-right font-medium">{t('colTrades')}</th>
+                    <th className="pb-2 text-right font-medium">{t('colWin')}</th>
                   </tr>
                 </thead>
                 <tbody className="font-mono tabular-nums">
@@ -249,18 +220,18 @@ export default function LiveQualityTab() {
                     <tr key={s.symbol} className="border-t border-border/50">
                       <td className="py-1.5 pr-3 text-foreground">{s.symbol}</td>
                       <td className={cn('py-1.5 pr-3 text-right', tone(s.realized_pnl))}>
-                        {signed(s.realized_pnl)}
+                        {formatSigned(locale, s.realized_pnl, 4)}
                       </td>
                       <td className="py-1.5 pr-3 text-right text-muted-foreground">{s.trades}</td>
                       <td className="py-1.5 text-right text-muted-foreground">
-                        {(s.win_rate * 100).toFixed(0)}%
+                        {formatNumber(locale, s.win_rate * 100, 0)}%
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
+          </SectionCard>
         </>
       ) : null}
     </div>

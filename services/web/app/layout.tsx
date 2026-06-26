@@ -31,15 +31,15 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="en"
+      lang="pt-BR"
       className={`${display.variable} ${mono.variable} ${sans.variable}`}
     >
       <head>
-        {/* Apply the saved density before paint so there's no flash and no
-            hydration mismatch (runs outside React). */}
+        {/* Apply the saved density + locale before paint so there's no flash and no
+            hydration mismatch (runs outside React). Locale defaults to pt-BR. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var d=localStorage.getItem('viper-density');if(d==='cockpit')document.documentElement.dataset.density=d;}catch(e){}`,
+            __html: `try{var d=localStorage.getItem('viper-density');if(d==='cockpit')document.documentElement.dataset.density=d;var l=localStorage.getItem('viper-locale');l=(l==='en'||l==='pt-BR')?l:'pt-BR';document.documentElement.dataset.locale=l;document.documentElement.lang=l;}catch(e){document.documentElement.dataset.locale='pt-BR';}`,
           }}
         />
       </head>
