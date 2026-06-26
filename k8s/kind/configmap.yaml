@@ -43,12 +43,6 @@ data:
   # Trading profile
   TRADING_PROFILE: MEDIUM
 
-  # ai-analyst /analyze/tuning — OpenRouter model for the Format-A narration layer
-  # (numbers come from the deterministic grid; the model only writes prose). Override
-  # with any strong OpenRouter slug. The API KEY is a SECRET → compose/.env
-  # (OPENROUTER_API_KEY), never here. With no key, /analyze/tuning returns the grid only.
-  OPENROUTER_MODEL: "openai/gpt-oss-120b:free"
-
   # Strategy: use the real decision logic (ENTER_LONG/SHORT) instead of the
   # always-HOLD stub. Safe to enable here because TRADING_MODE=paper and
   # EXECUTOR_ENABLE_LIVE_ORDERS=false — fills are DB-simulated, no real orders.

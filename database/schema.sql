@@ -412,21 +412,6 @@ VALUES (CURRENT_DATE)
 ON CONFLICT (date) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════
--- TUNING ANALYSIS CACHE (ai-analyst /analyze/tuning)
--- Single-row cache of the last successful LLM narration, served as a fallback
--- when live narration fails (free-tier 429/timeout). ai-analyst also ensures
--- this table on startup (CREATE TABLE IF NOT EXISTS).
--- ═══════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS tuning_analysis_cache (
-    id smallint PRIMARY KEY DEFAULT 1,
-    model text NOT NULL,
-    report_md text NOT NULL,
-    corpus_ticks bigint NOT NULL,
-    generated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT tuning_cache_single_row CHECK (id = 1)
-);
-
--- ═══════════════════════════════════════════════════════════
 -- COMMENTS PARA DOCUMENTAÇÃO
 -- ═══════════════════════════════════════════════════════════
 

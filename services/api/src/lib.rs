@@ -992,6 +992,202 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
     }
 }
 
+#[derive(serde::Deserialize)]
+struct TradeQualityQuery {
+    days: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct CloseReasonStat {
+    reason: String,
+    trades: i64,
+    net_pnl: f64,
+    wins: i64,
+    avg_pnl_pct: f64,
+}
+
+#[derive(Serialize)]
+struct FollowThroughStat {
+    armed: bool,
+    trades: i64,
+    net_pnl: f64,
+    wins: i64,
+    avg_pnl_pct: f64,
+}
+
+#[derive(Serialize)]
+struct PeakCapture {
+    trailing_exits: i64,
+    avg_peak_pct: f64,
+    avg_realized_pct: f64,
+    pct_captured: f64,
+}
+
+#[derive(Serialize)]
+struct TradeQualityResponse {
+    window_days: i64,
+    closed_trades: i64,
+    net_pnl: f64,
+    win_rate: f64,
+    by_close_reason: Vec<CloseReasonStat>,
+    follow_through: Vec<FollowThroughStat>,
+    peak_capture: PeakCapture,
+    worst_symbols: Vec<SymbolPnlItem>,
+}
+
+// LIVE trade-quality metrics over realized (closed, paper) trades — NOT a backtest.
+// Surfaces the diagnostics we actually validate by: close-reason attribution, entry
+// follow-through (did the trade reach profit and arm the trail, or die flat?), and
+// how much of the peak the trailing stop captured. Feeds the /analysis "Ao Vivo" tab.
+async fn trade_quality_handler(query: TradeQualityQuery, state: Arc<AppState>) -> impl Reply {
+    let Some(pool) = &state.db_pool else {
+        return json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_unavailable",
+            "database is not connected",
+        );
+    };
+    let days = query.days.unwrap_or(7).clamp(1, 365);
+
+    // 1) close-reason attribution (and overall is derived from it).
+    let by_reason = sqlx::query_as::<_, (Option<String>, i64, f64, i64, f64)>(
+        "SELECT close_reason, COUNT(*)::bigint, COALESCE(SUM(pnl),0)::double precision,
+                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
+         FROM trades
+         WHERE status='closed' AND paper_trade = TRUE
+           AND closed_at >= NOW() - make_interval(days => $1::int)
+         GROUP BY close_reason ORDER BY SUM(pnl) ASC",
+    )
+    .bind(days as i32)
+    .fetch_all(pool)
+    .await;
+
+    // 2) entry follow-through: armed the trailing vs never (died flat/negative).
+    let follow = sqlx::query_as::<_, (Option<bool>, i64, f64, i64, f64)>(
+        "SELECT trailing_stop_activated, COUNT(*)::bigint, COALESCE(SUM(pnl),0)::double precision,
+                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
+         FROM trades
+         WHERE status='closed' AND paper_trade = TRUE
+           AND closed_at >= NOW() - make_interval(days => $1::int)
+         GROUP BY trailing_stop_activated ORDER BY trailing_stop_activated",
+    )
+    .bind(days as i32)
+    .fetch_all(pool)
+    .await;
+
+    // 3) trailing peak-capture: how much of the peak the trail locked.
+    let cap = sqlx::query_as::<_, (i64, f64, f64)>(
+        "WITH t AS (
+            SELECT pnl_pct,
+              CASE WHEN side='Long' THEN (trailing_stop_peak_price-entry_price)/entry_price*100
+                   ELSE (entry_price-trailing_stop_peak_price)/entry_price*100 END AS peak_pct
+            FROM trades
+            WHERE status='closed' AND paper_trade = TRUE AND close_reason='trailing_stop'
+              AND closed_at >= NOW() - make_interval(days => $1::int)
+              AND trailing_stop_peak_price IS NOT NULL AND trailing_stop_peak_price <> entry_price)
+         SELECT COUNT(*)::bigint, COALESCE(AVG(peak_pct),0)::double precision,
+                COALESCE(AVG(pnl_pct),0)::double precision FROM t",
+    )
+    .bind(days as i32)
+    .fetch_one(pool)
+    .await;
+
+    // 4) worst symbols (reuses the by-symbol ranking, windowed).
+    let symbols = sqlx::query_as::<_, (String, f64, i64, i64, f64)>(
+        "SELECT symbol, COALESCE(SUM(pnl),0)::double precision, COUNT(*)::bigint,
+                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
+         FROM trades
+         WHERE status='closed' AND paper_trade = TRUE
+           AND closed_at >= NOW() - make_interval(days => $1::int)
+         GROUP BY symbol ORDER BY SUM(pnl) ASC LIMIT 12",
+    )
+    .bind(days as i32)
+    .fetch_all(pool)
+    .await;
+
+    let (Ok(by_reason), Ok(follow), Ok(cap), Ok(symbols)) = (by_reason, follow, cap, symbols)
+    else {
+        return json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "query_failed",
+            "failed to compute trade-quality metrics",
+        );
+    };
+
+    let mut closed_trades = 0i64;
+    let mut net_pnl = 0.0f64;
+    let mut wins = 0i64;
+    let by_close_reason: Vec<CloseReasonStat> = by_reason
+        .into_iter()
+        .map(|(reason, trades, net, w, avg)| {
+            closed_trades += trades;
+            net_pnl += net;
+            wins += w;
+            CloseReasonStat {
+                reason: reason.unwrap_or_else(|| "(none)".to_string()),
+                trades,
+                net_pnl: round6(net),
+                wins: w,
+                avg_pnl_pct: round6(avg),
+            }
+        })
+        .collect();
+
+    let follow_through: Vec<FollowThroughStat> = follow
+        .into_iter()
+        .map(|(armed, trades, net, w, avg)| FollowThroughStat {
+            armed: armed.unwrap_or(false),
+            trades,
+            net_pnl: round6(net),
+            wins: w,
+            avg_pnl_pct: round6(avg),
+        })
+        .collect();
+
+    let (cap_n, cap_peak, cap_real) = cap;
+    let peak_capture = PeakCapture {
+        trailing_exits: cap_n,
+        avg_peak_pct: round6(cap_peak),
+        avg_realized_pct: round6(cap_real),
+        pct_captured: if cap_peak.abs() > 1e-9 {
+            round6(cap_real / cap_peak * 100.0)
+        } else {
+            0.0
+        },
+    };
+
+    let worst_symbols: Vec<SymbolPnlItem> = symbols
+        .into_iter()
+        .map(|(symbol, net, trades, w, avg)| SymbolPnlItem {
+            symbol,
+            realized_pnl: round6(net),
+            trades,
+            wins: w,
+            win_rate: round6(if trades > 0 {
+                w as f64 / trades as f64
+            } else {
+                0.0
+            }),
+            avg_pnl_pct: round6(avg),
+        })
+        .collect();
+
+    json_ok(&TradeQualityResponse {
+        window_days: days,
+        closed_trades,
+        net_pnl: round6(net_pnl),
+        win_rate: round6(if closed_trades > 0 {
+            wins as f64 / closed_trades as f64
+        } else {
+            0.0
+        }),
+        by_close_reason,
+        follow_through,
+        peak_capture,
+        worst_symbols,
+    })
+}
+
 // Per-symbol realized-PnL ranking over closed trades, worst-first. Feeds the
 // "broaden the universe, then prune the worst" workflow: with real decisions on,
 // this is the objective scoreboard for which symbols to disable in pairs.yaml.
@@ -2432,6 +2628,14 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(symbol_pnl_handler);
 
+    let trade_quality = api_v1
+        .and(warp::path("performance"))
+        .and(warp::path("trade-quality"))
+        .and(warp::path::end())
+        .and(warp::query::<TradeQualityQuery>())
+        .and(with_state(state.clone()))
+        .then(trade_quality_handler);
+
     let risk_kpis = api_v1
         .and(warp::path("risk"))
         .and(warp::path("kpis"))
@@ -2514,6 +2718,7 @@ pub async fn run() {
         .or(events)
         .or(performance)
         .or(symbol_pnl)
+        .or(trade_quality)
         .or(risk_kpis)
         .or(bybit_private_health)
         .or(bybit_wallet)

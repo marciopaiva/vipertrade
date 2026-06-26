@@ -7,6 +7,7 @@ import {
   ClassBadge,
   GridVariant,
   signed,
+  SubstitutionCard,
   tone,
   TuningState,
 } from '@/components/analysis/tuningShared';
@@ -137,7 +138,7 @@ export default function TuningTab({ tuning }: { tuning: TuningState }) {
     <div className="space-y-5">
       <RunBar
         tuning={tuning}
-        blurb="Grid de backtest determinístico (paths/PnL calculados no Rust) narrado pela IA. On-demand — pode levar até ~3min com o modelo free. Os números são autoritativos; a IA só comenta."
+        blurb="Grid de backtest determinístico (paths/PnL calculados no Rust) sobre o corpus de auditoria. On-demand. ⚠️ O backtest NÃO modela o trailing ao vivo (advice/min_hold) — confie nos eixos de entrada; valide trailing pela aba Ao Vivo."
       />
 
       {error && (
@@ -163,36 +164,7 @@ export default function TuningTab({ tuning }: { tuning: TuningState }) {
 
           <RecommendationCard rec={data.recommended} />
           <GridTable variants={data.variants} />
-
-          <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              <span>Comentário da IA</span>
-              {data.ai && <span className="normal-case tracking-normal">{data.ai.model}</span>}
-            </div>
-            {data.ai ? (
-              <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-                {data.ai.report_md}
-              </pre>
-            ) : data.cached_ai ? (
-              <>
-                <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
-                  Narração ao vivo falhou{data.ai_error ? ` (${data.ai_error})` : ''}. Mostrando a
-                  última narração de{' '}
-                  {new Date(data.cached_ai.generated_at).toLocaleString()} ({data.cached_ai.model}) —
-                  o grid acima é atual; o texto abaixo pode referir um corpus anterior (
-                  {data.cached_ai.corpus_ticks.toLocaleString()} ticks).
-                </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-                  {data.cached_ai.report_md}
-                </pre>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Narração indisponível{data.ai_error ? ` — ${data.ai_error}` : ''}. O grid
-                determinístico acima é autoritativo e independe da IA.
-              </p>
-            )}
-          </section>
+          <SubstitutionCard sub={data.substitution} />
         </>
       )}
 
