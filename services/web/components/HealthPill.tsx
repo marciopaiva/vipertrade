@@ -1,32 +1,33 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { useConnectionStatus, type LiveStatus } from '@/hooks/useConnectionStatus';
 
 const CONFIG: Record<
   LiveStatus,
-  { label: string; dot: string; text: string; pulse: boolean }
+  { labelKey: 'healthLive' | 'healthConnecting' | 'healthStale' | 'healthOffline'; dot: string; text: string; pulse: boolean }
 > = {
   live: {
-    label: 'LIVE',
+    labelKey: 'healthLive',
     dot: 'bg-viper-green',
     text: 'text-viper-green',
     pulse: true,
   },
   connecting: {
-    label: 'CONNECTING',
+    labelKey: 'healthConnecting',
     dot: 'bg-viper-cyan',
     text: 'text-viper-cyan',
     pulse: true,
   },
   stale: {
-    label: 'STALE',
+    labelKey: 'healthStale',
     dot: 'bg-viper-orange',
     text: 'text-viper-orange',
     pulse: false,
   },
   down: {
-    label: 'OFFLINE',
+    labelKey: 'healthOffline',
     dot: 'bg-viper-red',
     text: 'text-viper-red',
     pulse: false,
@@ -39,8 +40,10 @@ const CONFIG: Record<
  * failure is loud" principle.
  */
 export function HealthPill({ className }: { className?: string }) {
+  const t = useT('app');
   const { status } = useConnectionStatus();
   const c = CONFIG[status];
+  const label = t(c.labelKey);
 
   return (
     <span
@@ -49,7 +52,7 @@ export function HealthPill({ className }: { className?: string }) {
         c.text,
         className
       )}
-      title={`Realtime feed: ${c.label.toLowerCase()}`}
+      title={t('healthFeed', { status: label.toLowerCase() })}
       aria-live="polite"
     >
       <span className="relative flex h-2 w-2">
@@ -63,7 +66,7 @@ export function HealthPill({ className }: { className?: string }) {
         )}
         <span className={cn('relative inline-flex h-2 w-2 rounded-full', c.dot)} />
       </span>
-      {c.label}
+      {label}
     </span>
   );
 }

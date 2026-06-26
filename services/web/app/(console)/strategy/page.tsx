@@ -2,12 +2,14 @@
 
 import { cn } from '@/lib/utils';
 import { useDecisions } from '@/hooks/useDecisions';
+import { useT } from '@/lib/i18n';
 import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
 const LONG_PB_CEILING = 0.85;
 const SHORT_PB_FLOOR = 0.15;
 
 export default function StrategyPage() {
+  const t = useT('strategy');
   const { decisions, loading, error, live } = useDecisions();
 
   const entering = decisions.filter(d => d.action.startsWith('ENTER')).length;
@@ -40,30 +42,28 @@ export default function StrategyPage() {
                 )}
               />
             </span>
-            Strategy
+            {t('title')}
             <span
               className={cn(
                 'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
                 live ? 'bg-accent/15 text-accent' : 'bg-secondary text-muted-foreground'
               )}
             >
-              {live ? 'live' : 'polling'}
+              {live ? t('live') : t('polling')}
             </span>
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Per-symbol multi-exchange consensus, entry guards, and the reason each
-            symbol is entering or being held.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-4 font-mono text-sm tabular-nums">
           <span className="text-muted-foreground">
-            <span className="text-foreground">{decisions.length}</span> symbols
+            <span className="text-foreground">{decisions.length}</span>{' '}
+            {t('symbols')}
           </span>
           <span className="text-muted-foreground">
-            <span className="text-accent">{entering}</span> entering
+            <span className="text-accent">{entering}</span> {t('entering')}
           </span>
           <span className="text-muted-foreground">
-            <span className="text-warn">{guarded}</span> guarded
+            <span className="text-warn">{guarded}</span> {t('guarded')}
           </span>
         </div>
       </div>
@@ -71,14 +71,14 @@ export default function StrategyPage() {
       {/* legend */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-3 rounded-sm bg-destructive/25" /> %B guard zone
-          (≥{LONG_PB_CEILING} / ≤{SHORT_PB_FLOOR})
+          <span className="h-2 w-3 rounded-sm bg-destructive/25" />{' '}
+          {t('legendGuard', { ceil: LONG_PB_CEILING, floor: SHORT_PB_FLOOR })}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-3 rounded-sm bg-warn/20" /> ADX &lt; 20 weak trend
+          <span className="h-2 w-3 rounded-sm bg-warn/20" /> {t('legendWeak')}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-3 rounded-sm bg-accent/20" /> ADX ≥ 25 strong trend
+          <span className="h-2 w-3 rounded-sm bg-accent/20" /> {t('legendStrong')}
         </span>
       </div>
 
@@ -99,8 +99,7 @@ export default function StrategyPage() {
         </div>
       ) : decisions.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-3 py-12 text-center text-sm text-muted-foreground">
-          No decisions recorded yet — the strategy publishes one per symbol as
-          market data flows in.
+          {t('empty')}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -111,13 +110,13 @@ export default function StrategyPage() {
               'border-b border-border px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground'
             )}
           >
-            <span>Symbol</span>
-            <span>State</span>
-            <span>Consensus</span>
-            <span>RSI</span>
-            <span>%B</span>
-            <span>ADX</span>
-            <span>Why</span>
+            <span>{t('colSymbol')}</span>
+            <span>{t('colState')}</span>
+            <span>{t('colConsensus')}</span>
+            <span>{t('colRsi')}</span>
+            <span>{t('colPb')}</span>
+            <span>{t('colAdx')}</span>
+            <span>{t('colWhy')}</span>
           </div>
           {ordered.map(d => (
             <div key={d.symbol} id={`sym-${d.symbol}`} className="scroll-mt-24">

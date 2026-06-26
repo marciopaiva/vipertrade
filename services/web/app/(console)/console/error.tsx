@@ -1,5 +1,7 @@
 'use client';
 
+import { useT } from '@/lib/i18n';
+
 export default function DashboardError({
   error,
   reset,
@@ -7,6 +9,7 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT('app');
   return (
     <div className="flex flex-col items-center justify-center min-h-[400px] bg-secondary/50 rounded-lg border border-border/50 p-8">
       <div className="text-center space-y-4">
@@ -14,7 +17,7 @@ export default function DashboardError({
         <div className="text-4xl">❌</div>
 
         {/* Error Message */}
-        <h3 className="text-xl font-bold text-viper-red">Dashboard Error</h3>
+        <h3 className="text-xl font-bold text-viper-red">{t('dashboardError')}</h3>
 
         {/* Error Details (dev only) */}
         {process.env.NODE_ENV === 'development' && (
@@ -29,7 +32,7 @@ export default function DashboardError({
             onClick={reset}
             className="px-4 py-2 bg-viper-cyan text-viper-navy font-semibold rounded hover:bg-primary transition-colors"
           >
-            Retry
+            {t('retry')}
           </button>
 
           <a
@@ -37,7 +40,7 @@ export default function DashboardError({
             target="_blank"
             className="px-4 py-2 bg-secondary text-foreground font-semibold rounded hover:bg-secondary transition-colors"
           >
-            Check API
+            {t('checkApi')}
           </a>
         </div>
       </div>

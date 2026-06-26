@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 interface Command {
   id: string;
@@ -18,6 +19,7 @@ interface Command {
  * actions can join the command list as they're wired.
  */
 export function CommandPalette() {
+  const t = useT('cmd');
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -27,13 +29,13 @@ export function CommandPalette() {
 
   const commands = useMemo<Command[]>(
     () => [
-      { id: 'console', label: 'Go to Console', hint: 'g c', run: () => router.push('/console') },
-      { id: 'strategy', label: 'Go to Strategy', hint: 'g s', run: () => router.push('/strategy') },
-      { id: 'trades', label: 'Go to Trades', hint: 'g t', run: () => router.push('/trades') },
-      { id: 'analysis', label: 'Go to Analysis', hint: 'g a', run: () => router.push('/analysis') },
-      { id: 'system', label: 'Go to System · controls', hint: 'g y', run: () => router.push('/system') },
+      { id: 'console', label: t('goConsole'), hint: 'g c', run: () => router.push('/console') },
+      { id: 'strategy', label: t('goStrategy'), hint: 'g s', run: () => router.push('/strategy') },
+      { id: 'trades', label: t('goTrades'), hint: 'g t', run: () => router.push('/trades') },
+      { id: 'analysis', label: t('goAnalysis'), hint: 'g a', run: () => router.push('/analysis') },
+      { id: 'system', label: t('goSystem'), hint: 'g y', run: () => router.push('/system') },
     ],
-    [router]
+    [router, t]
   );
 
   const filtered = useMemo(() => {
@@ -140,13 +142,13 @@ export function CommandPalette() {
               runAt(active);
             }
           }}
-          placeholder="Jump to…"
+          placeholder={t('placeholder')}
           className="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <ul className="max-h-72 overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-              No matches
+              {t('noMatches')}
             </li>
           ) : (
             filtered.map((c, i) => (
