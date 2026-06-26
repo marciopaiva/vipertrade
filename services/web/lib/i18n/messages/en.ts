@@ -98,6 +98,48 @@ const en = {
     mark: 'mark',
     tpArm: 'TP-arm',
   },
+  console: {
+    connecting: 'Connecting to ViperTrade',
+    // KPI strip
+    equity: 'Equity',
+    delta24h: '24h',
+    winRate: 'Win rate',
+    open: 'Open',
+    today: 'Today',
+    trades: 'trades',
+    // Market sentiment
+    sentimentTitle: 'Market Sentiment',
+    fngTitle: 'Fear & Greed Index',
+    indexUnavailable: 'Index unavailable',
+    fngBlurb:
+      'The Crypto Fear & Greed Index distills volatility, momentum, volume, social media, and surveys into a single 0–100 reading of market emotion.',
+    fngExtremeFear: 'Extreme Fear',
+    fngExtremeFearNote:
+      'Investors are highly fearful — often an oversold zone with potential buying opportunities.',
+    fngFear: 'Fear',
+    fngFearNote: 'Caution dominates the market — sentiment leans bearish.',
+    fngNeutral: 'Neutral',
+    fngNeutralNote: 'Sentiment is balanced — no strong directional bias.',
+    fngGreed: 'Greed',
+    fngGreedNote: 'Optimism is rising — momentum is bullish, but watch for froth.',
+    fngExtremeGreed: 'Extreme Greed',
+    fngExtremeGreedNote:
+      'Markets are euphoric — historically a zone of elevated pullback risk.',
+    longShortRatio: 'Long/Short ratio',
+    bybitPerps: 'Bybit perpetuals',
+    long: 'Long',
+    short: 'Short',
+    longShortUnavailable: 'Long/Short ratio unavailable',
+    // Equity curve
+    equityTitle: 'Equity curve',
+    equitySubtitle:
+      'Cumulative realized PnL across {n} closed trades · marker per fill',
+    equityNet: 'net',
+    equityPeak: 'peak',
+    equityEmpty: 'No closed trades yet — the curve plots as fills land.',
+    fill: 'fill',
+    equityLabel: 'equity',
+  },
 };
 
 // Value types widen to `string` (no `as const`) so pt-BR.ts can hold translated

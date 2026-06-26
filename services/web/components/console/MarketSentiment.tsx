@@ -1,7 +1,10 @@
 'use client';
 
 import { useDashboard } from '@/hooks/useDashboard';
+import { useT } from '@/lib/i18n';
 import { Card } from '@/components/ui/card';
+
+type T = ReturnType<typeof useT<'console'>>;
 
 interface FearGreed {
   value: number;
@@ -24,36 +27,17 @@ interface SentimentResponse {
 
 // Fear & Greed zones, low→high. Color is shared by the arc marker, the big
 // number, and the classification label so the whole card reads as one signal.
-function zone(value: number): { color: string; label: string; note: string } {
+// Labels/notes resolve through the i18n catalog (pt-BR/en).
+function zone(value: number, t: T): { color: string; label: string; note: string } {
   if (value < 25)
-    return {
-      color: '#ef4444',
-      label: 'Extreme Fear',
-      note: 'Investors are highly fearful — often an oversold zone with potential buying opportunities.',
-    };
+    return { color: '#ef4444', label: t('fngExtremeFear'), note: t('fngExtremeFearNote') };
   if (value < 45)
-    return {
-      color: '#f97316',
-      label: 'Fear',
-      note: 'Caution dominates the market — sentiment leans bearish.',
-    };
+    return { color: '#f97316', label: t('fngFear'), note: t('fngFearNote') };
   if (value < 55)
-    return {
-      color: '#eab308',
-      label: 'Neutral',
-      note: 'Sentiment is balanced — no strong directional bias.',
-    };
+    return { color: '#eab308', label: t('fngNeutral'), note: t('fngNeutralNote') };
   if (value < 75)
-    return {
-      color: '#84cc16',
-      label: 'Greed',
-      note: 'Optimism is rising — momentum is bullish, but watch for froth.',
-    };
-  return {
-    color: '#22c55e',
-    label: 'Extreme Greed',
-    note: 'Markets are euphoric — historically a zone of elevated pullback risk.',
-  };
+    return { color: '#84cc16', label: t('fngGreed'), note: t('fngGreedNote') };
+  return { color: '#22c55e', label: t('fngExtremeGreed'), note: t('fngExtremeGreedNote') };
 }
 
 // Point on the top semicircle for a 0–100 value (0 = left/red, 100 = right/green).
@@ -63,11 +47,11 @@ function arcPoint(value: number, radius: number, cx: number, cy: number) {
   return { x: cx + radius * Math.cos(angle), y: cy - radius * Math.sin(angle) };
 }
 
-function Gauge({ fg }: { fg: FearGreed }) {
+function Gauge({ fg, t }: { fg: FearGreed; t: T }) {
   const cx = 100;
   const cy = 100;
   const R = 80;
-  const z = zone(fg.value);
+  const z = zone(fg.value, t);
   const marker = arcPoint(fg.value, R, cx, cy);
 
   // Dotted scale along an inner arc, mirroring the Bybit reference.
@@ -81,7 +65,7 @@ function Gauge({ fg }: { fg: FearGreed }) {
         viewBox="0 0 200 118"
         className="w-full"
         role="img"
-        aria-label={`Fear and Greed Index ${fg.value}, ${z.label}`}
+        aria-label={`${t('fngTitle')} ${fg.value}, ${z.label}`}
       >
         <defs>
           <linearGradient id="fng-arc" x1="0" y1="0" x2="1" y2="0">
@@ -138,14 +122,16 @@ function Gauge({ fg }: { fg: FearGreed }) {
   );
 }
 
-function LongShortBar({ ls }: { ls: LongShort }) {
+function LongShortBar({ ls, t }: { ls: LongShort; t: T }) {
   const long = Math.round(ls.longPct);
   const short = Math.round(ls.shortPct);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Long/Short ratio · {ls.symbol}</span>
-        <span>Bybit perpetuals</span>
+        <span>
+          {t('longShortRatio')} · {ls.symbol}
+        </span>
+        <span>{t('bybitPerps')}</span>
       </div>
       <div className="flex h-2.5 overflow-hidden rounded-full bg-secondary">
         <div
@@ -156,10 +142,12 @@ function LongShortBar({ ls }: { ls: LongShort }) {
       </div>
       <div className="flex items-center justify-between text-xs">
         <span className="font-semibold text-emerald-500">
-          {long}% <span className="font-normal text-muted-foreground">Long</span>
+          {long}%{' '}
+          <span className="font-normal text-muted-foreground">{t('long')}</span>
         </span>
         <span className="font-semibold text-red-500">
-          <span className="font-normal text-muted-foreground">Short</span> {short}%
+          <span className="font-normal text-muted-foreground">{t('short')}</span>{' '}
+          {short}%
         </span>
       </div>
     </div>
@@ -167,33 +155,35 @@ function LongShortBar({ ls }: { ls: LongShort }) {
 }
 
 export function MarketSentiment() {
+  const t = useT('console');
+  const tc = useT('common');
   const { data, loading } = useDashboard<SentimentResponse>('/api/sentiment', {
     refreshInterval: 60000,
   });
 
   const fg = data?.fearGreed ?? null;
   const ls = data?.longShort ?? null;
-  const z = fg ? zone(fg.value) : null;
+  const z = fg ? zone(fg.value, t) : null;
 
   return (
     <Card className="p-4">
       <h3 className="mb-3 text-sm font-semibold tracking-tight">
-        Market Sentiment
+        {t('sentimentTitle')}
       </h3>
 
       {loading && !data ? (
         <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-          Loading…
+          {tc('loading')}
         </div>
       ) : (
         <div className="flex flex-col gap-6 md:flex-row md:items-center">
           {/* Gauge — fixed lane on the left so it doesn't stretch full width. */}
           <div className="mx-auto w-full max-w-[260px] shrink-0 md:mx-0">
             {fg ? (
-              <Gauge fg={fg} />
+              <Gauge fg={fg} t={t} />
             ) : (
               <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-                Index unavailable
+                {t('indexUnavailable')}
               </div>
             )}
           </div>
@@ -206,17 +196,15 @@ export function MarketSentiment() {
                   {z.label} · {fg.value}/100
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  The Crypto Fear &amp; Greed Index distills volatility, momentum,
-                  volume, social media, and surveys into a single 0–100 reading of
-                  market emotion. {z.note}
+                  {t('fngBlurb')} {z.note}
                 </p>
               </div>
             )}
             {ls ? (
-              <LongShortBar ls={ls} />
+              <LongShortBar ls={ls} t={t} />
             ) : (
               <p className="text-xs text-muted-foreground">
-                Long/Short ratio unavailable
+                {t('longShortUnavailable')}
               </p>
             )}
           </div>

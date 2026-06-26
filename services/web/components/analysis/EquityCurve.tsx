@@ -12,7 +12,11 @@ import {
   YAxis,
 } from 'recharts';
 import { useDashboard } from '@/hooks/useDashboard';
+import { useLocale, useT, formatUsd, type Locale } from '@/lib/i18n';
+import { SectionCard } from '@/components/ui/SectionCard';
 import type { Trade } from '@/types/trading';
+
+type T = ReturnType<typeof useT<'console'>>;
 
 interface Point {
   i: number;
@@ -32,7 +36,7 @@ function titleCase(value?: string | null) {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function CurveTooltip({ active, payload }: any) {
+function CurveTooltip({ active, payload, t, locale }: any) {
   if (!active || !payload?.length) return null;
   const p: Point = payload[0].payload;
   const win = p.pnl >= 0;
@@ -45,14 +49,14 @@ function CurveTooltip({ active, payload }: any) {
         </span>
       </div>
       <div className="mt-1 font-mono tabular-nums text-muted-foreground">
-        fill{' '}
+        {(t as T)('fill')}{' '}
         <span className={win ? 'text-accent' : 'text-destructive'}>
-          {win ? '+' : '−'}${Math.abs(p.pnl).toFixed(2)}
+          {formatUsd(locale as Locale, p.pnl)}
         </span>{' '}
         · {titleCase(p.reason)}
       </div>
       <div className="mt-0.5 font-mono tabular-nums text-foreground/80">
-        equity {p.cum >= 0 ? '+' : '−'}${Math.abs(p.cum).toFixed(2)}
+        {(t as T)('equityLabel')} {formatUsd(locale as Locale, p.cum)}
       </div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{p.when}</div>
     </div>
@@ -83,6 +87,8 @@ function FillDot(props: any) {
  * mark-to-market equity (no equity time-series exists in the API).
  */
 export function EquityCurve() {
+  const t = useT('console');
+  const locale = useLocale();
   const { data, loading, error } = useDashboard<{ items: Trade[] }>(
     '/api/v1/trades?limit=200',
     { refreshInterval: 15000 }
@@ -115,7 +121,7 @@ export function EquityCurve() {
         reason: t.close_reason || 'closed',
         when: Number.isNaN(d.getTime())
           ? '—'
-          : d.toLocaleString(undefined, {
+          : d.toLocaleString(locale, {
               month: 'short',
               day: 'numeric',
               hour: '2-digit',
@@ -124,7 +130,7 @@ export function EquityCurve() {
       });
     }
     return { points: pts, net: cum, peak: hi, low: lo };
-  }, [data]);
+  }, [data, locale]);
 
   // Fraction of the chart height where $0 sits, so the fill/stroke can switch
   // green (above) → red (below) exactly at the zero line — a net-negative curve
@@ -134,27 +140,26 @@ export function EquityCurve() {
   const zeroOffset = top - bottom > 0 ? top / (top - bottom) : 1;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <SectionCard>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
           <h3 className="text-base font-semibold text-foreground">
-            Equity curve
+            {t('equityTitle')}
           </h3>
           <p className="text-xs text-muted-foreground">
-            Cumulative realized PnL across {points.length} closed trades · marker
-            per fill
+            {t('equitySubtitle', { n: points.length })}
           </p>
         </div>
         <div className="flex items-center gap-4 font-mono text-sm tabular-nums">
           <span className="text-muted-foreground">
-            net{' '}
+            {t('equityNet')}{' '}
             <span className={net >= 0 ? 'text-accent' : 'text-destructive'}>
-              {net >= 0 ? '+' : '−'}${Math.abs(net).toFixed(2)}
+              {formatUsd(locale, net)}
             </span>
           </span>
           <span className="text-muted-foreground">
-            peak{' '}
-            <span className="text-foreground">+${peak.toFixed(2)}</span>
+            {t('equityPeak')}{' '}
+            <span className="text-foreground">{formatUsd(locale, peak)}</span>
           </span>
         </div>
       </div>
@@ -167,7 +172,7 @@ export function EquityCurve() {
         <div className="h-64 animate-pulse rounded-lg bg-secondary/40" />
       ) : points.length === 0 ? (
         <div className="flex h-64 items-center justify-center rounded-lg bg-secondary/40 text-sm text-muted-foreground">
-          No closed trades yet — the curve plots as fills land.
+          {t('equityEmpty')}
         </div>
       ) : (
         <div className="h-64">
@@ -213,7 +218,7 @@ export function EquityCurve() {
                 tickFormatter={v => `$${v}`}
               />
               <ReferenceLine y={0} stroke="#475569" strokeDasharray="2 4" />
-              <Tooltip content={<CurveTooltip />} />
+              <Tooltip content={<CurveTooltip t={t} locale={locale} />} />
               <Area
                 type="monotone"
                 dataKey="cum"
@@ -229,6 +234,6 @@ export function EquityCurve() {
           </ResponsiveContainer>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }

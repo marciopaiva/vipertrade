@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useLocale, useT, formatNumber, formatUsd } from '@/lib/i18n';
 import { Sparkline } from './Sparkline';
 
 interface Trade {
@@ -22,21 +23,6 @@ interface KpiStripProps {
   todayCount: number;
   /** Closed trades (any window) — the 24h slice drives the equity curve. */
   trades: Trade[];
-}
-
-function usd(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function signedUsd(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
-  return `${sign}${usd(Math.abs(value))}`;
 }
 
 function Stat({
@@ -73,6 +59,8 @@ export function KpiStrip({
   todayCount,
   trades,
 }: KpiStripProps) {
+  const t = useT('console');
+  const locale = useLocale();
   // Hold "now" in state (Date.now() is impure during render) and slide the 24h
   // window forward periodically so a long-open page stays honest.
   const [now, setNow] = useState(() => Date.now());
@@ -112,11 +100,11 @@ export function KpiStrip({
       <div className="flex items-end gap-5">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            Equity
+            {t('equity')}
           </span>
           <div className="flex items-baseline gap-2.5">
             <span className="font-mono text-3xl font-bold tabular-nums tracking-tight text-foreground">
-              {usd(equity)}
+              {typeof equity === 'number' ? `$${formatNumber(locale, equity)}` : '—'}
             </span>
             <span
               className={cn(
@@ -124,9 +112,9 @@ export function KpiStrip({
                 up ? 'text-accent' : 'text-destructive'
               )}
             >
-              {up ? '▴' : '▾'} {signedUsd(pnl24h)}
+              {up ? '▴' : '▾'} {formatUsd(locale, pnl24h ?? NaN)}
               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                24h
+                {t('delta24h')}
               </span>
             </span>
           </div>
@@ -140,14 +128,16 @@ export function KpiStrip({
 
       {/* secondary stats */}
       <div className="flex items-center gap-x-8">
-        <Stat label="Win rate">
-          {typeof winRate24h === 'number' ? `${winRate24h.toFixed(0)}%` : '—'}
+        <Stat label={t('winRate')}>
+          {typeof winRate24h === 'number'
+            ? `${formatNumber(locale, winRate24h, 0)}%`
+            : '—'}
         </Stat>
-        <Stat label="Open">{openCount}</Stat>
-        <Stat label="Today">
+        <Stat label={t('open')}>{openCount}</Stat>
+        <Stat label={t('today')}>
           {todayCount}
           <span className="ml-1 text-xs font-normal text-muted-foreground">
-            trades
+            {t('trades')}
           </span>
         </Stat>
       </div>
