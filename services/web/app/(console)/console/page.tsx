@@ -2,6 +2,7 @@
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
+import { useT } from '@/lib/i18n';
 import { PositionGauge } from '@/components/console/PositionGauge';
 import { KpiStrip } from '@/components/console/KpiStrip';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
@@ -56,6 +57,8 @@ interface DashboardData {
 type LooseSignal = any;
 
 export default function ConsolePage() {
+  const t = useT('console');
+  const tc = useT('common');
   const { data: dashboardData, loading } = useDashboard<DashboardData>(
     '/api/dashboard',
     { refreshInterval: 5000, enabled: true }
@@ -68,8 +71,8 @@ export default function ConsolePage() {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
-          <div className="mb-2 text-2xl font-bold text-primary">Loading…</div>
-          <div className="text-muted-foreground">Connecting to ViperTrade</div>
+          <div className="mb-2 text-2xl font-bold text-primary">{tc('loading')}</div>
+          <div className="text-muted-foreground">{t('connecting')}</div>
         </div>
       </div>
     );

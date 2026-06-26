@@ -98,6 +98,49 @@ const ptBR: Messages = {
     mark: 'mark',
     tpArm: 'TP-arm',
   },
+  console: {
+    connecting: 'Conectando ao ViperTrade',
+    // Faixa de KPIs
+    equity: 'Patrimônio',
+    delta24h: '24h',
+    winRate: 'Win rate',
+    open: 'Abertas',
+    today: 'Hoje',
+    trades: 'trades',
+    // Sentimento de mercado
+    sentimentTitle: 'Sentimento de Mercado',
+    fngTitle: 'Índice de Medo e Ganância',
+    indexUnavailable: 'Índice indisponível',
+    fngBlurb:
+      'O Índice de Medo e Ganância das criptos resume volatilidade, momentum, volume, redes sociais e pesquisas em uma única leitura de 0–100 da emoção do mercado.',
+    fngExtremeFear: 'Medo Extremo',
+    fngExtremeFearNote:
+      'Investidores muito temerosos — costuma ser uma zona de sobrevenda com potenciais oportunidades de compra.',
+    fngFear: 'Medo',
+    fngFearNote: 'A cautela domina o mercado — o sentimento pende para baixista.',
+    fngNeutral: 'Neutro',
+    fngNeutralNote: 'Sentimento equilibrado — sem viés direcional forte.',
+    fngGreed: 'Ganância',
+    fngGreedNote:
+      'O otimismo está crescendo — momentum altista, mas atenção ao exagero.',
+    fngExtremeGreed: 'Ganância Extrema',
+    fngExtremeGreedNote:
+      'Mercado eufórico — historicamente uma zona de risco elevado de correção.',
+    longShortRatio: 'Razão Long/Short',
+    bybitPerps: 'Perpétuos Bybit',
+    long: 'Long',
+    short: 'Short',
+    longShortUnavailable: 'Razão Long/Short indisponível',
+    // Curva de patrimônio
+    equityTitle: 'Curva de patrimônio',
+    equitySubtitle:
+      'PnL realizado acumulado em {n} trades fechados · marcador por execução',
+    equityNet: 'net',
+    equityPeak: 'pico',
+    equityEmpty: 'Nenhum trade fechado ainda — a curva é plotada conforme as execuções ocorrem.',
+    fill: 'execução',
+    equityLabel: 'patrimônio',
+  },
 };
 
 export default ptBR;
