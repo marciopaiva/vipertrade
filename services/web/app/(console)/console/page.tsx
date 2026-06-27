@@ -6,7 +6,6 @@ import { useDecisions } from '@/hooks/useDecisions';
 import { useT, useLocale, formatNumber, formatUsd } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { HudFrame } from '@/components/ui/HudFrame';
-import { RadialGauge } from '@/components/ui/RadialGauge';
 import { StatRail } from '@/components/ui/StatRail';
 import { Sparkline } from '@/components/console/Sparkline';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
@@ -160,12 +159,13 @@ export default function CommandDeckPage() {
         {t('statusLive', { n: decisions.length })}
       </div>
 
-      {/* Instrument cluster */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      {/* Instrument cluster — equity + sentiment dial. Win rate / net / open /
+          today live in the rail below, so nothing is shown twice. */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <HudFrame title={t('equity')} scan>
           <div className="flex items-end gap-4">
-            <div>
-              <div className="font-mono text-3xl font-bold tabular-nums tracking-tight text-foreground">
+            <div className="shrink-0">
+              <div className="font-mono text-4xl font-bold tabular-nums tracking-tight text-foreground">
                 {typeof equity === 'number'
                   ? `$${formatNumber(locale, equity)}`
                   : '—'}
@@ -185,25 +185,9 @@ export default function CommandDeckPage() {
             <Sparkline
               values={series}
               colorClassName={up ? 'text-accent' : 'text-destructive'}
-              className="mb-1 flex-1"
+              className="h-16 flex-1"
             />
           </div>
-        </HudFrame>
-
-        <HudFrame title={t('winRate')}>
-          <RadialGauge
-            value={typeof winRate === 'number' ? winRate : null}
-            min={0}
-            max={100}
-            label={tc('winRate')}
-            format={v => `${Math.round(v)}%`}
-            color={
-              (winRate ?? 0) >= 50
-                ? 'hsl(var(--accent))'
-                : 'hsl(var(--warn))'
-            }
-            sweep
-          />
         </HudFrame>
 
         <HudFrame title={t('sentiment')}>
@@ -211,7 +195,8 @@ export default function CommandDeckPage() {
         </HudFrame>
       </div>
 
-      {/* KPI rail */}
+      {/* KPI rail — the single source for win / open / today (net is on the
+          equity instrument above). */}
       <HudFrame>
         <StatRail
           items={[
@@ -225,11 +210,6 @@ export default function CommandDeckPage() {
             },
             { label: tc('open'), value: openPositions.length },
             { label: tc('today'), value: todayCount },
-            {
-              label: t('net24h'),
-              value: formatUsd(locale, pnl24h),
-              tone: up ? 'accent' : 'danger',
-            },
           ]}
         />
       </HudFrame>
