@@ -1,0 +1,481 @@
+# config/trading/pairs.yaml
+# ViperTrade v0.8.1 - Trading Pairs Configuration
+# Otimizado para Smart Copy Mode com Trailing Stop Dinâmico
+
+# ═══════════════════════════════════════════════════════════
+# GLOBAL SETTINGS
+# ═══════════════════════════════════════════════════════════
+
+global:
+  mode_profiles:
+    # ═══════════════════════════════════════════════════════════
+    # PAPER MODE - OTIMIZADO (2026-04-01)
+    # Mudanças: thesis invalidation menos sensível, filtros mais rigorosos
+    # ═══════════════════════════════════════════════════════════
+    PAPER: &paper_profile
+      name: "standard_guarded_v2"
+      permissive_entry: false
+      require_multi_exchange_consensus: true
+      require_btc_macro_alignment: true
+      min_volume_24h_usdt: 16000000
+      max_spread_pct: 0.0008
+      max_atr_pct: 0.035
+      max_funding_rate_pct: 0.01
+      stop_loss_pct: 0.012
+      fixed_take_profit_enabled: false
+      trailing_enabled: true
+      trailing_stop:
+        # Tuned via backtest (large corpus): activate sooner + tighter initial
+        # trail captures more of the trailing edge. net -0.3034 -> -0.2310.
+        # Lowered 0.0015 -> 0.001 in the 2026-06-24 retune (deterministic backtest,
+        # 60k window, 47 trades): activating the trail sooner migrates premature
+        # thesis cuts to trailing exits (thesis_invalidated 20 -> 14, trailing
+        # 27 -> 34, wins 25 -> 28). net Δ +0.2998 — genuine exit-structure alpha,
+        # not exposure reduction.
+        # 2026-06-26 arm-timing retune (60k window, 83 trades) — fixes post-#113
+        # whipsaw (arming at +0.1% then exiting near flat, ~37% peak-capture).
+        # Grid combo activate 0.001->0.002 + initial_trail 0.0006->0.0008 tested
+        # TOGETHER: net Δ +0.3633 (w/l 64/19 -> 67/14). Arming later skips the
+        # shallow noise band; the wider initial trail rides past first-tick jitter.
+        activate_after_profit_pct: 0.002
+        initial_trail_pct: 0.0008
+        # Ratchets must only tighten (<= initial_trail_pct) as profit grows.
+        ratchet_levels:
+          - at_profit_pct: 0.003
+            trail_pct: 0.0005
+          - at_profit_pct: 0.0045
+            trail_pct: 0.0004
+          - at_profit_pct: 0.006
+            trail_pct: 0.0003
+        move_to_break_even_at: 0.0016
+        # Min peak move (fraction) before the ratcheted peak is persisted to the DB.
+        # The persisted peak is the ONLY cross-tick memory of the trail, so this must
+        # be far below the trail geometry: the old 0.002 (0.2%) default froze the peak
+        # near activation (sub-0.2% profits never persisted), letting profit bleed back
+        # to break-even. 0.0002 (0.02%) ratchets finely; DB writes are cheap here.
+        min_move_threshold_pct: 0.0002
+      # Aumentado de 180 para 300 segundos - evita saídas prematuras
+      min_hold_seconds: 300
+      # Aumentado para filtrar entradas marginais - CORRIGIDO 2026-04-02
+      min_trend_score_long: 0.50
+      # Raised 0.45 -> 0.55 in the 2026-06-13 entry-filter retune (deterministic
+      # backtest, 60k+20k windows): part of the combo that ~4x'd net PnL and
+      # halved the stop_loss bleed.
+      min_trend_score_short: 0.55
+      # Reduzida assimetria Long/Short
+      min_signal_confirmation_ticks_long: 4
+      min_signal_confirmation_ticks_short: 5
+      # BTC Macro mais rigoroso
+      btc_macro_min_trend_score_long: 0.15
+      btc_macro_min_trend_score_short: 0.20
+      btc_macro_min_consensus_count_long: 2
+      btc_macro_min_consensus_count_short: 3
+      btc_macro_neutral_penalty: 0.05
+      min_volume_ratio_long: 0.25
+      min_volume_ratio_short: 0.25
+      rsi_long_min: 52
+      rsi_long_max: 75
+      rsi_short_min: 28
+      rsi_short_max: 48
+      # Bollinger %B entry guard: skip longs at band tops / shorts at band
+      # bottoms. Backtest (#37): net -0.3488 -> +0.0030, thesis bleed 37 -> 17.
+      max_percent_b_long: 0.85
+      # Raised 0.15 -> 0.20 in the 2026-06-13 entry-filter retune (see min_adx).
+      min_percent_b_short: 0.20
+      # ADX(14) entry gate: skip entries in chop (weak trend). Gain plateaus 18-22;
+      # >=25 over-cuts. Set to 20 in the 2026-06-13 retune on the 4x-grown corpus
+      # (60k+20k windows): min_adx alone +1.55 net; the AI auto-tuner had drifted
+      # this to 25 (over-cutting profitable trades) before the retune reverted it.
+      # Read as a DIRECT child of the mode profile by mode_f64("min_adx").
+      min_adx: 20
+      stop_loss_cooldown_minutes_long: 5
+      stop_loss_cooldown_minutes_short: 8
+      # Position-sizing DEFAULTS (single source of truth). Every token inherits
+      # these unless it sets a per-symbol risk override — so a freshly-added token
+      # (just `enabled: true`) is sized conservatively, never on the raw global cap.
+      # Read by max_position_wallet_pct / atr_multiplier / max_position_usdt as the
+      # fallback after any per-symbol value.
+      risk:
+        max_position_wallet_pct: 0.08   # cap = 8% of equity
+        atr_multiplier: 0.65            # volatility sizing dampener (applied to live ATR)
+        max_position_usdt: 18           # also bounded by smart_copy.max_position_usdt (30)
+      # Thesis health-score invalidation DISABLED (analysis 2026-06-11). The
+      # health-score exit tiers were micro-cutting winners that would have
+      # trailed to profit. Deterministic backtest (ADX-era corpus, 91 trades):
+      # pushing every tier past the [-100,100] health clamp lifts net
+      # -0.5950 -> -0.0263 (+0.57), win 47.3% -> 70.8%; thesis closes 61 -> 15
+      # (opposite_side regime-flip only), trailing 25 -> 67, stop_loss 5 -> 7.
+      # Per-trade trailing edge unchanged (+0.024) so it is migration, not luck.
+      # PARTIAL tuning backfires (tier interaction → degrading-path cascade), so
+      # this is all-or-nothing. opposite_side (consensus flip) + stop_loss +
+      # trailing remain the exit set. Read as DIRECT children of this mode
+      # profile by StrategyConfig::thesis_health(); values past ±100 never fire.
+      thesis_health:
+        long_invalidate: -200
+        long_invalidate_confirmed: -200
+        long_no_alignment: -200
+        long_degrading_hard: -200
+        long_degrading_hard_unaligned: -200
+        long_degrading_soft: -200
+        long_degrading_soft_unaligned: -200
+        short_invalidate: 200
+        short_no_alignment: 200
+        short_degrading_hard: 200
+        short_degrading_hard_unaligned: 200
+        short_degrading_soft: 200
+        short_degrading_soft_unaligned: 200
+        # Regime-flip exit: require BOTH consensus_side AND bybit_regime to flip
+        # against the position before cutting (the old "any"/OR cut on a single
+        # noisy bybit_regime blip). Backtest (ADX-era corpus, 3 windows): net
+        # Δ +0.11..+0.19, win rate up in all, stop_loss unchanged — fewer false
+        # cuts migrate to trailing without losing the protective value. "off"
+        # was worse (losers ride to stop_loss: 7 -> 16). evaluate_thesis_invalidation.
+        opposite_side_exit: both
+      entry_filters:
+        # Aumentado de 2 para 4 - requer mais confirmação antes de invalidar
+        thesis_invalidation_confirmation_ticks: 4
+        # Aumentado cooldown para evitar reentrada imediata após perda
+        thesis_invalidation_cooldown_minutes_long: 8
+        thesis_invalidation_cooldown_minutes_short: 10
+    TESTNET:
+      name: "testnet_smoke"
+      permissive_entry: true
+      require_multi_exchange_consensus: false
+      require_btc_macro_alignment: false
+      min_volume_24h_usdt: 0
+      max_spread_pct: 0.02
+      max_atr_pct: 1.0
+      max_funding_rate_pct: 1.0
+      stop_loss_pct: 0.03
+      fixed_take_profit_enabled: false
+      take_profit_pct: 0.003
+      trailing_enabled: true
+      trailing_stop:
+        activate_after_profit_pct: 0.003
+        initial_trail_pct: 0.003
+        ratchet_levels:
+          - at_profit_pct: 0.004
+            trail_pct: 0.002
+          - at_profit_pct: 0.005
+            trail_pct: 0.001
+        move_to_break_even_at: 0.004
+      min_hold_seconds: 45
+      min_trend_score_long: 0.0
+      min_trend_score_short: 0.0
+      min_signal_confirmation_ticks_long: 1
+      min_signal_confirmation_ticks_short: 1
+      min_volume_ratio_long: 0.0
+      min_volume_ratio_short: 0.0
+      rsi_long_min: 0
+      rsi_long_max: 100
+      rsi_short_min: 0
+      rsi_short_max: 100
+      stop_loss_cooldown_minutes_long: 0
+      stop_loss_cooldown_minutes_short: 0
+    # ═══════════════════════════════════════════════════════════
+    # MAINNET MODE — kept identical to PAPER via YAML anchor.
+    # Tune PAPER (&paper_profile); MAINNET inherits it. Don't duplicate keys
+    # here or the two profiles would diverge.
+    # ═══════════════════════════════════════════════════════════
+    MAINNET: *paper_profile
+
+  # Smart Copy constraints
+  smart_copy:
+    enabled: true
+    min_position_usdt: 5      # Abaixo não copia bem
+    max_position_usdt: 30     # Acima exclui followers pequenos
+  
+  # Trailing Stop Dinâmico (global defaults)
+  trailing_stop:
+    enabled: true
+  
+  # Risk limits globais — single source of truth for account-level risk (was
+  # config/system/profiles.yaml, now removed). risk_per_trade_pct drives the
+  # position-sizing risk budget (risk_budget = equity * pct).
+  risk:
+    max_daily_loss_pct: 0.03
+    max_consecutive_losses: 3
+    risk_per_trade_pct: 1.25
+    max_leverage: 2
+  
+  # Entry timing filters - OTIMIZADO (2026-04-01)
+  entry_filters:
+    min_volume_24h_usdt: 30000000  # $30M mínimo
+    max_spread_pct: 0.001  # 0.1% máximo
+    max_atr_pct: 0.05  # 5% volatilidade máxima
+    max_funding_rate_pct: 0.015  # 1.5% funding máximo
+    # Aumentado de 0.25 para filtrar melhor
+    min_trend_score: 0.35
+    # Aumentado de 2 para 4
+    min_signal_confirmation_ticks: 4
+    min_volume_ratio: 1.0
+    min_volume_ratio_long: 0.90
+    min_volume_ratio_short: 0.95
+    rsi_long_min: 50
+    rsi_long_max: 80
+    rsi_short_min: 20
+    rsi_short_max: 50
+    # BTC Macro mais rigoroso
+    btc_macro_min_trend_score_long: 0.15
+    btc_macro_min_trend_score_short: 0.20
+    btc_macro_min_consensus_count_long: 2
+    btc_macro_min_consensus_count_short: 3
+    btc_macro_neutral_penalty: 0.05
+    # Aumentado cooldown
+    stop_loss_cooldown_minutes: 5
+    stop_loss_cooldown_minutes_short: 8
+    min_signal_confirmation_ticks_short: 5
+
+# ═══════════════════════════════════════════════════════════
+# PER-SYMBOL OVERRIDES
+# Only the keys actually honored per symbol: `enabled` (the universe marker
+# read by market-data + web) and position SIZING. All signal/entry/exit tuning
+# lives in global.mode_profiles.PAPER (the single source of truth tuned via the
+# backtest) — per-symbol signal overrides were dropped (they silently shadowed
+# the global tunables). max_position_wallet_pct is read per mode; max_position_usdt
+# (capped at smart_copy.max_position_usdt) + atr_multiplier are pair-level.
+# ═══════════════════════════════════════════════════════════
+
+DOGEUSDT:  # meme coin · high vol
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 15.0
+    atr_multiplier: 0.5
+
+XRPUSDT:  # large-cap alt · PRUNED 2026-06-25 (chop, net -0.13 / 10t / 50% win)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+ADAUSDT:  # large-cap alt · PRUNED 2026-06-25 (chop, net -0.06 / 11t / 27% win)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.65
+
+XLMUSDT:  # large-cap alt · PRUNED 2026-06-25 (chop, net -0.13 / 8t / 38% win)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+SUIUSDT:  # large-cap alt · high vol
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.72
+
+LINKUSDT:  # large-cap alt
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.65
+
+NEARUSDT:  # large-cap alt · PRUNED 2026-06-25 (worst, net -0.67 / 18t / 50% win)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.66
+
+LTCUSDT:  # large-cap alt
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.07 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.07 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0024 } }
+  risk:
+    max_position_usdt: 16.0
+    atr_multiplier: 0.58
+
+# ── 2026-06-15: universe diversification (broaden-then-prune). All six verified
+# live as USDT perps on bybit ∩ binance ∩ okx. Adds majors + L1 + DeFi + PoW to
+# the previously all-large-cap-alt set, including BTC/ETH benchmarks that were
+# absent. Conservative sizing within the existing per-symbol ranges.
+# 2026-06-19: pruned (broaden-then-prune). Structural incompatibility with the
+# trend-following entry model, NOT a PnL cut. Audit (3 days, ~6.3k decisions each):
+# BTC/BNB never fired an entry (0 trades) — consensus_regime stays "neutral" because
+# the EMA20/50+slope gate rarely resolves directional on low-trend majors. ETH fired
+# only 3x (all losses): its entry score is pinned at 55 and only spikes to 95 on rare
+# full alignment, which coincides with exhausted moves. Majors don't trend cleanly
+# enough for this strategy. Replaced by 3 higher-beta mid-caps.
+BTCUSDT:  # major · benchmark (disabled 2026-06-19)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+ETHUSDT:  # major · benchmark (disabled 2026-06-19 — see BTC note above)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.12 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.12 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0041 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.6
+
+SOLUSDT:  # L1 major
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 20.0
+    atr_multiplier: 0.65
+
+BNBUSDT:  # exchange token (disabled 2026-06-19 — see BTC note above)
+  enabled: false
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.1 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.1 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0034 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.6
+
+# 2026-06-16: pruned (broaden-then-prune). Lowest liquidity of the added set
+# (~$28M, near the volume filter) AND worst early paper PnL (-0.10, 0/2 wins) —
+# two independent signals, so this is not a noise-only cut. Replaced by AVAX.
+AAVEUSDT:  # DeFi blue-chip · re-enabled 2026-06-26 to reach the 15-token clean-run universe
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.65
+
+AVAXUSDT:  # L1 (replaces AAVE)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.66
+
+BCHUSDT:  # PoW
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.6
+
+# ── 2026-06-19: high-beta substitutes for the disabled majors (BTC/ETH/BNB).
+# Chosen for HIGH realized volatility + clean directional trends — the opposite of
+# the low-trend majors whose entry signal never fired. All three are standard USDT
+# perps on bybit ∩ binance ∩ okx (cross-exchange consensus requirement — verify live
+# before relying on them). Conservative AVAX/BCH-tier sizing; atr_multiplier 0.62
+# dampens position size on their higher ATR.
+WIFUSDT:  # meme · high-beta (replaces BTC)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+TIAUSDT:  # L1 modular · trending (replaces ETH)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+INJUSDT:  # DeFi/L1 · trending (replaces BNB)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+# Added 2026-06-25 (replaces XRP/ADA/XLM/NEAR): high-beta, clean trends — the perfil
+# that fits the trend model (vs the chopping large-cap alts). Verify each receives
+# bybit ∩ binance ∩ okx snapshots after enabling (cross-exchange consensus gate).
+APTUSDT:  # L1 · high-beta (replaces NEAR)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+SEIUSDT:  # L1 · high-beta (replaces XLM)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+WLDUSDT:  # AI/narrative · high vol (replaces XRP)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62
+
+ARBUSDT:  # L2 · liquid trends (replaces ADA; PEPE dropped — bybit/binance list it as
+          # 1000PEPEUSDT, so plain PEPEUSDT got no cross-exchange consensus)
+  enabled: true
+  mode_profiles:
+    PAPER:   { risk: { max_position_wallet_pct: 0.08 } }
+    MAINNET: { risk: { max_position_wallet_pct: 0.08 } }
+    TESTNET: { risk: { max_position_wallet_pct: 0.0027 } }
+  risk:
+    max_position_usdt: 18.0
+    atr_multiplier: 0.62

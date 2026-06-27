@@ -17,9 +17,13 @@ const nextConfig = {
     NEXT_PUBLIC_TRADING_MODE: process.env.NEXT_PUBLIC_TRADING_MODE || 'paper',
   },
 
-  // Back-compat: the dashboard was reframed as the operator Console.
+  // Back-compat: the dashboard was reframed as the operator Console; Strategy was
+  // folded into the Command Deck (its decision matrix lives on /console now).
   async redirects() {
-    return [{ source: '/dashboard', destination: '/console', permanent: false }];
+    return [
+      { source: '/dashboard', destination: '/console', permanent: false },
+      { source: '/strategy', destination: '/console', permanent: false },
+    ];
   },
 
   // Rewrites for API backend

@@ -3,11 +3,21 @@ import type { Messages } from './en';
 // Portuguese (Brazil) catalog. Must match the shape of en.ts (the type source).
 const ptBR: Messages = {
   nav: {
-    console: 'Console',
+    console: 'Command Deck',
     strategy: 'Estratégia',
     trades: 'Trades',
     analysis: 'Análise',
     system: 'Sistema',
+  },
+  deck: {
+    statusLive: 'AO VIVO · {n} ativos',
+    equity: 'Patrimônio',
+    sentiment: 'Sentimento',
+    winRate: 'Win rate · 24h',
+    net24h: 'net 24h',
+    decisionMatrix: 'Matriz de decisão',
+    liveFeed: 'Feed ao vivo',
+    feedEmpty: 'Nenhuma execução ainda — o feed atualiza conforme os trades fecham.',
   },
   common: {
     language: 'Idioma',

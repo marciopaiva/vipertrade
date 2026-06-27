@@ -11,9 +11,10 @@ import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 
 // Only real destinations live in the nav; labels come from the i18n `nav` namespace.
+// Strategy folded into the Command Deck (its decision matrix lives there now),
+// so it's no longer a top-level destination.
 const NAV = [
   { href: '/console', key: 'console' },
-  { href: '/strategy', key: 'strategy' },
   { href: '/trades', key: 'trades' },
   { href: '/analysis', key: 'analysis' },
   { href: '/system', key: 'system' },
