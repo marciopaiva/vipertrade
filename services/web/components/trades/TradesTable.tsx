@@ -113,7 +113,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   if (trades.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card px-3 py-12 text-center text-sm text-muted-foreground">
+      <div className="hud-frame rounded-md border border-border bg-card px-3 py-12 text-center text-sm text-muted-foreground">
         {t('emptyFiltered')}
       </div>
     );
@@ -121,7 +121,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="hud-frame overflow-hidden rounded-md border border-border bg-card">
         {/* header */}
         <div className="hidden gap-4 border-b border-border px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-muted-foreground lg:flex">
           {COLUMNS.map(col => (

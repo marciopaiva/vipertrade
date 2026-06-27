@@ -1,10 +1,10 @@
-import { cn } from '@/lib/utils';
+import { HudFrame } from './HudFrame';
 
 /**
- * A console section card. Extracted from the repeated `rounded-xl border-border
- * bg-card p-5` panel + its `text-[10px] uppercase tracking-[0.2em]` header used all
- * over the analysis/console screens, so sections share one rhythm. Pass `title`
- * for the standard header (with optional `right` slot), or omit it for a bare card.
+ * A console section panel. Now a thin wrapper over {@link HudFrame} so every
+ * screen that used SectionCard inherits the HUD / Mission Control chrome (corner
+ * brackets, gradient top rail, display-font header) in one place. Kept as a
+ * named export so existing call sites (analysis tabs, EquityCurve) don't change.
  */
 export function SectionCard({
   title,
@@ -20,20 +20,8 @@ export function SectionCard({
   tone?: 'default' | 'accent';
 }) {
   return (
-    <section
-      className={cn(
-        'rounded-xl border bg-card p-5',
-        tone === 'accent' ? 'border-accent/30 bg-accent/5' : 'border-border',
-        className
-      )}
-    >
-      {title && (
-        <div className="mb-3 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          <span>{title}</span>
-          {right && <span className="normal-case tracking-normal">{right}</span>}
-        </div>
-      )}
+    <HudFrame title={title} right={right} tone={tone} className={className}>
       {children}
-    </section>
+    </HudFrame>
   );
 }
