@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HudFrame } from '@/components/ui/HudFrame';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useLocale, useT, formatPrice, formatPct, formatUsd, formatNumber } from '@/lib/i18n';
@@ -348,46 +348,32 @@ export function PositionGauge({
   const t = useT('positions');
   if (positions.length === 0) {
     return (
-      <Card
-        className={cn('border-0 bg-transparent shadow-none [&>*]:px-0', className)}
-      >
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-foreground">{t('title')}</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="py-8 text-center">
-            <p className="font-medium text-foreground/80">
-              {guardedSetups && guardedSetups > 0
-                ? t('flatGuards', { n: guardedSetups })
-                : t('flatNoPos')}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">{t('flatNote')}</p>
-          </div>
-        </CardContent>
-      </Card>
+      <HudFrame title={t('title')} className={className}>
+        <div className="py-8 text-center">
+          <p className="font-medium text-foreground/80">
+            {guardedSetups && guardedSetups > 0
+              ? t('flatGuards', { n: guardedSetups })
+              : t('flatNoPos')}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('flatNote')}</p>
+        </div>
+      </HudFrame>
     );
   }
 
   const marketBySymbol = new Map(marketSignals.map(s => [s.symbol, s]));
 
   return (
-    <Card className={cn('border-border bg-card', className)}>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-lg text-foreground">
-          {t('titleCount', { n: positions.length })}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="flex flex-col gap-2">
-          {positions.map(p => (
-            <PositionRow
-              key={p.trade_id}
-              p={p}
-              signal={marketBySymbol.get(p.symbol)}
-            />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <HudFrame title={t('titleCount', { n: positions.length })} className={className}>
+      <div className="flex flex-col gap-2">
+        {positions.map(p => (
+          <PositionRow
+            key={p.trade_id}
+            p={p}
+            signal={marketBySymbol.get(p.symbol)}
+          />
+        ))}
+      </div>
+    </HudFrame>
   );
 }
