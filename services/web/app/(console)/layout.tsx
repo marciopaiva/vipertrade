@@ -14,7 +14,7 @@ export default function ConsoleLayout({
 }) {
   // Auth (when enabled) is enforced by middleware before we get here.
   return (
-    <div className="min-h-screen bg-background">
+    <div className="hud-grid min-h-screen bg-background">
       <AppHeader />
       <main className="container mx-auto px-4 py-6">{children}</main>
       <CommandPalette />
