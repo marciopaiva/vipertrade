@@ -38,6 +38,11 @@
      `--bg/--panel/--accent-*` set was unused and a duplicate `--muted`
      shadowed the one above, so they were removed. */
   --warn: 44 100% 48%;
+
+  /* HUD line color (Mission Control theme) — a desaturated cyan-slate used for
+     the faint instrument grid behind the console. Consumed with an alpha:
+     `hsl(var(--hud-line) / 0.06)`. */
+  --hud-line: 200 60% 60%;
 }
 
 @layer base {
@@ -154,4 +159,93 @@
     opacity: 0.15;
     transform: scale(0.92);
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   HUD / Mission Control theme layer
+   Instrument-cabin chrome built on the existing tokens. Corner brackets live
+   in <HudFrame>; here are the base panel, the ambient grid, the scanline, and
+   the state-glow text utilities. All animation honors the reduce-motion block
+   above (which zeroes animation-duration globally).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Notched instrument panel: a thin top rail (gradient, like the ServiceFlow
+   rail) sits across the frame; the four corner brackets are drawn by the
+   <HudFrame> React component so all four corners render. */
+.hud-frame {
+  position: relative;
+}
+.hud-frame::before {
+  content: '';
+  position: absolute;
+  left: 1.25rem;
+  right: 1.25rem;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--primary) / 0.5),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Faint instrument grid for the console backdrop — layered over the body glow. */
+.hud-grid {
+  background-image:
+    linear-gradient(hsl(var(--hud-line) / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--hud-line) / 0.06) 1px, transparent 1px);
+  background-size: 44px 44px;
+  background-position: center top;
+}
+
+/* Slow scanline sweep — opt-in per panel via `.hud-scan` (kept off the whole
+   screen so it stays subtle). Killed by prefers-reduced-motion. */
+.hud-scan {
+  position: relative;
+  overflow: hidden;
+}
+.hud-scan::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 35%;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    hsl(var(--primary) / 0.045),
+    transparent
+  );
+  animation: hudScan 6.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes hudScan {
+  0% {
+    transform: translateY(-60%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(280%);
+    opacity: 0;
+  }
+}
+
+/* State glow — text-shadow only, so the text's own contrast is unchanged. */
+.hud-glow {
+  text-shadow: 0 0 10px hsl(var(--primary) / 0.55);
+}
+.hud-glow-accent {
+  text-shadow: 0 0 10px hsl(var(--accent) / 0.55);
+}
+.hud-glow-danger {
+  text-shadow: 0 0 10px hsl(var(--destructive) / 0.55);
 }
