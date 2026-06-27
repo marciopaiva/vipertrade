@@ -2,7 +2,6 @@
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { useT } from '@/lib/i18n';
-import { Card } from '@/components/ui/card';
 
 type T = ReturnType<typeof useT<'console'>>;
 
@@ -166,11 +165,7 @@ export function MarketSentiment() {
   const z = fg ? zone(fg.value, t) : null;
 
   return (
-    <Card className="p-4">
-      <h3 className="mb-3 text-sm font-semibold tracking-tight">
-        {t('sentimentTitle')}
-      </h3>
-
+    <>
       {loading && !data ? (
         <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
           {tc('loading')}
@@ -210,6 +205,6 @@ export function MarketSentiment() {
           </div>
         </div>
       )}
-    </Card>
+    </>
   );
 }

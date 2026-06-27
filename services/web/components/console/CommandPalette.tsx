@@ -30,7 +30,6 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(
     () => [
       { id: 'console', label: t('goConsole'), hint: 'g c', run: () => router.push('/console') },
-      { id: 'strategy', label: t('goStrategy'), hint: 'g s', run: () => router.push('/strategy') },
       { id: 'trades', label: t('goTrades'), hint: 'g t', run: () => router.push('/trades') },
       { id: 'analysis', label: t('goAnalysis'), hint: 'g a', run: () => router.push('/analysis') },
       { id: 'system', label: t('goSystem'), hint: 'g y', run: () => router.push('/system') },
@@ -56,7 +55,6 @@ export function CommandPalette() {
   useEffect(() => {
     const GOTO: Record<string, string> = {
       c: '/console',
-      s: '/strategy',
       t: '/trades',
       a: '/analysis',
       y: '/system',

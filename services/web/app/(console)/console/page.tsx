@@ -1,12 +1,19 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
-import { useT } from '@/lib/i18n';
-import { PositionGauge } from '@/components/console/PositionGauge';
-import { KpiStrip } from '@/components/console/KpiStrip';
+import { useT, useLocale, formatNumber, formatUsd } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+import { HudFrame } from '@/components/ui/HudFrame';
+import { RadialGauge } from '@/components/ui/RadialGauge';
+import { StatRail } from '@/components/ui/StatRail';
+import { Sparkline } from '@/components/console/Sparkline';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
+import { PositionGauge } from '@/components/console/PositionGauge';
+import { LiveFeed } from '@/components/console/LiveFeed';
 import { EquityCurve } from '@/components/analysis/EquityCurve';
+import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
 interface PositionItem {
   trade_id: string;
@@ -27,18 +34,10 @@ interface PositionItem {
 
 interface TradeItem {
   trade_id: string;
-  symbol: string;
-  side: string;
   status: string;
-  quantity: number;
-  entry_price: number;
-  exit_price?: number;
   pnl?: number;
-  pnl_pct?: number;
-  close_reason?: string;
   opened_at: string;
   closed_at?: string;
-  duration_seconds?: number;
 }
 
 interface DashboardData {
@@ -49,37 +48,76 @@ interface DashboardData {
   trades?: { items: TradeItem[] };
   daily_trades_summary?: { count?: number };
   wallet?: { total_equity?: number };
-  // Loosely typed: PositionGauge narrows these to its own MarketSignal shape.
   market_signals?: { items?: unknown[] | Record<string, unknown> };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseSignal = any;
 
-export default function ConsolePage() {
-  const t = useT('console');
-  const tc = useT('common');
+export default function CommandDeckPage() {
+  const t = useT('deck');
+  const tc = useT('console');
+  const tcm = useT('common');
+  const ts = useT('strategy');
+  const locale = useLocale();
+
   const { data: dashboardData, loading } = useDashboard<DashboardData>(
     '/api/dashboard',
     { refreshInterval: 5000, enabled: true }
   );
-  // Live decisions power the PositionGauge's "guards holding N setups" empty
-  // state — the same %B gate the /strategy screen surfaces.
-  const { decisions } = useDecisions();
+  const { decisions, live } = useDecisions();
+
+  // Slide a 24h window forward so the equity sparkline stays honest on a
+  // long-open page (Date.now() is impure during render).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const closedTrades = useMemo(
+    () => dashboardData?.trades?.items ?? [],
+    [dashboardData]
+  );
+
+  // Cumulative realized PnL over the last 24h of closed trades — the equity
+  // sparkline (no equity time-series exists in the API).
+  const series = useMemo(() => {
+    const since = now - 24 * 60 * 60 * 1000;
+    const closed = closedTrades
+      .filter(tr => {
+        if (tr.status !== 'closed') return false;
+        const ts2 = Date.parse(tr.closed_at || tr.opened_at);
+        return Number.isFinite(ts2) && ts2 >= since;
+      })
+      .sort(
+        (a, b) =>
+          Date.parse(a.closed_at || a.opened_at) -
+          Date.parse(b.closed_at || b.opened_at)
+      );
+    let running = 0;
+    const points = [0];
+    for (const tr of closed) {
+      running += tr.pnl ?? 0;
+      points.push(running);
+    }
+    return points;
+  }, [closedTrades, now]);
 
   if (loading && !dashboardData) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
-          <div className="mb-2 text-2xl font-bold text-primary">{tc('loading')}</div>
-          <div className="text-muted-foreground">{t('connecting')}</div>
+          <div className="mb-2 text-2xl font-bold text-primary hud-glow">
+            {tcm('loading')}
+          </div>
+          <div className="text-muted-foreground">{tc('connecting')}</div>
         </div>
       </div>
     );
   }
 
   const openPositions = dashboardData?.positions?.items ?? [];
-  const closedTrades = dashboardData?.trades?.items ?? [];
   const guardedSetups = decisions.filter(d => {
     const pb = d.consensus_bollinger_percent_b;
     return typeof pb === 'number' && (pb > 0.85 || pb < 0.15);
@@ -92,31 +130,155 @@ export default function ConsolePage() {
     ? (Object.values(dashboardData.market_signals.items) as LooseSignal[])
     : [];
 
+  const equity = dashboardData?.wallet?.total_equity;
+  const pnl24h = dashboardData?.performance?.last_24h?.total_pnl ?? 0;
+  const winRate = dashboardData?.performance?.last_24h?.win_rate;
+  const up = pnl24h >= 0;
+
+  // Entering symbols float to the top (the actionable ones), then alphabetical.
+  const ordered = [...decisions].sort((a, b) => {
+    const ae = a.action.startsWith('ENTER') ? 0 : 1;
+    const be = b.action.startsWith('ENTER') ? 0 : 1;
+    return ae - be || a.symbol.localeCompare(b.symbol);
+  });
+
   return (
-    <main className="container mx-auto space-y-4 px-4 py-4">
-      {/* At-a-glance KPI strip — the single top-line source of truth. */}
-      <KpiStrip
-        equity={dashboardData?.wallet?.total_equity}
-        pnl24h={dashboardData?.performance?.last_24h?.total_pnl}
-        winRate24h={dashboardData?.performance?.last_24h?.win_rate}
-        openCount={openPositions.length}
-        todayCount={todayCount}
-        trades={closedTrades}
-      />
+    <div className="space-y-4">
+      {/* Status bar */}
+      <div className="flex items-center gap-2 font-display text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+        <span className="relative flex h-2 w-2">
+          {live && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+          )}
+          <span
+            className={cn(
+              'relative inline-flex h-2 w-2 rounded-full',
+              live ? 'bg-accent' : 'bg-muted-foreground'
+            )}
+          />
+        </span>
+        {t('statusLive', { n: decisions.length })}
+      </div>
 
-      {/* Equity curve — cumulative realized PnL, right under the KPI strip. */}
-      <EquityCurve />
+      {/* Instrument cluster */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <HudFrame title={t('equity')} scan>
+          <div className="flex items-end gap-4">
+            <div>
+              <div className="font-mono text-3xl font-bold tabular-nums tracking-tight text-foreground">
+                {typeof equity === 'number'
+                  ? `$${formatNumber(locale, equity)}`
+                  : '—'}
+              </div>
+              <div
+                className={cn(
+                  'mt-1 font-mono text-sm font-semibold tabular-nums',
+                  up ? 'text-accent hud-glow-accent' : 'text-destructive hud-glow-danger'
+                )}
+              >
+                {up ? '▴' : '▾'} {formatUsd(locale, pnl24h)}{' '}
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  24h
+                </span>
+              </div>
+            </div>
+            <Sparkline
+              values={series}
+              colorClassName={up ? 'text-accent' : 'text-destructive'}
+              className="mb-1 flex-1"
+            />
+          </div>
+        </HudFrame>
 
-      {/* Market sentiment — full-width band: gauge on the left, Fear & Greed
-          explanation + Long/Short ratio on the right. */}
-      <MarketSentiment />
+        <HudFrame title={t('winRate')}>
+          <RadialGauge
+            value={typeof winRate === 'number' ? winRate : null}
+            min={0}
+            max={100}
+            label={tc('winRate')}
+            format={v => `${Math.round(v)}%`}
+            color={
+              (winRate ?? 0) >= 50
+                ? 'hsl(var(--accent))'
+                : 'hsl(var(--warn))'
+            }
+            sweep
+          />
+        </HudFrame>
 
-      {/* Open positions — horizontal risk-rail rows, one per token (full width). */}
+        <HudFrame title={t('sentiment')}>
+          <MarketSentiment />
+        </HudFrame>
+      </div>
+
+      {/* KPI rail */}
+      <HudFrame>
+        <StatRail
+          items={[
+            {
+              label: tc('winRate'),
+              value:
+                typeof winRate === 'number'
+                  ? `${formatNumber(locale, winRate, 0)}%`
+                  : '—',
+              tone: (winRate ?? 0) >= 50 ? 'accent' : 'warn',
+            },
+            { label: tc('open'), value: openPositions.length },
+            { label: tc('today'), value: todayCount },
+            {
+              label: t('net24h'),
+              value: formatUsd(locale, pnl24h),
+              tone: up ? 'accent' : 'danger',
+            },
+          ]}
+        />
+      </HudFrame>
+
+      {/* Equity curve + live feed */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <EquityCurve />
+        </div>
+        <HudFrame title={t('liveFeed')} scan>
+          <LiveFeed />
+        </HudFrame>
+      </div>
+
+      {/* Open positions — risk rail (self-framed) */}
       <PositionGauge
         positions={openPositions}
         guardedSetups={guardedSetups}
         marketSignals={marketSignals}
       />
-    </main>
+
+      {/* Decision matrix (folded from /strategy) */}
+      <HudFrame title={t('decisionMatrix')}>
+        {decisions.length === 0 ? (
+          <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+            {ts('empty')}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <div
+              className={cn(
+                ROW_GRID,
+                'border-b border-border px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground'
+              )}
+            >
+              <span>{ts('colSymbol')}</span>
+              <span>{ts('colState')}</span>
+              <span>{ts('colConsensus')}</span>
+              <span>{ts('colRsi')}</span>
+              <span>{ts('colPb')}</span>
+              <span>{ts('colAdx')}</span>
+              <span>{ts('colWhy')}</span>
+            </div>
+            {ordered.map(d => (
+              <DecisionRow key={d.symbol} d={d} />
+            ))}
+          </div>
+        )}
+      </HudFrame>
+    </div>
   );
 }

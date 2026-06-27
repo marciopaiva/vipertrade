@@ -3,11 +3,21 @@
 // interpolated by useT(). Keep keys stable; add a namespace as a screen is migrated.
 const en = {
   nav: {
-    console: 'Console',
+    console: 'Command Deck',
     strategy: 'Strategy',
     trades: 'Trades',
     analysis: 'Analysis',
     system: 'System',
+  },
+  deck: {
+    statusLive: 'LIVE · {n} assets',
+    equity: 'Equity',
+    sentiment: 'Sentiment',
+    winRate: 'Win rate · 24h',
+    net24h: 'net 24h',
+    decisionMatrix: 'Decision matrix',
+    liveFeed: 'Live feed',
+    feedEmpty: 'No fills yet — the feed updates as trades close.',
   },
   common: {
     language: 'Language',
