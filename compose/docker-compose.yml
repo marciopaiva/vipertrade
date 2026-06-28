@@ -351,10 +351,13 @@ services:
     - viper
   web:
     build:
-      context: ../services/web
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/web/Dockerfile
       args:
         NODE_VERSION: '20'
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+        NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
+        NEXT_PUBLIC_TRADING_MODE: paper
     container_name: vipertrade-web
     ports:
     - 3000:3000

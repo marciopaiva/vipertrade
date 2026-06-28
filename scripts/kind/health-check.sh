@@ -80,7 +80,7 @@ check_services_exist() {
 
 check_postgres_ready() {
   print_step "PostgreSQL ready"
-  kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec deployment/postgres -- pg_isready -U viper -d vipertrade >/dev/null 2>&1 && print_ok "PostgreSQL accepting connections" || print_fail "PostgreSQL not ready"
+  kubectl --context "$KIND_CONTEXT" -n "$KIND_NAMESPACE" exec deployment/postgres -- pg_isready -U viper -d vipertrade -h 127.0.0.1 >/dev/null 2>&1 && print_ok "PostgreSQL accepting connections" || print_fail "PostgreSQL not ready"
 }
 
 check_redis_ready() {

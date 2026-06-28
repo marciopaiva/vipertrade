@@ -1,83 +1,35 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getWebSocketClient, type ConnectionStatus } from '@/lib/websocket/client';
 
-export type LiveStatus = 'connecting' | 'live' | 'stale' | 'down';
-
-/** Same /ws endpoint the cockpit uses: api on host :8443 (kind maps 8443 -> api).
- *  Derived from the current host. Override with NEXT_PUBLIC_WS_URL. */
-function wsUrl(): string {
-  const override = process.env.NEXT_PUBLIC_WS_URL;
-  if (override && !override.includes(':8080')) return override;
-  if (typeof window === 'undefined') return '';
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.hostname}:8443/ws`;
-}
-
-// A live connection that hasn't pushed anything for this long is "stale".
-const STALE_AFTER_MS = 20_000;
+export type LiveStatus = ConnectionStatus;
 
 /**
- * Lightweight global liveness for the header pill: tracks the WebSocket
- * connection and how fresh the last push was. Opens one dedicated socket and
- * only reads message arrival times (no payload processing).
+ * Lightweight global liveness for the header pill: delegates to the shared
+ * WebSocket singleton so there is only one connection in the whole app.
  */
 export function useConnectionStatus(): {
   status: LiveStatus;
   lastMessageAt: number | null;
 } {
-  const [connected, setConnected] = useState(false);
-  const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const wsRef = useRef<WebSocket | null>(null);
+  const ws = getWebSocketClient();
+  const [status, setStatus] = useState<ConnectionStatus>(ws.status);
+  const [lastMessageAt, setLastMessageAt] = useState<number | null>(
+    ws.lastMessageTimestamp > 0 ? ws.lastMessageTimestamp : null
+  );
 
-  // Connect (with reconnect), mirroring the cockpit's WS lifecycle.
   useEffect(() => {
-    const url = wsUrl();
-    if (!url) return;
-    let active = true;
-    let reconnect: ReturnType<typeof setTimeout> | null = null;
-
-    const connect = () => {
-      if (!active) return;
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-        ws.onopen = () => active && setConnected(true);
-        ws.onmessage = () => active && setLastMessageAt(Date.now());
-        ws.onclose = () => {
-          if (!active) return;
-          setConnected(false);
-          reconnect = setTimeout(connect, 5000);
-        };
-        ws.onerror = () => ws.close();
-      } catch {
-        reconnect = setTimeout(connect, 5000);
-      }
-    };
-    connect();
-
+    const unsubStatus = ws.onStatusChange(setStatus);
+    const unsubMessage = ws.on('message', () => setLastMessageAt(Date.now()));
+    ws.connect();
     return () => {
-      active = false;
-      if (reconnect) clearTimeout(reconnect);
-      wsRef.current?.close();
+      unsubStatus();
+      unsubMessage();
     };
+    // ws is the module-level singleton — stable reference, safe to exclude.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Tick so "stale" is detected even when no messages arrive.
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  let status: LiveStatus = 'connecting';
-  if (!connected) {
-    status = lastMessageAt === null ? 'connecting' : 'down';
-  } else if (lastMessageAt !== null && now - lastMessageAt > STALE_AFTER_MS) {
-    status = 'stale';
-  } else {
-    status = 'live';
-  }
 
   return { status, lastMessageAt };
 }

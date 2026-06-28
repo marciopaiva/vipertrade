@@ -1,19 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchApi, endpoints } from '@/lib/api/endpoints';
+import { getWebSocketClient } from '@/lib/websocket/client';
 import type { DecisionItem } from '@/types/trading';
-
-/** WS stream URL: the api exposes /ws on host :8443 (kind maps 8443 -> api).
- *  Derived from the current host so it works wherever the dashboard is served.
- *  Override with NEXT_PUBLIC_WS_URL. */
-function wsUrl(): string {
-  const override = process.env.NEXT_PUBLIC_WS_URL;
-  if (override && !override.includes(':8080')) return override;
-  if (typeof window === 'undefined') return '';
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.hostname}:8443/ws`;
-}
 
 function num(v: unknown): number | null | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -31,7 +21,6 @@ export function useDecisions() {
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -59,30 +48,13 @@ export function useDecisions() {
     void load();
   }, [load]);
 
-  // Fallback poll: ONLY while the WebSocket is down — once it's live, updates
-  // are 100% push (no periodic refresh).
+  // WebSocket push via the shared singleton.
   useEffect(() => {
-    if (live) return;
-    const id = setInterval(() => void load(), 15000);
-    return () => clearInterval(id);
-  }, [live, load]);
+    const ws = getWebSocketClient();
 
-  // WebSocket push.
-  useEffect(() => {
-    const url = wsUrl();
-    if (!url) return;
-    let active = true;
-    let reconnect: ReturnType<typeof setTimeout> | null = null;
-
-    const apply = (raw: string) => {
-      let msg: any;
-      try {
-        msg = JSON.parse(raw);
-      } catch {
-        return;
-      }
+    const apply = (raw: any) => {
       // market_data event => refresh consensus indicators
-      const sig = msg?.signal;
+      const sig = raw?.signal;
       if (sig?.symbol) {
         setBySymbol((prev) => {
           const cur = prev[sig.symbol] ?? {
@@ -123,8 +95,8 @@ export function useDecisions() {
         return;
       }
       // decision event => refresh action
-      const action = msg?.decision?.action ?? msg?.action;
-      const symbol = msg?.symbol ?? msg?.decision?.symbol;
+      const action = raw?.decision?.action ?? raw?.action;
+      const symbol = raw?.symbol ?? raw?.decision?.symbol;
       if (action && symbol) {
         setBySymbol((prev) =>
           prev[symbol]
@@ -135,31 +107,22 @@ export function useDecisions() {
       }
     };
 
-    const connect = () => {
-      if (!active) return;
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-        ws.onopen = () => active && setLive(true);
-        ws.onmessage = (e) => apply(e.data as string);
-        ws.onclose = () => {
-          if (!active) return;
-          setLive(false);
-          reconnect = setTimeout(connect, 5000);
-        };
-        ws.onerror = () => ws.close();
-      } catch {
-        reconnect = setTimeout(connect, 5000);
-      }
-    };
-    connect();
+    const unsubStatus = ws.onStatusChange((s) => setLive(s === 'live'));
+    const unsubMessage = ws.on('message', (data: any) => apply(data));
+    ws.connect();
 
     return () => {
-      active = false;
-      if (reconnect) clearTimeout(reconnect);
-      wsRef.current?.close();
+      unsubMessage();
+      unsubStatus();
     };
   }, []);
+
+  // Fallback poll: ONLY while the WebSocket is down.
+  useEffect(() => {
+    if (live) return;
+    const id = setInterval(() => void load(), 15000);
+    return () => clearInterval(id);
+  }, [live, load]);
 
   // Stable alphabetical order by symbol so live WS updates don't reshuffle cards.
   const decisions = Object.values(bySymbol).sort((a, b) =>
