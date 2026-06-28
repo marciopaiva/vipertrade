@@ -6,6 +6,11 @@ pub mod config;
 
 pub const SCHEMA_VERSION: &str = "1.0";
 
+pub const REDIS_CHANNEL_MARKET_DATA: &str = "viper:market_data";
+pub const REDIS_CHANNEL_DECISIONS: &str = "viper:decisions";
+pub const REDIS_CHANNEL_EXECUTOR_EVENTS: &str = "viper:executor_events";
+pub const REDIS_CHANNEL_RECONCILIATION: &str = "viper:reconciliation";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarketSignal {
     pub symbol: String,

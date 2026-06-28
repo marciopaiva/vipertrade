@@ -2468,12 +2468,18 @@ async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
         let result: redis::RedisResult<()> = async {
             let client = redis::Client::open(url.as_str())?;
             let mut pubsub = client.get_async_pubsub().await?;
-            pubsub.subscribe("viper:market_data").await?;
-            pubsub.subscribe("viper:decisions").await?;
-            tracing::info!("WS bridge subscribed to Redis market/decision channels");
+            pubsub.subscribe(viper_domain::REDIS_CHANNEL_MARKET_DATA).await?;
+            pubsub.subscribe(viper_domain::REDIS_CHANNEL_DECISIONS).await?;
+            tracing::info!(
+                market_channel = %viper_domain::REDIS_CHANNEL_MARKET_DATA,
+                decisions_channel = %viper_domain::REDIS_CHANNEL_DECISIONS,
+                "WS bridge subscribed to Redis market/decision channels"
+            );
             let mut stream = pubsub.on_message();
             while let Some(msg) = stream.next().await {
+                let channel = msg.get_channel_name().to_string();
                 if let Ok(payload) = msg.get_payload::<String>() {
+                    tracing::trace!(channel = %channel, payload_len = %payload.len(), "WS bridge forwarding Redis message");
                     let _ = tx.send(payload);
                 }
             }

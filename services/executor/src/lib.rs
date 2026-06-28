@@ -2423,7 +2423,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let mut ack_conn = redis_client.get_multiplexed_async_connection().await?;
     #[allow(deprecated)]
     let mut pubsub = redis_client.get_async_connection().await?.into_pubsub();
-    pubsub.subscribe("viper:decisions").await?;
+    pubsub.subscribe(viper_domain::REDIS_CHANNEL_DECISIONS).await?;
     tracing::info!("Subscribed to viper:decisions");
 
     let mut messages = pubsub.on_message();
@@ -2447,7 +2447,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         tracing::warn!(event_id = %event.event_id, error = %e, "Executor failed handling event");
                     }
 
-                    let _ = ack_conn.publish::<_, _, ()>("viper:executor_events", payload).await;
+                    let _ = ack_conn.publish::<_, _, ()>(viper_domain::REDIS_CHANNEL_EXECUTOR_EVENTS, payload).await;
                     continue;
                 }
 

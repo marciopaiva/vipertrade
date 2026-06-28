@@ -3271,7 +3271,7 @@ async fn publish_decision_event(
 
     let decision_json = serde_json::to_string(&decision_event)?;
     publish_conn
-        .publish::<_, _, ()>("viper:decisions", decision_json)
+        .publish::<_, _, ()>(viper_domain::REDIS_CHANNEL_DECISIONS, decision_json)
         .await?;
 
     info!(
@@ -4921,7 +4921,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     #[allow(deprecated)]
     let mut pubsub = client.get_async_connection().await?.into_pubsub();
 
-    pubsub.subscribe("viper:market_data").await?;
+    pubsub.subscribe(viper_domain::REDIS_CHANNEL_MARKET_DATA).await?;
     info!("Subscribed to viper:market_data");
 
     let mut publish_conn = client.get_multiplexed_async_connection().await?;

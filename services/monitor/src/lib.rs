@@ -388,7 +388,7 @@ async fn publish_recon_event(redis_url: &str, result: &ReconResult) {
     };
 
     let publish_result: Result<(), redis::RedisError> = conn
-        .publish("viper:reconciliation", payload.to_string())
+        .publish(viper_domain::REDIS_CHANNEL_RECONCILIATION, payload.to_string())
         .await;
 
     if let Err(err) = publish_result {
