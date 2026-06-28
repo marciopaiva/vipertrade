@@ -12,9 +12,10 @@ use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::types::Json;
 use sqlx::PgPool;
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::watch;
+use tokio::sync::{watch, RwLock};
 use viper_domain::config::*;
 use warp::http::StatusCode;
 use warp::reply::Json as WarpJson;
@@ -2444,11 +2445,20 @@ async fn shutdown_signal() {
 // Bridges Redis pub/sub (viper:market_data, viper:decisions) to connected
 // browsers so the dashboard updates by push instead of polling.
 
+type DlqStore = Arc<RwLock<VecDeque<String>>>;
+const DLQ_CAPACITY: usize = 2000;
+
 fn with_broadcast(
     tx: tokio::sync::broadcast::Sender<String>,
 ) -> impl Filter<Extract = (tokio::sync::broadcast::Sender<String>,), Error = std::convert::Infallible>
        + Clone {
     warp::any().map(move || tx.clone())
+}
+
+fn with_dlq(
+    dlq: DlqStore,
+) -> impl Filter<Extract = (DlqStore,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || dlq.clone())
 }
 
 fn resolve_redis_url() -> String {
@@ -2461,7 +2471,12 @@ fn resolve_redis_url() -> String {
 
 /// Subscribe to the strategy/market Redis channels and fan out every message to
 /// the broadcast channel (consumed by each WS client). Reconnects on error.
-async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
+/// Also keeps a sliding window of recent messages in the in-memory DLQ so
+/// clients that briefly lag can recover without missing events.
+async fn redis_stream_subscriber(
+    tx: tokio::sync::broadcast::Sender<String>,
+    dlq: DlqStore,
+) {
     use futures_util::StreamExt;
     let url = resolve_redis_url();
     loop {
@@ -2480,6 +2495,13 @@ async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
                 let channel = msg.get_channel_name().to_string();
                 if let Ok(payload) = msg.get_payload::<String>() {
                     tracing::trace!(channel = %channel, payload_len = %payload.len(), "WS bridge forwarding Redis message");
+                    {
+                        let mut deque = dlq.write().await;
+                        if deque.len() >= DLQ_CAPACITY {
+                            deque.pop_front();
+                        }
+                        deque.push_back(payload.clone());
+                    }
                     let _ = tx.send(payload);
                 }
             }
@@ -2493,7 +2515,11 @@ async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>) {
     }
 }
 
-async fn ws_client(ws: warp::ws::WebSocket, tx: tokio::sync::broadcast::Sender<String>) {
+async fn ws_client(
+    ws: warp::ws::WebSocket,
+    tx: tokio::sync::broadcast::Sender<String>,
+    dlq: DlqStore,
+) {
     use futures_util::{SinkExt, StreamExt};
     let (mut ws_tx, mut ws_rx) = ws.split();
     let mut rx = tx.subscribe();
@@ -2514,7 +2540,18 @@ async fn ws_client(ws: warp::ws::WebSocket, tx: tokio::sync::broadcast::Sender<S
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(missed = n, "WS client lagged, skipping");
+                            let n_capped = (n as usize).min(100);
+                            let recovered = {
+                                let deque = dlq.read().await;
+                                let len = deque.len();
+                                deque.iter().skip(len.saturating_sub(n_capped)).cloned().collect::<Vec<_>>()
+                            };
+                            tracing::warn!(missed = n, recovered = recovered.len(), "WS client lagged, recovering from DLQ");
+                            for msg in recovered {
+                                if ws_tx.send(warp::ws::Message::text(msg)).await.is_err() {
+                                    break;
+                                }
+                            }
                             continue;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -2583,15 +2620,19 @@ pub async fn run() {
     });
 
     // Live stream: one Redis subscriber fans out to all WS clients.
-    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(2048);
-    tokio::spawn(redis_stream_subscriber(market_tx.clone()));
+    // In-memory dead-letter queue keeps the last 2000 messages so clients that
+    // briefly lag can recover without missing events.
+    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(8192);
+    let dlq: DlqStore = Arc::new(RwLock::new(VecDeque::with_capacity(DLQ_CAPACITY)));
+    tokio::spawn(redis_stream_subscriber(market_tx.clone(), dlq.clone()));
 
     let ws_stream = warp::path("ws")
         .and(warp::ws())
         .and(with_broadcast(market_tx.clone()))
+        .and(with_dlq(dlq.clone()))
         .map(
-            |ws: warp::ws::Ws, tx: tokio::sync::broadcast::Sender<String>| {
-                ws.on_upgrade(move |socket| ws_client(socket, tx))
+            |ws: warp::ws::Ws, tx: tokio::sync::broadcast::Sender<String>, dlq: DlqStore| {
+                ws.on_upgrade(move |socket| ws_client(socket, tx, dlq))
             },
         );
 
