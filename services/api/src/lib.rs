@@ -2492,14 +2492,37 @@ async fn ws_client(ws: warp::ws::WebSocket, tx: tokio::sync::broadcast::Sender<S
     let (mut ws_tx, mut ws_rx) = ws.split();
     let mut rx = tx.subscribe();
     let forward = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if ws_tx.send(warp::ws::Message::text(msg)).await.is_err() {
-                break;
+        let mut ping = tokio::time::interval(std::time::Duration::from_secs(20));
+        loop {
+            tokio::select! {
+                _ = ping.tick() => {
+                    if ws_tx.send(warp::ws::Message::ping(vec![])).await.is_err() {
+                        break;
+                    }
+                }
+                result = rx.recv() => {
+                    match result {
+                        Ok(msg) => {
+                            if ws_tx.send(warp::ws::Message::text(msg)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(missed = n, "WS client lagged, skipping");
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                    }
+                }
             }
         }
     });
-    // Drain inbound frames (we don't expect any) so we notice the socket closing.
-    while let Some(Ok(_)) = ws_rx.next().await {}
+    // Drain inbound frames with idle timeout so we notice the socket closing.
+    while let Ok(Some(Ok(_))) =
+        tokio::time::timeout(std::time::Duration::from_secs(30), ws_rx.next()).await
+    {}
     forward.abort();
 }
 
@@ -2554,7 +2577,7 @@ pub async fn run() {
     });
 
     // Live stream: one Redis subscriber fans out to all WS clients.
-    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(512);
+    let (market_tx, _) = tokio::sync::broadcast::channel::<String>(2048);
     tokio::spawn(redis_stream_subscriber(market_tx.clone()));
 
     let ws_stream = warp::path("ws")

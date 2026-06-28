@@ -57,7 +57,13 @@ fi
 # NEXT_PUBLIC_API_URL is intentionally empty: client fetches use relative
 # /api/... paths proxied by the Next rewrite (NEXT_REWRITE_API_URL -> api:8080).
 # An absolute base would break in the browser (can't resolve `api:8080`) / CORS.
-want web && build_image web services/web services/web/Dockerfile --build-arg NODE_VERSION=20 --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-}" --build-arg NEXT_PUBLIC_TRADING_MODE="${NEXT_PUBLIC_TRADING_MODE:-paper}"
+# NEXT_PUBLIC_WS_URL must be set at build time (e.g. `ws://localhost:8443/ws` for
+# Kind) or it falls back to the app default (ws://localhost:8080/ws).
+want web && build_image web . services/web/Dockerfile \
+    --build-arg NODE_VERSION=20 \
+    --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-}" \
+    --build-arg NEXT_PUBLIC_WS_URL="${NEXT_PUBLIC_WS_URL:-}" \
+    --build-arg NEXT_PUBLIC_TRADING_MODE="${NEXT_PUBLIC_TRADING_MODE:-paper}"
 
 vt_ok "Images built and pushed to $KIND_REGISTRY (targets: ${SELECTORS[*]:-all})"
 

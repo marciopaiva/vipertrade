@@ -23,26 +23,24 @@ APP_DEPLOYMENTS  := market-data analytics strategy executor monitor api ai-analy
 help:
 	@printf "ViperTrade — Kind lifecycle\n\n"
 	@printf "  make build      Build all service images and push to the local registry\n"
-	@printf "  make build-web  Rebuild ONLY the web image and restart its rollout (fast UI iteration)\n"
+	@printf "  make build-web  Rebuild ONLY the web image (Docker-based, no host tooling needed)\n"
 	@printf "  make deploy     Apply the Kubernetes manifests to the Kind cluster\n"
 	@printf "  make redeploy   Build + deploy + restart app pods (pick up new image & config)\n"
 	@printf "  make start      Start the Kind cluster and local registry\n"
 	@printf "  make stop       Stop the Kind cluster and local registry\n"
 	@printf "  make wipe       Wipe paper trading data from postgres + restart services (fresh start)\n"
 
-## Build all service images (web first) and push them to the local Kind registry
+## Build all service images and push them to the local Kind registry
 build:
-	@cd services/web && yarn build
-	@./scripts/kind/build-images.sh
+	@NEXT_PUBLIC_WS_URL=ws://localhost:8443/ws ./scripts/kind/build-images.sh
 
 ## Rebuild only the web image and roll the web deployment so the new image is
 ## pulled (the :dev tag is mutable, so a restart is required). Avoids the slow
 ## Rust rebuild that `make build` triggers on any repo change.
 build-web:
-	@cd services/web && yarn build
-	@./scripts/kind/build-images.sh web
-	@kubectl rollout restart deployment web -n $(KUBE_NAMESPACE)
-	@kubectl rollout status deployment web -n $(KUBE_NAMESPACE) --timeout=120s
+	@NEXT_PUBLIC_WS_URL=ws://localhost:8443/ws ./scripts/kind/build-images.sh web
+	@kubectl --context $(KIND_CONTEXT) rollout restart deployment web -n $(KUBE_NAMESPACE)
+	@kubectl --context $(KIND_CONTEXT) rollout status deployment web -n $(KUBE_NAMESPACE) --timeout=120s
 
 ## Apply the Kubernetes manifests to the Kind cluster
 deploy:
@@ -59,8 +57,13 @@ redeploy: build
 	@kubectl --context $(KIND_CONTEXT) apply -k k8s/kind
 	@kubectl --context $(KIND_CONTEXT) -n $(KUBE_NAMESPACE) rollout restart deployment $(APP_DEPLOYMENTS)
 	@for d in $(APP_DEPLOYMENTS); do \
-		kubectl --context $(KIND_CONTEXT) -n $(KUBE_NAMESPACE) rollout status deployment $$d --timeout=300s; \
-	done
+		kubectl --context $(KIND_CONTEXT) -n $(KUBE_NAMESPACE) rollout status deployment $$d --timeout=300s & \
+	done; \
+	status=0; \
+	for job in $$(jobs -p); do \
+		wait $$job || status=1; \
+	done; \
+	[ $$status -eq 0 ] || (echo "One or more rollouts failed" >&2 && exit 1)
 
 ## Start the Kind cluster and local registry
 start:

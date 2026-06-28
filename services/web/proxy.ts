@@ -19,7 +19,7 @@ const PUBLIC_PATHS = [
   '/apple-icon.png',
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   if (!AUTH_ENABLED) {
     return NextResponse.next();
   }
