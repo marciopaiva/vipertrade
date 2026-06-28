@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useT } from '@/lib/i18n';
+import { HudFrame } from '@/components/ui/HudFrame';
 import { ConfirmAction } from '@/components/system/ConfirmAction';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { cn } from '@/lib/utils';
@@ -118,7 +119,7 @@ export default function SystemPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
           {t('title')}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -135,11 +136,7 @@ export default function SystemPage() {
       )}
 
       {/* runtime */}
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          {t('runtime')}
-        </h2>
-
+      <HudFrame title={t('runtime')}>
         <Row label={t('tradingMode')} hint={t('tradingModeHint')}>
           <span
             className={cn(
@@ -232,13 +229,10 @@ export default function SystemPage() {
         <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
           {FLAG_CMD}
         </pre>
-      </section>
+      </HudFrame>
 
       {/* service health — the architecture-flow pipeline (moved from /console) */}
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          {t('serviceHealth')}
-        </h2>
+      <HudFrame title={t('serviceHealth')}>
         {services.length === 0 ? (
           <div className="py-6 text-center text-sm text-muted-foreground">
             {t('noServiceHealth')}
@@ -250,7 +244,7 @@ export default function SystemPage() {
             executorState={executorOn ? 'running' : 'down'}
           />
         )}
-      </section>
+      </HudFrame>
     </div>
   );
 }

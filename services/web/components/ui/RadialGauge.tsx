@@ -38,7 +38,7 @@ export function RadialGauge({
   value: number | null | undefined;
   min?: number;
   max?: number;
-  label: string;
+  label?: string;
   sublabel?: string;
   color?: string;
   stops?: GaugeStop[];
@@ -67,7 +67,7 @@ export function RadialGauge({
         viewBox="0 0 200 118"
         className="w-full"
         role="img"
-        aria-label={ariaLabel ?? `${label}: ${display}`}
+        aria-label={ariaLabel ?? `${label ?? ''} ${display}`.trim()}
       >
         {stops && (
           <defs>
@@ -135,9 +135,11 @@ export function RadialGauge({
             {sublabel}
           </span>
         )}
-        <span className="mt-1 font-display text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          {label}
-        </span>
+        {label && (
+          <span className="mt-1 font-display text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+            {label}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -140,30 +140,23 @@ export function EquityCurve() {
   const zeroOffset = top - bottom > 0 ? top / (top - bottom) : 1;
 
   return (
-    <SectionCard>
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">
-            {t('equityTitle')}
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            {t('equitySubtitle', { n: points.length })}
-          </p>
-        </div>
-        <div className="flex items-center gap-4 font-mono text-sm tabular-nums">
-          <span className="text-muted-foreground">
+    <SectionCard
+      title={t('equityTitle')}
+      right={
+        <span className="flex items-center gap-4">
+          <span>
             {t('equityNet')}{' '}
             <span className={net >= 0 ? 'text-accent' : 'text-destructive'}>
               {formatUsd(locale, net)}
             </span>
           </span>
-          <span className="text-muted-foreground">
+          <span>
             {t('equityPeak')}{' '}
             <span className="text-foreground">{formatUsd(locale, peak)}</span>
           </span>
-        </div>
-      </div>
-
+        </span>
+      }
+    >
       {error ? (
         <div className="flex h-64 items-center justify-center rounded-lg bg-secondary/40 text-sm text-destructive">
           {error}
