@@ -3,7 +3,9 @@
 #![recursion_limit = "512"]
 
 mod bybit_client;
+mod jwt_auth;
 mod position_config;
+mod rate_limit;
 mod state;
 
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
@@ -27,7 +29,7 @@ use state::{
     BybitPositionFetchResult, BybitWalletFetchResult, ControlStateResponse, DecisionItem,
     DecisionsQuery, DecisionsResponse, EventItem, EventsQuery, EventsResponse,
     ExecutorControlRequest, ExecutorControlResponse, ExecutorControlStatus, HealthResponse,
-    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PerformanceResponse,
+    KillSwitchRequest, KillSwitchResponse, KillSwitchStatus, PaginationMeta, PerformanceResponse,
     PerformanceWindow, PositionItem, PositionsResponse, RiskLimitsRequest, RiskLimitsResponse,
     RiskLimitsStatus, StatusResponse, SymbolPnlItem, SymbolPnlQuery, SymbolPnlResponse, TradeItem,
     TradesQuery, TradesResponse,
@@ -178,9 +180,28 @@ fn resolve_position_triggers(
     )
 }
 
+fn clamp_page(page: Option<u32>) -> u32 {
+    page.unwrap_or(1).max(1)
+}
+
 fn clamp_limit(limit: Option<u32>, default_value: u32) -> i64 {
     let raw = limit.unwrap_or(default_value);
     raw.clamp(1, 200) as i64
+}
+
+fn pagination_meta(page: u32, limit: i64, total: i64) -> PaginationMeta {
+    let limit_u32 = limit as u32;
+    let total_pages = if total > 0 {
+        ((total as f64) / (limit as f64)).ceil() as u32
+    } else {
+        1
+    };
+    PaginationMeta {
+        page,
+        limit: limit_u32,
+        total,
+        total_pages,
+    }
 }
 
 fn round6(v: f64) -> f64 {
@@ -258,35 +279,61 @@ fn validate_risk_limits(
 }
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
-    if err.is_not_found() {
-        return Ok(json_err(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "route not found",
-        ));
-    }
-
-    if err.find::<warp::reject::MethodNotAllowed>().is_some() {
-        return Ok(json_err(
+    let reply: warp::reply::Response = if err.is_not_found() {
+        json_err(StatusCode::NOT_FOUND, "not_found", "route not found").into_response()
+    } else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
+        json_err(
             StatusCode::METHOD_NOT_ALLOWED,
             "method_not_allowed",
             "method not allowed",
-        ));
-    }
-
-    if let Some(body_err) = err.find::<warp::filters::body::BodyDeserializeError>() {
-        return Ok(json_err(
+        )
+        .into_response()
+    } else if err.find::<rate_limit::RateLimited>().is_some() {
+        warp::reply::with_header(
+            json_err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "too many requests — try again later",
+            ),
+            "Retry-After",
+            "60",
+        )
+        .into_response()
+    } else if let Some(body_err) = err.find::<warp::filters::body::BodyDeserializeError>() {
+        json_err(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             format!("invalid request body: {}", body_err),
-        ));
-    }
-
-    Ok(json_err(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "internal_error",
-        format!("unhandled rejection: {:?}", err),
-    ))
+        )
+        .into_response()
+    } else if let Some(auth_err) = err.find::<jwt_auth::AuthError>() {
+        let (code, reason, message) = match auth_err {
+            jwt_auth::AuthError::MissingToken => (
+                StatusCode::UNAUTHORIZED,
+                "missing_token",
+                "missing authentication token",
+            ),
+            jwt_auth::AuthError::InvalidToken => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_token",
+                "invalid or malformed authentication token",
+            ),
+            jwt_auth::AuthError::ExpiredToken => (
+                StatusCode::UNAUTHORIZED,
+                "expired_token",
+                "authentication token has expired",
+            ),
+        };
+        json_err(code, reason, message).into_response()
+    } else {
+        json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            format!("unhandled rejection: {:?}", err),
+        )
+        .into_response()
+    };
+    Ok(reply)
 }
 
 async fn fetch_kill_switch_status(pool: &PgPool) -> Result<KillSwitchStatus, sqlx::Error> {
@@ -661,7 +708,14 @@ async fn build_paper_trades_response(
         );
     };
 
+    let page = clamp_page(query.page);
     let limit = clamp_limit(query.limit, 50);
+    let offset = ((page - 1) as i64) * limit;
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM trades WHERE paper_trade = TRUE")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
 
     let rows = sqlx::query_as::<
         _,
@@ -699,9 +753,11 @@ async fn build_paper_trades_response(
          FROM trades
          WHERE paper_trade = TRUE
          ORDER BY opened_at DESC
-         LIMIT $1",
+         LIMIT $1
+         OFFSET $2",
     )
     .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await;
 
@@ -739,7 +795,8 @@ async fn build_paper_trades_response(
                     },
                 )
                 .collect();
-            json_ok(&TradesResponse { items })
+            let pagination = pagination_meta(page, limit, total);
+            json_ok(&TradesResponse { items, pagination })
         }
         Err(err) => json_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -750,6 +807,7 @@ async fn build_paper_trades_response(
 }
 
 async fn build_exchange_trades_response(query: TradesQuery) -> warp::reply::WithStatus<WarpJson> {
+    let page = clamp_page(query.page);
     let limit = clamp_limit(query.limit, 20) as usize;
     let window_end_utc = Utc::now();
     let window_start_utc = window_end_utc - ChronoDuration::days(30);
@@ -766,7 +824,12 @@ async fn build_exchange_trades_response(query: TradesQuery) -> warp::reply::With
                     .cmp(&a.closed_at.unwrap_or(a.opened_at))
             });
             trades.truncate(limit);
-            json_ok(&TradesResponse { items: trades })
+            let total = trades.len() as i64;
+            let pagination = pagination_meta(page, limit as i64, total);
+            json_ok(&TradesResponse {
+                items: trades,
+                pagination,
+            })
         }
         Err(message) => json_err(
             StatusCode::BAD_GATEWAY,
@@ -785,7 +848,20 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
         );
     };
 
+    let page = clamp_page(query.page);
     let limit = clamp_limit(query.limit, 30);
+    let offset = ((page - 1) as i64) * limit;
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM (
+             SELECT 1 FROM tupa_audit_logs
+             WHERE input_data ? 'signal'
+             GROUP BY input_data->>'symbol'
+         ) sub",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
 
     // Latest decision per symbol, with the consensus indicators from input_data.
     let rows = sqlx::query_as::<
@@ -828,9 +904,11 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
              ORDER BY input_data->>'symbol', executed_at DESC
          ) latest
          ORDER BY executed_at DESC
-         LIMIT $1",
+         LIMIT $1
+         OFFSET $2",
     )
     .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await;
 
@@ -872,7 +950,8 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                     },
                 )
                 .collect();
-            json_ok(&DecisionsResponse { items })
+            let pagination = pagination_meta(page, limit, total);
+            json_ok(&DecisionsResponse { items, pagination })
         }
         Err(err) => json_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -923,7 +1002,14 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
         );
     };
 
+    let page = clamp_page(query.page);
     let limit = clamp_limit(query.limit, 50);
+    let offset = ((page - 1) as i64) * limit;
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM system_events")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
 
     let rows = sqlx::query_as::<
         _,
@@ -949,9 +1035,11 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
              timestamp
          FROM system_events
          ORDER BY timestamp DESC
-         LIMIT $1",
+         LIMIT $1
+         OFFSET $2",
     )
     .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await;
 
@@ -983,7 +1071,8 @@ async fn events_handler(query: EventsQuery, state: Arc<AppState>) -> impl Reply 
                     },
                 )
                 .collect();
-            json_ok(&EventsResponse { items })
+            let pagination = pagination_meta(page, limit, total);
+            json_ok(&EventsResponse { items, pagination })
         }
         Err(err) => json_err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2256,8 +2345,99 @@ async fn kill_switch_handler(
             updated_at: Some(Utc::now()),
         });
 
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let redis_url = resolve_redis_url();
+
+    let acknowledged = match redis::Client::open(redis_url.as_str()) {
+        Ok(client) => {
+            let sync_msg = serde_json::json!({
+                "type": "kill_switch_sync",
+                "enabled": req.enabled,
+                "request_id": request_id,
+            });
+
+            let sync_payload = sync_msg.to_string();
+
+            let mut publish_conn = match client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to get Redis connection for kill-switch sync");
+                    return json_ok(&KillSwitchResponse {
+                        updated: true,
+                        acknowledged: false,
+                        kill_switch,
+                    });
+                }
+            };
+
+            if let Err(e) = viper_domain::stream_publish(
+                &mut publish_conn,
+                viper_domain::REDIS_STREAM_CONTROL_EVENTS,
+                &sync_payload,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, "Failed to publish kill-switch sync request");
+                false
+            } else {
+                let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let entries: redis::RedisResult<viper_domain::StreamEntries> =
+                            redis::cmd("XREAD")
+                                .arg("BLOCK")
+                                .arg(1000)
+                                .arg("COUNT")
+                                .arg(10)
+                                .arg("STREAMS")
+                                .arg(viper_domain::REDIS_STREAM_EXECUTOR_EVENTS)
+                                .arg("$")
+                                .query_async(&mut publish_conn)
+                                .await;
+                        match entries {
+                            Ok(streams) => {
+                                for (_key, msgs) in streams {
+                                    for (_id, fields) in msgs {
+                                        for (k, v) in fields {
+                                            if k == "payload" {
+                                                if let Ok(ack) =
+                                                    serde_json::from_str::<serde_json::Value>(&v)
+                                                {
+                                                    if ack.get("type").and_then(|x| x.as_str())
+                                                        == Some("kill_switch_ack")
+                                                        && ack
+                                                            .get("request_id")
+                                                            .and_then(|x| x.as_str())
+                                                            == Some(&request_id)
+                                                    {
+                                                        return true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Kill-switch ack XREAD failed");
+                                return false;
+                            }
+                        }
+                    }
+                })
+                .await;
+
+                result.unwrap_or(false)
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to open Redis client for kill-switch ack");
+            false
+        }
+    };
+
     json_ok(&KillSwitchResponse {
         updated: true,
+        acknowledged,
         kill_switch,
     })
 }
@@ -2417,6 +2597,33 @@ async fn risk_limits_control_handler(
     })
 }
 
+async fn ws_token_handler() -> Result<impl warp::Reply, warp::Rejection> {
+    if !jwt_auth::is_enabled() {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&json!({
+                "error": "auth_disabled",
+                "message": "WS authentication is not configured"
+            })),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ));
+    }
+    match jwt_auth::issue_ws_token("web-ui", 3600) {
+        Ok(token) => Ok(warp::reply::with_status(
+            warp::reply::json(&json!({
+                "token": token,
+                "expires_in": 3600,
+                "type": "Bearer"
+            })),
+            StatusCode::OK,
+        )),
+        Err(e) => Ok(json_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "token_issuance_failed",
+            e,
+        )),
+    }
+}
+
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -2446,7 +2653,7 @@ async fn shutdown_signal() {
 // browsers so the dashboard updates by push instead of polling.
 
 type DlqStore = Arc<RwLock<VecDeque<String>>>;
-const DLQ_CAPACITY: usize = 2000;
+const DLQ_CAPACITY: usize = 8192;
 
 fn with_broadcast(
     tx: tokio::sync::broadcast::Sender<String>,
@@ -2473,39 +2680,56 @@ fn resolve_redis_url() -> String {
 /// the broadcast channel (consumed by each WS client). Reconnects on error.
 /// Also keeps a sliding window of recent messages in the in-memory DLQ so
 /// clients that briefly lag can recover without missing events.
-async fn redis_stream_subscriber(
-    tx: tokio::sync::broadcast::Sender<String>,
-    dlq: DlqStore,
-) {
-    use futures_util::StreamExt;
+async fn redis_stream_subscriber(tx: tokio::sync::broadcast::Sender<String>, dlq: DlqStore) {
     let url = resolve_redis_url();
     loop {
         let result: redis::RedisResult<()> = async {
             let client = redis::Client::open(url.as_str())?;
-            let mut pubsub = client.get_async_pubsub().await?;
-            pubsub.subscribe(viper_domain::REDIS_CHANNEL_MARKET_DATA).await?;
-            pubsub.subscribe(viper_domain::REDIS_CHANNEL_DECISIONS).await?;
-            tracing::info!(
-                market_channel = %viper_domain::REDIS_CHANNEL_MARKET_DATA,
-                decisions_channel = %viper_domain::REDIS_CHANNEL_DECISIONS,
-                "WS bridge subscribed to Redis market/decision channels"
-            );
-            let mut stream = pubsub.on_message();
-            while let Some(msg) = stream.next().await {
-                let channel = msg.get_channel_name().to_string();
-                if let Ok(payload) = msg.get_payload::<String>() {
-                    tracing::trace!(channel = %channel, payload_len = %payload.len(), "WS bridge forwarding Redis message");
-                    {
-                        let mut deque = dlq.write().await;
-                        if deque.len() >= DLQ_CAPACITY {
-                            deque.pop_front();
+            let mut conn = client.get_multiplexed_async_connection().await?;
+            let _: Result<String, _> = redis::cmd("XGROUP")
+                .arg("CREATE").arg(viper_domain::REDIS_STREAM_MARKET_DATA)
+                .arg(viper_domain::STREAM_GROUP_WS_BRIDGE).arg("$").arg("MKSTREAM")
+                .query_async(&mut conn).await;
+            let _: Result<String, _> = redis::cmd("XGROUP")
+                .arg("CREATE").arg(viper_domain::REDIS_STREAM_DECISIONS)
+                .arg(viper_domain::STREAM_GROUP_WS_BRIDGE).arg("$").arg("MKSTREAM")
+                .query_async(&mut conn).await;
+            tracing::info!("WS bridge subscribed to market_data and decisions streams");
+            loop {
+                let result: redis::RedisResult<viper_domain::StreamEntries> = redis::cmd("XREADGROUP")
+                    .arg("GROUP").arg(viper_domain::STREAM_GROUP_WS_BRIDGE).arg("ws-bridge")
+                    .arg("BLOCK").arg(2000).arg("COUNT").arg(10).arg("NOACK")
+                    .arg("STREAMS")
+                    .arg(viper_domain::REDIS_STREAM_MARKET_DATA)
+                    .arg(viper_domain::REDIS_STREAM_DECISIONS)
+                    .arg(">").arg(">")
+                    .query_async(&mut conn).await;
+                match result {
+                    Ok(entries) => {
+                        for (_stream_key, msgs) in entries {
+                            for (_msg_id, fields) in msgs {
+                                for (k, v) in fields {
+                                    if k == "payload" {
+                                        tracing::trace!(stream = %_stream_key, payload_len = %v.len(), "WS bridge forwarding stream message");
+                                        {
+                                            let mut deque = dlq.write().await;
+                                            if deque.len() >= DLQ_CAPACITY {
+                                                deque.pop_front();
+                                            }
+                                            deque.push_back(v.clone());
+                                        }
+                                        let _ = tx.send(v);
+                                    }
+                                }
+                            }
                         }
-                        deque.push_back(payload.clone());
                     }
-                    let _ = tx.send(payload);
+                    Err(e) => {
+                        tracing::warn!(error = %e, "WS bridge stream read failed");
+                        return Err(e);
+                    }
                 }
             }
-            Ok(())
         }
         .await;
         if let Err(err) = result {
@@ -2569,14 +2793,14 @@ async fn ws_client(
     forward.abort();
 }
 
-pub async fn run() {
-    tracing_subscriber::fmt()
+pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "viper_api=info".into()),
         )
         .json()
-        .init();
+        .try_init();
 
     let db_pool = if let Some(database_url) = resolve_database_url() {
         match PgPoolOptions::new()
@@ -2627,6 +2851,7 @@ pub async fn run() {
     tokio::spawn(redis_stream_subscriber(market_tx.clone(), dlq.clone()));
 
     let ws_stream = warp::path("ws")
+        .and(jwt_auth::ws_auth_filter())
         .and(warp::ws())
         .and(with_broadcast(market_tx.clone()))
         .and(with_dlq(dlq.clone()))
@@ -2770,10 +2995,47 @@ pub async fn run() {
         .and(with_state(state.clone()))
         .then(risk_limits_control_handler);
 
+    let ws_token = api_v1
+        .and(warp::path("auth"))
+        .and(warp::path("ws-token"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(ws_token_handler);
+
     let legacy_root = warp::path::end().map(|| "Hello, ViperTrade API!");
     let legacy_health = warp::path("health")
         .and(warp::path::end())
         .map(|| warp::reply::json(&"OK"));
+
+    let general_limiter = {
+        let redis_url = resolve_redis_url();
+        match redis::Client::open(redis_url.as_str()) {
+            Ok(client) => match client.get_multiplexed_async_connection().await {
+                Ok(conn) => {
+                    tracing::info!("Rate limiter using Redis backend");
+                    rate_limit::RateLimiter::new_redis(100, 60, conn)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Redis connection failed for rate limiter — using in-memory");
+                    rate_limit::RateLimiter::new(100, 60)
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "Redis client creation failed for rate limiter — using in-memory");
+                rate_limit::RateLimiter::new(100, 60)
+            }
+        }
+    };
+    let control_limiter = {
+        let redis_url = resolve_redis_url();
+        match redis::Client::open(redis_url.as_str()) {
+            Ok(client) => match client.get_multiplexed_async_connection().await {
+                Ok(conn) => rate_limit::RateLimiter::new_redis(20, 60, conn),
+                Err(_) => rate_limit::RateLimiter::new(20, 60),
+            },
+            Err(_) => rate_limit::RateLimiter::new(20, 60),
+        }
+    };
 
     // Boxed sub-groups: collapsing each group's filter type with `.boxed()` keeps
     // the combined `.or(...)` tree shallow, avoiding warp's deep-type recursion
@@ -2798,11 +3060,24 @@ pub async fn run() {
         .or(executor_control)
         .or(risk_limits_control)
         .boxed();
-    let misc = legacy_root.or(legacy_health).or(ws_stream).boxed();
+    let misc = legacy_root
+        .or(legacy_health)
+        .or(ws_stream)
+        .or(ws_token)
+        .boxed();
 
-    let routes = public
-        .or(data)
-        .or(control)
+    // public + data share a general rate-limit tier (100 req/min).
+    // control endpoints get a stricter tier (20 req/min).
+    // WS (misc) is exempt — persistent connection.
+    let general_routes = warp::any()
+        .and(rate_limit::with_rate_limit(general_limiter))
+        .and(public.or(data));
+    let control_routes = warp::any()
+        .and(rate_limit::with_rate_limit(control_limiter))
+        .and(control);
+
+    let routes = general_routes
+        .or(control_routes)
         .or(misc)
         .recover(handle_rejection);
 
@@ -2820,6 +3095,7 @@ pub async fn run() {
         });
 
     server.await;
+    Ok(())
 }
 
 #[cfg(test)]

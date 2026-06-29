@@ -30,15 +30,23 @@ export function useMarketData() {
     fetchMarketData();
 
     // Setup WebSocket for real-time updates
-    const ws = getWebSocketClient();
-    const handleMarketSignal = (data: any) => {
-      const currentSignals = useTradingStore.getState().marketSignals;
-      setMarketSignals([data, ...currentSignals.slice(0, 99)]);
-    };
-    ws.on('market_signal', handleMarketSignal);
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    getWebSocketClient().then((ws) => {
+      if (cancelled) return;
+      const handleMarketSignal = (data: any) => {
+        const currentSignals = useTradingStore.getState().marketSignals;
+        setMarketSignals([data, ...currentSignals.slice(0, 99)]);
+      };
+      ws.on('market_signal', handleMarketSignal);
+      cleanup = () => {
+        ws.off('market_signal', handleMarketSignal);
+      };
+    });
 
     return () => {
-      ws.off('market_signal', handleMarketSignal);
+      cancelled = true;
+      cleanup?.();
     };
   }, [setMarketSignals]);
 

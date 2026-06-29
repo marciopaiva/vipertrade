@@ -39,6 +39,7 @@ web/.env.production
 # AI agent working directories (local scratch, not versioned)
 .kilo/
 .claude/
+.opencode/
 .cursor/
 .aider*
 .windsurf/

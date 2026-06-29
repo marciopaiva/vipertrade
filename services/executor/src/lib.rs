@@ -1,8 +1,5 @@
-use futures_util::StreamExt;
-use hmac::{Hmac, Mac};
-use redis::AsyncCommands;
-use reqwest::header::CONTENT_TYPE;
-use serde_json::{json, Value};
+use rand::Rng;
+use serde_json::Value;
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
@@ -10,14 +7,28 @@ use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::{watch, Mutex};
-use viper_domain::{StrategyDecision, StrategyDecisionEvent};
+use tokio::sync::{mpsc, watch, Mutex};
+use viper_domain::{
+    stream_ensure_group, stream_publish, StrategyDecision, StrategyDecisionEvent,
+    REDIS_STREAM_CONTROL_EVENTS, REDIS_STREAM_DECISIONS, REDIS_STREAM_EXECUTOR_EVENTS,
+    STREAM_GROUP_EXECUTOR,
+};
 
-type HmacSha256 = Hmac<Sha256>;
 const CONSTRAINTS_CACHE_TTL_SECS: u64 = 60;
+mod bybit_client;
+mod orders;
+mod reconciliation;
+mod risk;
+mod state;
+
+pub(crate) use bybit_client::*;
+pub(crate) use orders::*;
+pub(crate) use reconciliation::*;
+pub(crate) use risk::*;
+pub(crate) use state::*;
 
 #[derive(Debug, Clone)]
 struct ExecutorConfig {
@@ -33,6 +44,9 @@ struct ExecutorConfig {
     live_orders_enabled: bool,
     live_symbol_allowlist: HashSet<String>,
     reconcile_fix: bool,
+    reconcile_auto_fix: bool,
+    reconcile_max_correction_pct: f64,
+    reconcile_max_daily: i64,
     paper_max_open_positions: i64,
     strategy_config_path: String,
     trading_profile: String,
@@ -84,6 +98,7 @@ struct ExecutorState {
     db_pool: Option<PgPool>,
     processed_in_memory: Arc<Mutex<HashSet<String>>>,
     constraints_cache: Arc<Mutex<HashMap<String, (Instant, BybitSymbolConstraints)>>>,
+    reconcile_daily_counts: Arc<Mutex<HashMap<String, (String, i64)>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,6 +140,19 @@ impl ExecutorConfig {
         let reconcile_fix = std::env::var("EXECUTOR_RECONCILE_FIX")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let reconcile_auto_fix = std::env::var("EXECUTOR_RECONCILE_AUTO_FIX")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
+        let reconcile_max_correction_pct = std::env::var("RECONCILE_MAX_CORRECTION_PCT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v > 0.0 && *v <= 1.0)
+            .unwrap_or(0.05);
+        let reconcile_max_daily = std::env::var("RECONCILE_MAX_DAILY")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(5);
         let paper_max_open_positions = std::env::var("EXECUTOR_PAPER_MAX_OPEN_POSITIONS")
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
@@ -148,6 +176,9 @@ impl ExecutorConfig {
             live_orders_enabled,
             live_symbol_allowlist,
             reconcile_fix,
+            reconcile_auto_fix,
+            reconcile_max_correction_pct,
+            reconcile_max_daily,
             paper_max_open_positions,
             strategy_config_path,
             trading_profile,
@@ -345,20 +376,6 @@ async fn shutdown_signal() {
     }
 }
 
-fn now_ms() -> String {
-    let ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    ms.to_string()
-}
-
-fn bybit_sign(secret: &str, payload: &str) -> Result<String, Box<dyn Error>> {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
-    mac.update(payload.as_bytes());
-    Ok(hex::encode(mac.finalize().into_bytes()))
-}
-
 fn action_to_side(action: &str) -> Option<&'static str> {
     match action {
         "ENTER_LONG" | "CLOSE_SHORT" => Some("Buy"),
@@ -455,211 +472,6 @@ struct BybitFill {
     raw_data: Value,
 }
 
-fn realized_pnl(side: &str, entry_price: f64, exit_price: f64, quantity: f64) -> f64 {
-    let signed_delta = if side == "Long" {
-        exit_price - entry_price
-    } else {
-        entry_price - exit_price
-    };
-
-    // `quantity` is the full position size (calc_smart_size: desired_usdt / price,
-    // submitted to the exchange as-is). PnL is the price move over the position;
-    // leverage affects margin/ROI, NOT absolute PnL, so it must NOT be multiplied
-    // in here (doing so double-counted it and inflated realized PnL by leverage).
-    signed_delta * quantity
-}
-
-fn parse_positive_f64(v: Option<&Value>) -> Option<f64> {
-    v.and_then(Value::as_str)
-        .and_then(|x| x.parse::<f64>().ok())
-        .filter(|x| *x > 0.0)
-}
-
-fn format_order_qty(qty: f64, qty_step: f64) -> String {
-    let precision = qty_step_precision(qty_step);
-
-    if precision == 0 {
-        format!("{:.0}", qty)
-    } else {
-        let raw = format!("{qty:.precision$}");
-        raw.trim_end_matches('0').trim_end_matches('.').to_string()
-    }
-}
-
-fn format_price_value(price: f64, tick_size: f64) -> String {
-    let precision = qty_step_precision(tick_size);
-    if precision == 0 {
-        format!("{:.0}", price)
-    } else {
-        let raw = format!("{price:.precision$}");
-        raw.trim_end_matches('0').trim_end_matches('.').to_string()
-    }
-}
-
-fn snap_price_to_tick(price: f64, tick_size: f64) -> f64 {
-    if tick_size <= 0.0 {
-        return price;
-    }
-    let precision = qty_step_precision(tick_size);
-    let steps = (price / tick_size).round();
-    round_with_precision(steps * tick_size, precision)
-}
-
-fn qty_step_precision(qty_step: f64) -> usize {
-    if qty_step >= 1.0 {
-        0
-    } else {
-        let step_repr = format!("{:.12}", qty_step);
-        step_repr
-            .trim_end_matches('0')
-            .split('.')
-            .nth(1)
-            .map(|d| d.len())
-            .unwrap_or(0)
-    }
-}
-
-fn round_with_precision(value: f64, precision: usize) -> f64 {
-    if precision == 0 {
-        value.round()
-    } else {
-        let factor = 10_f64.powi(precision as i32);
-        (value * factor).round() / factor
-    }
-}
-
-fn normalize_order_quantity(qty: f64, c: BybitSymbolConstraints) -> Result<f64, String> {
-    if qty <= 0.0 {
-        return Err("quantity must be > 0".to_string());
-    }
-
-    let eps = 1e-8_f64;
-    let mut normalized = qty;
-    let precision = qty_step_precision(c.qty_step).max(qty_step_precision(c.min_order_qty));
-
-    if c.qty_step > 0.0 {
-        let raw_steps = qty / c.qty_step;
-        let rounded_steps = raw_steps.round();
-        let snapped_steps = if (raw_steps - rounded_steps).abs() <= eps {
-            rounded_steps
-        } else {
-            raw_steps.floor()
-        };
-        normalized = snapped_steps.max(0.0) * c.qty_step;
-    }
-    normalized = round_with_precision(normalized, precision);
-
-    if normalized + eps < c.min_order_qty {
-        let min_order_qty = round_with_precision(c.min_order_qty, precision);
-        if qty + eps >= min_order_qty {
-            return Ok(min_order_qty);
-        }
-        return Err(format!(
-            "quantity {} below minOrderQty {} after qtyStep normalization",
-            normalized, c.min_order_qty
-        ));
-    }
-
-    Ok(normalized)
-}
-
-fn ensure_min_notional(
-    action: &str,
-    qty: f64,
-    decision_price: f64,
-    c: BybitSymbolConstraints,
-) -> Result<(), String> {
-    if is_close_action(action) {
-        return Ok(());
-    }
-
-    let Some(min_notional) = c.min_notional else {
-        return Ok(());
-    };
-
-    if decision_price <= 0.0 {
-        return Err("decision entry_price must be > 0 for min-notional validation".to_string());
-    }
-
-    let notional = qty * decision_price;
-    if notional + 1e-9 < min_notional {
-        return Err(format!(
-            "order notional {} below minNotionalValue {}",
-            notional, min_notional
-        ));
-    }
-
-    Ok(())
-}
-
-async fn fetch_symbol_constraints(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-) -> Result<BybitSymbolConstraints, Box<dyn Error>> {
-    let path = format!(
-        "/v5/market/instruments-info?category=linear&symbol={}",
-        symbol.to_uppercase()
-    );
-    let value = bybit_public_get(http, cfg, &path).await?;
-
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let instrument = value
-        .get("result")
-        .and_then(|r| r.get("list"))
-        .and_then(Value::as_array)
-        .and_then(|list| list.first())
-        .ok_or("missing instrument metadata")?;
-
-    let lot = instrument
-        .get("lotSizeFilter")
-        .ok_or("missing lotSizeFilter")?;
-    let price_filter = instrument.get("priceFilter").ok_or("missing priceFilter")?;
-
-    let min_order_qty = parse_positive_f64(lot.get("minOrderQty")).ok_or("missing minOrderQty")?;
-    let qty_step = parse_positive_f64(lot.get("qtyStep")).ok_or("missing qtyStep")?;
-    let min_notional = parse_positive_f64(lot.get("minNotionalValue"));
-    let tick_size = parse_positive_f64(price_filter.get("tickSize")).ok_or("missing tickSize")?;
-
-    Ok(BybitSymbolConstraints {
-        min_order_qty,
-        qty_step,
-        min_notional,
-        tick_size,
-    })
-}
-
-async fn get_symbol_constraints(
-    state: &ExecutorState,
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-) -> Result<BybitSymbolConstraints, Box<dyn Error>> {
-    let key = symbol.to_uppercase();
-
-    {
-        let cache = state.constraints_cache.lock().await;
-        if let Some((cached_at, constraints)) = cache.get(&key) {
-            if cached_at.elapsed() < Duration::from_secs(CONSTRAINTS_CACHE_TTL_SECS) {
-                return Ok(*constraints);
-            }
-        }
-    }
-
-    let fetched = fetch_symbol_constraints(http, cfg, symbol).await?;
-    let mut cache = state.constraints_cache.lock().await;
-    cache.insert(key, (Instant::now(), fetched));
-    Ok(fetched)
-}
-
 fn idempotency_key(event: &StrategyDecisionEvent) -> &str {
     if event.source_event_id.trim().is_empty() {
         &event.event_id
@@ -688,1271 +500,28 @@ fn body_preview(body: &str) -> String {
     }
 }
 
-async fn parse_bybit_json_response(
-    res: reqwest::Response,
-    context: &str,
-) -> Result<Value, Box<dyn Error>> {
-    let status = res.status();
-    let content_type = res
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("<none>")
-        .to_string();
-    let body = res.text().await?;
-    let preview = body_preview(&body);
-
-    if body.trim().is_empty() {
-        return Err(format!(
-            "{} empty body http={} content_type={}",
-            context, status, content_type
-        )
-        .into());
-    }
-
-    let value: Value = serde_json::from_str(&body).map_err(|e| {
-        format!(
-            "{} invalid json http={} content_type={} err={} body_preview={}",
-            context, status, content_type, e, preview
-        )
-    })?;
-
-    if !status.is_success() {
-        return Err(format!(
-            "{} http={} content_type={} body={}",
-            context, status, content_type, value
-        )
-        .into());
-    }
-
-    Ok(value)
-}
-
-async fn bybit_public_get(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    path: &str,
-) -> Result<Value, Box<dyn Error>> {
-    let url = format!("{}{}", cfg.bybit_base_url(), path);
-    let res = http.get(url).send().await?;
-    parse_bybit_json_response(res, "bybit public").await
-}
-
-async fn bybit_private_get(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    path: &str,
-    query: &str,
-) -> Result<Value, Box<dyn Error>> {
-    let ts = now_ms();
-    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, query);
-    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
-
-    let mut url = format!("{}{}", cfg.bybit_base_url(), path);
-    if !query.is_empty() {
-        url = format!("{}?{}", url, query);
-    }
-
-    let res = http
-        .get(url)
-        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", ts)
-        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
-        .send()
-        .await?;
-
-    parse_bybit_json_response(res, "bybit private").await
-}
-
-async fn bybit_private_post(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    path: &str,
-    body: &Value,
-) -> Result<Value, Box<dyn Error>> {
-    let body_str = serde_json::to_string(body)?;
-    let ts = now_ms();
-    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, body_str);
-    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
-
-    let url = format!("{}{}", cfg.bybit_base_url(), path);
-    let res = http
-        .post(url)
-        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", ts)
-        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
-        .header(CONTENT_TYPE, "application/json")
-        .body(body_str)
-        .send()
-        .await?;
-
-    parse_bybit_json_response(res, "bybit private").await
-}
-
-async fn run_bybit_sanity_checks(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-) -> Result<(), String> {
-    let time_value = bybit_public_get(http, cfg, "/v5/market/time")
-        .await
-        .map_err(|e| format!("market/time failed: {}", e))?;
-
-    let time_ret = time_value
-        .get("retCode")
-        .and_then(Value::as_i64)
-        .unwrap_or(-1);
-    if time_ret != 0 {
-        return Err(format!(
-            "market/time retCode={} body={}",
-            time_ret, time_value
-        ));
-    }
-
-    tracing::info!("Bybit sanity check: market/time OK");
-
-    if matches!(cfg.trading_mode, TradingMode::Paper) {
-        tracing::info!("Bybit sanity check: wallet skipped (paper mode uses database simulation)");
-        return Ok(());
-    }
-
-    if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
-        if cfg.live_orders_enabled {
-            return Err("live orders enabled but BYBIT_API_KEY/SECRET missing".to_string());
-        }
-        tracing::info!("Bybit sanity check: wallet skipped (no API credentials)");
-        return Ok(());
-    }
-
-    let mut candidates = vec![cfg.bybit_account_type.to_uppercase()];
-    for fallback in ["UNIFIED", "CONTRACT", "SPOT"] {
-        if !candidates.iter().any(|v| v == fallback) {
-            candidates.push(fallback.to_string());
-        }
-    }
-
-    let mut wallet_errors: Vec<String> = Vec::new();
-    let mut wallet_ok_account_type: Option<String> = None;
-
-    for account_type in candidates {
-        let query = format!("accountType={account_type}");
-        let wallet_value =
-            match bybit_private_get(http, cfg, "/v5/account/wallet-balance", &query).await {
-                Ok(v) => v,
-                Err(e) => {
-                    wallet_errors.push(format!("accountType={account_type} request_error={e}"));
-                    continue;
-                }
-            };
-
-        let wallet_ret = wallet_value
-            .get("retCode")
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-        if wallet_ret == 0 {
-            wallet_ok_account_type = Some(account_type.clone());
-            break;
-        }
-
-        wallet_errors.push(format!(
-            "accountType={} retCode={} body={}",
-            account_type, wallet_ret, wallet_value
-        ));
-    }
-
-    if let Some(ok_account_type) = wallet_ok_account_type {
-        if ok_account_type != cfg.bybit_account_type.to_uppercase() {
-            tracing::warn!(ok_account_type = %ok_account_type, configured = %cfg.bybit_account_type, "Bybit sanity check: wallet-balance OK with fallback");
-        } else {
-            tracing::info!(account_type = %cfg.bybit_account_type, "Bybit sanity check: wallet-balance OK");
-        }
-    } else {
-        return Err(format!(
-            "wallet-balance failed for all accountType candidates: {}",
-            wallet_errors.join(" | ")
-        ));
-    }
-
-    Ok(())
-}
-
-async fn remember_processed(state: &ExecutorState, source_event_id: &str) {
-    let mut seen = state.processed_in_memory.lock().await;
-    seen.insert(source_event_id.to_string());
-}
-
-async fn claim_processed_event(
-    state: &ExecutorState,
-    source_event_id: &str,
-    event: &StrategyDecisionEvent,
-) -> Result<bool, sqlx::Error> {
-    if let Some(pool) = &state.db_pool {
-        let data = json!({
-            "source_event_id": source_event_id,
-            "decision_event_id": event.event_id,
-            "action": event.decision.action,
-            "symbol": event.decision.symbol,
-            "status": "claimed",
-            "bybit_order_id": null,
-            "error": null,
-        });
-
-        let result = sqlx::query(
-            "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT DO NOTHING",
-        )
-        .bind("executor_event_processed")
-        .bind("info")
-        .bind("trade")
-        .bind(data)
-        .bind(&event.decision.symbol)
-        .bind(&event.schema_version)
-        .bind(decision_hash(event))
-        .execute(pool)
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Ok(false);
-        }
-
-        upsert_decision_audit(pool, source_event_id, event, "claimed", None, None).await?;
-        remember_processed(state, source_event_id).await;
-        return Ok(true);
-    }
-
-    let mut seen = state.processed_in_memory.lock().await;
-    Ok(seen.insert(source_event_id.to_string()))
-}
-
-async fn upsert_decision_audit(
-    pool: &PgPool,
-    source_event_id: &str,
-    event: &StrategyDecisionEvent,
-    status: &str,
-    bybit_order_id: Option<&str>,
-    error: Option<&str>,
-) -> Result<(), sqlx::Error> {
-    let payload = serde_json::to_value(event).unwrap_or_else(|_| json!({}));
-
-    sqlx::query(
-        "INSERT INTO strategy_decision_audit (
-            source_event_id,
-            decision_event_id,
-            schema_version,
-            symbol,
-            action,
-            reason,
-            smart_copy_compatible,
-            decision_hash,
-            executor_status,
-            bybit_order_id,
-            error,
-            payload
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        ON CONFLICT (decision_event_id) DO UPDATE SET
-            source_event_id = EXCLUDED.source_event_id,
-            schema_version = EXCLUDED.schema_version,
-            symbol = EXCLUDED.symbol,
-            action = EXCLUDED.action,
-            reason = EXCLUDED.reason,
-            smart_copy_compatible = EXCLUDED.smart_copy_compatible,
-            decision_hash = EXCLUDED.decision_hash,
-            executor_status = EXCLUDED.executor_status,
-            bybit_order_id = EXCLUDED.bybit_order_id,
-            error = EXCLUDED.error,
-            payload = EXCLUDED.payload,
-            updated_at = NOW()",
-    )
-    .bind(source_event_id)
-    .bind(&event.event_id)
-    .bind(&event.schema_version)
-    .bind(&event.decision.symbol)
-    .bind(&event.decision.action)
-    .bind(&event.decision.reason)
-    .bind(event.decision.smart_copy_compatible)
-    .bind(decision_hash(event))
-    .bind(status)
-    .bind(bybit_order_id)
-    .bind(error)
-    .bind(payload)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-async fn mark_processed(
-    state: &ExecutorState,
-    source_event_id: &str,
-    event: &StrategyDecisionEvent,
-    status: &str,
-    bybit_order_id: Option<&str>,
-    error: Option<&str>,
-) -> Result<(), sqlx::Error> {
-    if let Some(pool) = &state.db_pool {
-        let data = json!({
-            "source_event_id": source_event_id,
-            "decision_event_id": event.event_id,
-            "action": event.decision.action,
-            "symbol": event.decision.symbol,
-            "status": status,
-            "bybit_order_id": bybit_order_id,
-            "error": error,
-        });
-
-        sqlx::query(
-            "INSERT INTO system_events (event_type, severity, category, data, symbol, pipeline_version, decision_hash)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (event_type, (data->>'source_event_id'))
-             WHERE event_type = 'executor_event_processed'
-               AND COALESCE(data->>'source_event_id', '') <> ''
-             DO UPDATE SET
-                severity = EXCLUDED.severity,
-                category = EXCLUDED.category,
-                data = EXCLUDED.data,
-                symbol = EXCLUDED.symbol,
-                pipeline_version = EXCLUDED.pipeline_version,
-                decision_hash = EXCLUDED.decision_hash,
-                timestamp = NOW()",
-        )
-        .bind("executor_event_processed")
-        .bind(if status == "error" { "error" } else { "info" })
-        .bind("trade")
-        .bind(data)
-        .bind(&event.decision.symbol)
-        .bind(&event.schema_version)
-        .bind(decision_hash(event))
-        .execute(pool)
-        .await?;
-
-        upsert_decision_audit(pool, source_event_id, event, status, bybit_order_id, error).await?;
-    }
-
-    remember_processed(state, source_event_id).await;
-    Ok(())
-}
-
-async fn fetch_latest_control_flag(
-    pool: &PgPool,
-    event_type: &str,
-    default_enabled: bool,
-) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query_scalar::<_, Option<bool>>(
-        "SELECT (data->>'enabled')::boolean
-         FROM system_events
-         WHERE event_type = $1
-         ORDER BY timestamp DESC
-         LIMIT 1",
-    )
-    .bind(event_type)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.flatten().unwrap_or(default_enabled))
-}
-
-async fn fetch_runtime_controls(
-    state: &ExecutorState,
-    cfg: &ExecutorConfig,
-) -> Result<RuntimeControls, sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(RuntimeControls {
-            executor_enabled: true,
-            kill_switch_enabled: false,
-        });
-    };
-
-    let executor_enabled =
-        fetch_latest_control_flag(pool, "api_executor_state_set", cfg.executor_default_enabled)
-            .await?;
-    let kill_switch_enabled = fetch_latest_control_flag(pool, "api_kill_switch_set", false).await?;
-
-    Ok(RuntimeControls {
-        executor_enabled,
-        kill_switch_enabled,
-    })
-}
-
-async fn persist_trade(
-    state: &ExecutorState,
-    event: &StrategyDecisionEvent,
-    bybit_order_id: &str,
-    entry_qty: f64,
-    entry_price: f64,
-    fees: f64,
-    paper_trade: bool,
-) -> Result<(), sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(());
-    };
-
-    let side = if event.decision.action == "ENTER_LONG" {
-        "Long"
-    } else {
-        "Short"
-    };
-
-    let hash = decision_hash(event);
-
-    sqlx::query(
-        "INSERT INTO trades (
-            order_link_id,
-            bybit_order_id,
-            symbol,
-            side,
-            quantity,
-            entry_price,
-            fees,
-            leverage,
-            status,
-            decision_hash,
-            smart_copy_compatible,
-            pipeline_version,
-            paper_trade,
-            trailing_stop_activated,
-            trailing_stop_peak_price,
-            trailing_stop_final_distance_pct
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13,$14,$15)
-        ON CONFLICT (order_link_id) DO NOTHING",
-    )
-    .bind(&event.event_id)
-    .bind(bybit_order_id)
-    .bind(&event.decision.symbol)
-    .bind(side)
-    .bind(entry_qty)
-    .bind(entry_price)
-    .bind(fees)
-    .bind(event.decision.leverage)
-    .bind(hash)
-    .bind(event.decision.smart_copy_compatible)
-    .bind(&event.schema_version)
-    .bind(paper_trade)
-    .bind(false)
-    .bind(entry_price)
-    .bind(0.0_f64)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(0);
-    };
-
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM trades WHERE status = 'open'")
-            .fetch_one(pool)
-            .await?;
-
-    Ok(count)
-}
-
 // Returns the side ("Long"/"Short") of an existing open trade for the symbol, if
 // any. Guards against BOTH a same-side duplicate AND an opposite-side hedge: the
 // strategy is directional, so at most one open position per symbol is valid.
 // Checking only (symbol, side) let an ENTER_LONG open while a Short was still
 // open (and vice versa), leaving simultaneous long+short on the same symbol.
-async fn open_trade_side_for_symbol(
-    state: &ExecutorState,
-    symbol: &str,
-) -> Result<Option<String>, sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(None);
-    };
 
-    let side: Option<String> = sqlx::query_scalar(
-        "SELECT side FROM trades
-         WHERE status = 'open' AND symbol = $1
-         ORDER BY opened_at ASC
-         LIMIT 1",
-    )
-    .bind(symbol)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(side)
-}
-
-async fn persist_bybit_fills(
-    state: &ExecutorState,
-    event: &StrategyDecisionEvent,
-    bybit_order_id: &str,
-    fills: &[BybitFill],
-) -> Result<(), sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(());
-    };
-
-    for fill in fills {
-        sqlx::query(
-            "INSERT INTO bybit_fills (
-                bybit_execution_id,
-                bybit_order_id,
-                order_link_id,
-                symbol,
-                side,
-                exec_qty,
-                exec_price,
-                exec_fee,
-                fee_currency,
-                is_maker,
-                exec_time,
-                raw_data
-            ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                CASE WHEN $11 IS NULL THEN NULL ELSE to_timestamp(($11::double precision)/1000.0) END,
-                $12
-            )
-            ON CONFLICT (bybit_execution_id) DO NOTHING",
-        )
-        .bind(&fill.execution_id)
-        .bind(if fill.order_id.is_empty() { bybit_order_id } else { &fill.order_id })
-        .bind(&event.event_id)
-        .bind(&event.decision.symbol)
-        .bind(fill.side.as_deref())
-        .bind(fill.exec_qty)
-        .bind(fill.exec_price)
-        .bind(fill.exec_fee)
-        .bind(fill.fee_currency.as_deref())
-        .bind(fill.is_maker)
-        .bind(fill.exec_time_ms)
-        .bind(&fill.raw_data)
-        .execute(pool)
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn close_open_trade(
-    state: &ExecutorState,
-    event: &StrategyDecisionEvent,
-    close_qty: f64,
-    close_price: f64,
-    close_fee: f64,
-) -> Result<CloseReconcileResult, sqlx::Error> {
-    let Some(pool) = &state.db_pool else {
-        return Ok(CloseReconcileResult::NoLocalOpen);
-    };
-
-    let Some(side) = close_action_to_position_side(&event.decision.action) else {
-        return Ok(CloseReconcileResult::NoLocalOpen);
-    };
-
-    let open_trade: Option<(String, f64, f64, f64)> = sqlx::query_as(
-        "SELECT trade_id::text,
-                quantity::double precision,
-                entry_price::double precision,
-                leverage::double precision
-         FROM trades
-         WHERE symbol = $1
-           AND side = $2
-           AND status = 'open'
-         ORDER BY opened_at DESC
-         LIMIT 1",
-    )
-    .bind(&event.decision.symbol)
-    .bind(side)
-    .fetch_optional(pool)
-    .await?;
-
-    let Some((trade_id, open_qty, entry_price, _leverage)) = open_trade else {
-        return Ok(CloseReconcileResult::NoLocalOpen);
-    };
-
-    let eps = 1e-9_f64;
-    let effective_close_qty = if close_qty > open_qty {
-        open_qty
-    } else {
-        close_qty
-    };
-    let pnl_delta = realized_pnl(side, entry_price, close_price, effective_close_qty);
-    let close_reason = close_reason_from_decision(&event.decision.reason);
-
-    if close_qty + eps < open_qty {
-        sqlx::query(
-            "UPDATE trades
-             SET quantity = quantity - $2,
-                 pnl = COALESCE(pnl, 0) + $3,
-                 fees = COALESCE(fees, 0) + $4,
-                 exit_price = $5,
-                 updated_at = NOW()
-             WHERE trade_id::text = $1",
-        )
-        .bind(&trade_id)
-        .bind(close_qty)
-        .bind(pnl_delta)
-        .bind(close_fee)
-        .bind(close_price)
-        .execute(pool)
-        .await?;
-
-        return Ok(CloseReconcileResult::Partial {
-            trade_id,
-            remaining_qty: open_qty - close_qty,
-            realized_pnl: pnl_delta,
-        });
-    }
-
-    sqlx::query(
-        "UPDATE trades
-         SET status = 'closed',
-             close_reason = $5,
-             closed_at = NOW(),
-             pnl = COALESCE(pnl, 0) + $2,
-             fees = COALESCE(fees, 0) + $3,
-             pnl_pct = CASE
-                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2 - COALESCE(fees, 0) - $3) / (entry_price * quantity)) * 100)
-                 ELSE NULL
-             END,
-             exit_price = $4,
-             updated_at = NOW()
-         WHERE trade_id::text = $1",
-    )
-    .bind(&trade_id)
-    .bind(pnl_delta)
-    .bind(close_fee)
-    .bind(close_price)
-    .bind(close_reason)
-    .execute(pool)
-    .await?;
-
-    if close_qty > open_qty + eps {
-        return Ok(CloseReconcileResult::CloseQtyExceedsOpen {
-            trade_id,
-            open_qty,
-            close_qty,
-            realized_pnl: pnl_delta,
-        });
-    }
-
-    Ok(CloseReconcileResult::Closed {
-        trade_id,
-        realized_pnl: pnl_delta,
-    })
-}
-
-async fn submit_market_order(
-    state: &ExecutorState,
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    event: &StrategyDecisionEvent,
-) -> Result<String, Box<dyn Error>> {
-    let side = action_to_side(&event.decision.action).ok_or("unsupported action for order")?;
-
-    let close_action = is_close_action(&event.decision.action);
-    let constraints = get_symbol_constraints(state, http, cfg, &event.decision.symbol)
-        .await
-        .map_err(|e| {
-            format!(
-                "symbol constraints unavailable for {} (live-safe block): {}",
-                event.decision.symbol, e
-            )
-        })?;
-    let normalized_qty = normalize_order_quantity(event.decision.quantity, constraints)
-        .map_err(|e| format!("quantity validation failed: {e}"))?;
-
-    ensure_min_notional(
-        &event.decision.action,
-        normalized_qty,
-        event.decision.entry_price,
-        constraints,
-    )
-    .map_err(|e| format!("notional validation failed: {e}"))?;
-
-    if (normalized_qty - event.decision.quantity).abs() > 1e-9 {
-        tracing::info!(event_id = %event.event_id, symbol = %event.decision.symbol, action = %event.decision.action, original_qty = event.decision.quantity, normalized_qty = normalized_qty, "Adjusted order quantity");
-    }
-
-    let qty_str = format_order_qty(normalized_qty, constraints.qty_step);
-
-    let body = json!({
-        "category": "linear",
-        "symbol": event.decision.symbol,
-        "side": side,
-        "orderType": "Market",
-        "qty": qty_str,
-        "orderLinkId": event.event_id,
-        "reduceOnly": close_action,
-        "closeOnTrigger": close_action,
-    });
-
-    let body_str = serde_json::to_string(&body)?;
-    let ts = now_ms();
-    let sign_payload = format!("{}{}{}{}", ts, cfg.bybit_api_key, cfg.recv_window, body_str);
-    let sign = bybit_sign(&cfg.bybit_api_secret, &sign_payload)?;
-
-    let url = format!("{}/v5/order/create", cfg.bybit_base_url());
-    let res = http
-        .post(url)
-        .header("X-BAPI-API-KEY", &cfg.bybit_api_key)
-        .header("X-BAPI-SIGN", sign)
-        .header("X-BAPI-SIGN-TYPE", "2")
-        .header("X-BAPI-TIMESTAMP", ts)
-        .header("X-BAPI-RECV-WINDOW", &cfg.recv_window)
-        .header("Content-Type", "application/json")
-        .body(body_str)
-        .send()
-        .await?;
-
-    let status = res.status();
-    let value: Value = res.json().await?;
-
-    if !status.is_success() {
-        return Err(format!("bybit http={} body={}", status, value).into());
-    }
-
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let order_id = value
-        .get("result")
-        .and_then(|r| r.get("orderId"))
-        .and_then(Value::as_str)
-        .ok_or("missing result.orderId")?
-        .to_string();
-
-    Ok(order_id)
-}
-
-async fn fetch_order_execution_price(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-    order_id: &str,
-) -> Result<Option<f64>, Box<dyn Error>> {
-    let query = format!(
-        "category=linear&symbol={}&orderId={}",
-        symbol.to_uppercase(),
-        order_id
-    );
-
-    let value = bybit_private_get(http, cfg, "/v5/order/realtime", &query).await?;
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let maybe_avg = value
-        .get("result")
-        .and_then(|r| r.get("list"))
-        .and_then(Value::as_array)
-        .and_then(|list| list.first())
-        .and_then(|order| order.get("avgPrice"))
-        .and_then(Value::as_str)
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|p| *p > 0.0);
-
-    Ok(maybe_avg)
-}
-
-async fn fetch_order_execution_fills(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-    order_id: &str,
-) -> Result<Vec<BybitFill>, Box<dyn Error>> {
-    let query = format!(
-        "category=linear&symbol={}&orderId={}",
-        symbol.to_uppercase(),
-        order_id
-    );
-
-    let value = bybit_private_get(http, cfg, "/v5/execution/list", &query).await?;
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let fills = value
-        .get("result")
-        .and_then(|r| r.get("list"))
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|fill| {
-                    let execution_id = fill
-                        .get("execId")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    if execution_id.is_empty() {
-                        return None;
-                    }
-
-                    let order_id = fill
-                        .get("orderId")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-
-                    let exec_qty = fill
-                        .get("execQty")
-                        .and_then(Value::as_str)
-                        .and_then(|x| x.parse::<f64>().ok())
-                        .unwrap_or(0.0);
-                    if exec_qty <= 0.0 {
-                        return None;
-                    }
-
-                    let exec_price = fill
-                        .get("execPrice")
-                        .and_then(Value::as_str)
-                        .and_then(|x| x.parse::<f64>().ok())
-                        .filter(|v| *v > 0.0);
-
-                    let exec_fee = fill
-                        .get("execFee")
-                        .and_then(Value::as_str)
-                        .and_then(|x| x.parse::<f64>().ok())
-                        .unwrap_or(0.0);
-
-                    let fee_currency = fill
-                        .get("feeCurrency")
-                        .and_then(Value::as_str)
-                        .map(str::to_string);
-
-                    let side = fill.get("side").and_then(Value::as_str).map(str::to_string);
-                    let is_maker = fill.get("isMaker").and_then(Value::as_bool);
-                    let exec_time_ms = fill
-                        .get("execTime")
-                        .and_then(Value::as_str)
-                        .and_then(|x| x.parse::<i64>().ok());
-
-                    Some(BybitFill {
-                        execution_id,
-                        order_id,
-                        side,
-                        exec_qty,
-                        exec_price,
-                        exec_fee,
-                        fee_currency,
-                        is_maker,
-                        exec_time_ms,
-                        raw_data: fill.clone(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Ok(fills)
-}
-
-async fn fetch_order_execution_meta(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-    order_id: &str,
-) -> Result<OrderExecutionMeta, Box<dyn Error>> {
-    let avg_price_from_order = fetch_order_execution_price(http, cfg, symbol, order_id).await?;
-    let fills = match fetch_order_execution_fills(http, cfg, symbol, order_id).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(symbol = %symbol, order_id = %order_id, error = %e, "Failed to fetch Bybit fills");
-            Vec::new()
-        }
-    };
-
-    let total_fee: f64 = fills.iter().map(|f| f.exec_fee).sum();
-    let total_qty: f64 = fills.iter().map(|f| f.exec_qty).sum();
-    let weighted_notional: f64 = fills
-        .iter()
-        .filter_map(|f| f.exec_price.map(|p| p * f.exec_qty))
-        .sum();
-
-    let avg_price_from_fills = if total_qty > 0.0 && weighted_notional > 0.0 {
-        Some(weighted_notional / total_qty)
-    } else {
-        None
-    };
-
-    Ok(OrderExecutionMeta {
-        avg_price: avg_price_from_order.or(avg_price_from_fills),
-        fee: if total_fee.abs() < 1e-12 {
-            None
-        } else {
-            Some(total_fee)
-        },
-        executed_qty: if total_qty.abs() < 1e-12 {
-            None
-        } else {
-            Some(total_qty)
-        },
-        fills,
-    })
-}
-
-async fn fetch_bybit_position_qty(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-    side: &str,
-) -> Result<f64, Box<dyn Error>> {
-    let query = format!("category=linear&symbol={}", symbol.to_uppercase());
-    let value = bybit_private_get(http, cfg, "/v5/position/list", &query).await?;
-
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let bybit_side = if side == "Long" { "Buy" } else { "Sell" };
-    let qty = value
-        .get("result")
-        .and_then(|r| r.get("list"))
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter(|pos| pos.get("side").and_then(Value::as_str) == Some(bybit_side))
-                .filter_map(|pos| pos.get("size"))
-                .filter_map(Value::as_str)
-                .filter_map(|x| x.parse::<f64>().ok())
-                .fold(0.0, |acc, v| acc + v)
-        })
-        .unwrap_or(0.0);
-
-    Ok(qty)
-}
-
-async fn fetch_bybit_last_price(
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    symbol: &str,
-) -> Result<f64, Box<dyn Error>> {
-    let path = format!(
-        "/v5/market/tickers?category=linear&symbol={}",
-        symbol.to_uppercase()
-    );
-    let value = bybit_public_get(http, cfg, &path).await?;
-
-    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-    if ret_code != 0 {
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!("bybit retCode={} retMsg={}", ret_code, ret_msg).into());
-    }
-
-    let price = value
-        .get("result")
-        .and_then(|r| r.get("list"))
-        .and_then(Value::as_array)
-        .and_then(|list| list.first())
-        .and_then(|ticker| ticker.get("lastPrice"))
-        .and_then(Value::as_str)
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|p| *p > 0.0)
-        .ok_or("missing result.list[0].lastPrice")?;
-
-    Ok(price)
-}
-
-async fn set_bybit_trailing_stop(
-    state: &ExecutorState,
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-    event: &StrategyDecisionEvent,
-    entry_price: f64,
-) -> Result<(), Box<dyn Error>> {
-    if !matches!(event.decision.action.as_str(), "ENTER_LONG" | "ENTER_SHORT") {
-        return Ok(());
-    }
-
-    let Some(native_cfg) = load_native_trailing_config(cfg, &event.decision.symbol) else {
-        return Ok(());
-    };
-
-    if !native_cfg.enabled || entry_price <= 0.0 {
-        return Ok(());
-    }
-
-    let constraints = get_symbol_constraints(state, http, cfg, &event.decision.symbol).await?;
-    let is_long = event.decision.action == "ENTER_LONG";
-    let trailing_distance_raw = entry_price * native_cfg.initial_trail_pct;
-    let trailing_distance = snap_price_to_tick(trailing_distance_raw, constraints.tick_size);
-
-    if trailing_distance <= 0.0 {
-        return Err("computed trailing distance is not positive".into());
-    }
-
-    let mut last_error: Option<String> = None;
-
-    for attempt in 1..=4 {
-        let last_price = fetch_bybit_last_price(http, cfg, &event.decision.symbol)
-            .await
-            .unwrap_or(entry_price);
-        let active_price_target = if is_long {
-            (entry_price * (1.0 + native_cfg.activate_after_profit_pct))
-                .max(last_price + constraints.tick_size)
-        } else {
-            (entry_price * (1.0 - native_cfg.activate_after_profit_pct))
-                .min((last_price - constraints.tick_size).max(constraints.tick_size))
-        };
-        let active_price = snap_price_to_tick(active_price_target, constraints.tick_size);
-
-        let body = json!({
-            "category": "linear",
-            "symbol": event.decision.symbol,
-            "tpslMode": "Full",
-            "positionIdx": 0,
-            "activePrice": format_price_value(active_price, constraints.tick_size),
-            "trailingStop": format_price_value(trailing_distance, constraints.tick_size),
-        });
-
-        let value = bybit_private_post(http, cfg, "/v5/position/trading-stop", &body).await?;
-        let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
-        if ret_code == 0 {
-            tracing::info!(
-                event_id = %event.event_id,
-                symbol = %event.decision.symbol,
-                active_price = ?format_price_value(active_price, constraints.tick_size),
-                trailing_distance = ?format_price_value(trailing_distance, constraints.tick_size),
-                attempt = attempt,
-                "Configured Bybit trailing stop"
-            );
-            return Ok(());
-        }
-
-        let ret_msg = value
-            .get("retMsg")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string();
-        last_error = Some(format!(
-            "bybit trailing-stop retCode={} retMsg={} body={}",
-            ret_code, ret_msg, value
-        ));
-
-        let retryable_zero_position = ret_msg.contains("zero position");
-        let retryable_active_price = ret_msg.contains("TrailingProfit:")
-            || ret_msg.contains("should greater than")
-            || ret_msg.contains("should be less than");
-
-        if !(retryable_zero_position || retryable_active_price) || attempt == 4 {
-            break;
-        }
-
-        tokio::time::sleep(Duration::from_millis(350 * attempt as u64)).await;
-    }
-
-    Err(last_error
-        .unwrap_or_else(|| "unknown trailing-stop error".to_string())
-        .into())
-}
-
-async fn local_open_qty(pool: &PgPool, symbol: &str, side: &str) -> Result<f64, sqlx::Error> {
-    let qty: Option<f64> = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(quantity)::double precision, 0)
-         FROM trades
-         WHERE symbol = $1 AND side = $2 AND status = 'open'",
-    )
-    .bind(symbol)
-    .bind(side)
-    .fetch_one(pool)
-    .await?;
-    Ok(qty.unwrap_or(0.0))
-}
-
-fn reconciliation_event_meta(fix_applied: bool) -> (&'static str, &'static str) {
-    if fix_applied {
-        ("executor_reconciliation_fix_applied", "info")
-    } else {
-        ("executor_reconciliation_detected", "warning")
+const PAPER_SLIPPAGE_MIN: f64 = 0.0003;
+const PAPER_SLIPPAGE_MAX: f64 = 0.0008;
+const PAPER_FILL_PROB: f64 = 0.97;
+
+fn paper_adverse_slippage(action: &str, price: f64) -> f64 {
+    use rand::Rng;
+    let slip_pct: f64 = rand::thread_rng().gen_range(PAPER_SLIPPAGE_MIN..PAPER_SLIPPAGE_MAX);
+    match action {
+        "ENTER_LONG" | "CLOSE_SHORT" => price * (1.0 + slip_pct),
+        "ENTER_SHORT" | "CLOSE_LONG" => price * (1.0 - slip_pct),
+        _ => price,
     }
 }
 
-async fn record_reconciliation_event(
-    pool: &PgPool,
-    symbol: &str,
-    side: &str,
-    local_qty: f64,
-    bybit_qty: f64,
-    diff: f64,
-    fix_applied: bool,
-) -> Result<(), sqlx::Error> {
-    let (event_type, severity) = reconciliation_event_meta(fix_applied);
-    let data = json!({
-        "symbol": symbol,
-        "side": side,
-        "local_qty": local_qty,
-        "bybit_qty": bybit_qty,
-        "diff": diff,
-        "fix_applied": fix_applied,
-    });
-
-    sqlx::query(
-        "INSERT INTO system_events (event_type, severity, category, data, symbol)
-         VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(event_type)
-    .bind(severity)
-    .bind("reconciliation")
-    .bind(data)
-    .bind(symbol)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-async fn apply_reconciliation_reduce_local(
-    pool: &PgPool,
-    symbol: &str,
-    side: &str,
-    target_qty: f64,
-) -> Result<(f64, f64), sqlx::Error> {
-    let open_trades: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT trade_id::text, quantity::double precision
-         FROM trades
-         WHERE symbol = $1 AND side = $2 AND status = 'open'
-         ORDER BY opened_at DESC",
-    )
-    .bind(symbol)
-    .bind(side)
-    .fetch_all(pool)
-    .await?;
-
-    let local_qty: f64 = open_trades.iter().map(|(_, q)| *q).sum();
-    let mut to_reduce = (local_qty - target_qty).max(0.0);
-    let eps = 1e-9_f64;
-
-    for (trade_id, qty) in open_trades {
-        if to_reduce <= eps {
-            break;
-        }
-
-        if to_reduce + eps >= qty {
-            sqlx::query(
-                "UPDATE trades
-                 SET status='closed',
-                     close_reason='error',
-                     closed_at=NOW(),
-                     updated_at=NOW()
-                 WHERE trade_id::text=$1",
-            )
-            .bind(&trade_id)
-            .execute(pool)
-            .await?;
-            to_reduce -= qty;
-        } else {
-            let new_qty = (qty - to_reduce).max(0.0);
-            sqlx::query(
-                "UPDATE trades
-                 SET quantity=$2,
-                     updated_at=NOW()
-                 WHERE trade_id::text=$1",
-            )
-            .bind(&trade_id)
-            .bind(new_qty)
-            .execute(pool)
-            .await?;
-
-            break;
-        }
-    }
-
-    let final_qty = local_open_qty(pool, symbol, side).await?;
-    Ok((local_qty, final_qty))
-}
-
-async fn run_reconciliation_tick(
-    state: &ExecutorState,
-    http: &reqwest::Client,
-    cfg: &ExecutorConfig,
-) -> Result<(), Box<dyn Error>> {
-    if !cfg.live_orders_enabled {
-        return Ok(());
-    }
-    let Some(pool) = &state.db_pool else {
-        return Ok(());
-    };
-
-    let symbols: Vec<String> = if cfg.live_symbol_allowlist.is_empty() {
-        sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT symbol FROM trades WHERE status = 'open' ORDER BY symbol",
-        )
-        .fetch_all(pool)
-        .await?
-    } else {
-        cfg.live_symbol_allowlist.iter().cloned().collect()
-    };
-
-    for symbol in symbols {
-        for side in ["Long", "Short"] {
-            let local_qty = local_open_qty(pool, &symbol, side).await?;
-            let bybit_qty = fetch_bybit_position_qty(http, cfg, &symbol, side).await?;
-            let diff = (local_qty - bybit_qty).abs();
-
-            if diff > 1e-6 {
-                tracing::warn!(symbol = %symbol, side = %side, local_qty = local_qty, bybit_qty = bybit_qty, diff = diff, fix_mode = ?cfg.reconcile_fix, "Reconciliation diff");
-
-                if cfg.reconcile_fix {
-                    if local_qty > bybit_qty + 1e-6 {
-                        match apply_reconciliation_reduce_local(pool, &symbol, side, bybit_qty)
-                            .await
-                        {
-                            Ok((before, after)) => {
-                                let _ = record_reconciliation_event(
-                                    pool,
-                                    &symbol,
-                                    side,
-                                    before,
-                                    bybit_qty,
-                                    (before - bybit_qty).abs(),
-                                    true,
-                                )
-                                .await;
-                                tracing::info!(symbol = %symbol, side = %side, before_local = before, target_bybit = bybit_qty, after_local = after, "Reconciliation fix applied");
-                            }
-                            Err(e) => {
-                                tracing::warn!(symbol = %symbol, side = %side, error = %e, "Reconciliation fix failed");
-                            }
-                        }
-                    } else {
-                        let _ = record_reconciliation_event(
-                            pool, &symbol, side, local_qty, bybit_qty, diff, false,
-                        )
-                        .await;
-                        tracing::warn!(symbol = %symbol, side = %side, "Reconciliation fix skipped");
-                    }
-                } else {
-                    let _ = record_reconciliation_event(
-                        pool, &symbol, side, local_qty, bybit_qty, diff, false,
-                    )
-                    .await;
-                }
-            }
-        }
-    }
-
-    Ok(())
+fn paper_fill_check() -> bool {
+    rand::thread_rng().gen_bool(PAPER_FILL_PROB)
 }
 
 async fn handle_decision_event(
@@ -2034,9 +603,24 @@ async fn handle_decision_event(
             "Live orders disabled; paper-trade dry-run"
         );
 
+        if !paper_fill_check() {
+            mark_processed(
+                state,
+                &idem_key,
+                &event,
+                "paper_not_filled",
+                Some(&format!("paper-{}", event.event_id)),
+                None,
+            )
+            .await?;
+            tracing::info!(event_id = %event.event_id, action = %event.decision.action, symbol = %event.decision.symbol, "Paper order not filled (fill probability check)");
+            return Ok(());
+        }
+
         let status = if is_close_action(&event.decision.action) {
             let close_qty = event.decision.quantity;
-            let close_price = event.decision.entry_price;
+            let close_price =
+                paper_adverse_slippage(&event.decision.action, event.decision.entry_price);
             match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
                 Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
                 Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
@@ -2129,7 +713,8 @@ async fn handle_decision_event(
             }
 
             let entry_qty = event.decision.quantity;
-            let entry_price = event.decision.entry_price;
+            let entry_price =
+                paper_adverse_slippage(&event.decision.action, event.decision.entry_price);
             if let Err(e) = persist_trade(
                 state,
                 &event,
@@ -2366,6 +951,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         db_pool,
         processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
         constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let listener = TcpListener::bind("0.0.0.0:8083").await?;
@@ -2420,13 +1006,145 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     tracing::info!(redis_url = %cfg.redis_url, "Connecting to Redis");
     let redis_client = redis::Client::open(cfg.redis_url.clone())?;
-    let mut ack_conn = redis_client.get_multiplexed_async_connection().await?;
-    #[allow(deprecated)]
-    let mut pubsub = redis_client.get_async_connection().await?.into_pubsub();
-    pubsub.subscribe(viper_domain::REDIS_CHANNEL_DECISIONS).await?;
-    tracing::info!("Subscribed to viper:decisions");
+    let mut pub_conn = redis_client.get_multiplexed_async_connection().await?;
+    stream_ensure_group(&mut pub_conn, REDIS_STREAM_DECISIONS, STREAM_GROUP_EXECUTOR).await;
+    stream_ensure_group(
+        &mut pub_conn,
+        REDIS_STREAM_CONTROL_EVENTS,
+        STREAM_GROUP_EXECUTOR,
+    )
+    .await;
 
-    let mut messages = pubsub.on_message();
+    let (decision_tx, mut decision_rx) = mpsc::unbounded_channel::<String>();
+    let decision_consumer = format!("executor-{}", std::process::id());
+    let decision_tx_clone = decision_tx.clone();
+    let mut stream_shutdown_rx = shutdown_rx.clone();
+    let redis_url_stream = cfg.redis_url.clone();
+    tokio::spawn(async move {
+        loop {
+            let c = match redis::Client::open(redis_url_stream.as_str()) {
+                Ok(c) => c,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+            let mut conn = match c.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+            loop {
+                tokio::select! {
+                    _ = stream_shutdown_rx.changed() => return,
+                    result = async {
+                        let r: redis::RedisResult<viper_domain::StreamEntries> = redis::cmd("XREADGROUP")
+                            .arg("GROUP").arg(STREAM_GROUP_EXECUTOR).arg(&decision_consumer)
+                            .arg("BLOCK").arg(2000).arg("COUNT").arg(1)
+                            .arg("STREAMS").arg(REDIS_STREAM_DECISIONS).arg(">")
+                            .query_async(&mut conn).await;
+                        r
+                    } => {
+                        match result {
+                            Ok(entries) => {
+                                for (_stream, msgs) in entries {
+                                    for (msg_id, fields) in msgs {
+                                        for (k, v) in fields {
+                                            if k == "payload" {
+                                                let _ = decision_tx_clone.send(v);
+                                                let _: Result<String, _> = redis::cmd("XACK")
+                                                    .arg(REDIS_STREAM_DECISIONS).arg(STREAM_GROUP_EXECUTOR).arg(&msg_id)
+                                                    .query_async(&mut conn).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Decision stream read failed");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    });
+
+    let state_ctl = state.clone();
+    let mut shutdown_rx_ctl = shutdown_rx.clone();
+    let redis_url_ctl = cfg.redis_url.clone();
+    let ctl_consumer = format!("executor-ctl-{}", std::process::id());
+    tokio::spawn(async move {
+        loop {
+            let ctl_client = match redis::Client::open(redis_url_ctl.as_str()) {
+                Ok(c) => c,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+            let mut ctl_conn = match ctl_client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx_ctl.changed() => return,
+                    result = async {
+                        let r: redis::RedisResult<viper_domain::StreamEntries> = redis::cmd("XREADGROUP")
+                            .arg("GROUP").arg(STREAM_GROUP_EXECUTOR).arg(&ctl_consumer)
+                            .arg("BLOCK").arg(2000).arg("COUNT").arg(1)
+                            .arg("STREAMS").arg(REDIS_STREAM_CONTROL_EVENTS).arg(">")
+                            .query_async(&mut ctl_conn).await;
+                        r
+                    } => {
+                        match result {
+                            Ok(entries) => {
+                                for (_stream, msgs) in entries {
+                                    for (msg_id, fields) in msgs {
+                                        for (k, v) in fields {
+                                            if k == "payload" {
+                                                let control: serde_json::Value = match serde_json::from_str(&v) {
+                                                    Ok(val) => val,
+                                                    Err(_) => continue,
+                                                };
+                                                if control.get("type").and_then(|t| t.as_str()) == Some("kill_switch_sync") {
+                                                    let enabled = control.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                                                    let request_id = control.get("request_id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                                                    let pool = state_ctl.db_pool.clone();
+                                                    let actual_enabled = if let Some(p) = pool {
+                                                        fetch_latest_control_flag(&p, "api_kill_switch_set", false).await.unwrap_or(false)
+                                                    } else { false };
+                                                    let ack = serde_json::json!({"type": "kill_switch_ack", "enabled": actual_enabled, "request_id": request_id, "status": "applied"});
+                                                    let _ = stream_publish(&mut ctl_conn, REDIS_STREAM_EXECUTOR_EVENTS, &ack.to_string()).await;
+                                                    tracing::info!(request_id = %request_id, requested_enabled = enabled, actual_enabled = actual_enabled, "Executor processed kill-switch sync request");
+                                                }
+                                                let _: Result<String, _> = redis::cmd("XACK")
+                                                    .arg(REDIS_STREAM_CONTROL_EVENTS).arg(STREAM_GROUP_EXECUTOR).arg(&msg_id)
+                                                    .query_async(&mut ctl_conn).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Control stream read failed");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    });
 
     loop {
         tokio::select! {
@@ -2434,20 +1152,18 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 tracing::info!("Received shutdown signal, stopping viper-executor");
                 break;
             }
-            maybe_msg = messages.next() => {
-                let Some(msg) = maybe_msg else {
+            maybe_msg = decision_rx.recv() => {
+                let Some(payload) = maybe_msg else {
                     tracing::warn!("Decision stream ended unexpectedly; exiting so container can restart");
                     return Err("decision stream ended unexpectedly".into());
                 };
-
-                let payload: String = msg.get_payload()?;
 
                 if let Ok(event) = serde_json::from_str::<StrategyDecisionEvent>(&payload) {
                     if let Err(e) = handle_decision_event(&state, &http, &cfg, event.clone()).await {
                         tracing::warn!(event_id = %event.event_id, error = %e, "Executor failed handling event");
                     }
 
-                    let _ = ack_conn.publish::<_, _, ()>(viper_domain::REDIS_CHANNEL_EXECUTOR_EVENTS, payload).await;
+                    let _ = stream_publish(&mut pub_conn, REDIS_STREAM_EXECUTOR_EVENTS, &payload).await;
                     continue;
                 }
 
@@ -2632,6 +1348,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let partial: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
@@ -2726,6 +1443,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let key = format!("it-fill-{}", now_ms());
@@ -2847,6 +1565,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let paper_order_id = format!("paper-{}", event.event_id);
@@ -2917,6 +1636,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let paper_order_id = format!("paper-{}", event.event_id);
@@ -2981,6 +1701,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let close_event: StrategyDecisionEvent = serde_json::from_value(serde_json::json!({
@@ -3073,6 +1794,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let existing_side = open_trade_side_for_symbol(&state, "ADAUSDT")
@@ -3128,6 +1850,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let open_count = count_open_trades(&state).await.expect("count open");
@@ -3193,6 +1916,9 @@ mod tests {
             live_orders_enabled: false,
             live_symbol_allowlist: HashSet::new(),
             reconcile_fix: false,
+            reconcile_auto_fix: false,
+            reconcile_max_correction_pct: 0.05,
+            reconcile_max_daily: 5,
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
             trading_profile: "MEDIUM".to_string(),
@@ -3202,6 +1928,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let http = reqwest::Client::new();
@@ -3288,6 +2015,9 @@ mod tests {
             live_orders_enabled: false,
             live_symbol_allowlist: HashSet::new(),
             reconcile_fix: false,
+            reconcile_auto_fix: false,
+            reconcile_max_correction_pct: 0.05,
+            reconcile_max_daily: 5,
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
             trading_profile: "MEDIUM".to_string(),
@@ -3297,6 +2027,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let http = reqwest::Client::new();
@@ -3366,6 +2097,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let idem_key = idempotency_key(&event);

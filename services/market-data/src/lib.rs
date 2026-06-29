@@ -1,9 +1,7 @@
+pub(crate) mod consensus;
 pub(crate) mod exchanges;
 pub(crate) mod indicators;
-pub(crate) mod consensus;
 
-use redis::AsyncCommands;
-use serde_json;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,11 +11,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{watch, RwLock};
 use viper_domain::config::*;
-use viper_domain::{MarketSignal, MarketSignalEvent, REDIS_CHANNEL_MARKET_DATA};
+use viper_domain::{stream_publish, MarketSignal, MarketSignalEvent, REDIS_STREAM_MARKET_DATA};
 
 use crate::consensus::{
-    apply_btc_context, fetch_analytics_weights, stabilize_consensus_side,
-    ConsensusLatchState, InvalidSignalDrop, LatestSignalsSnapshot,
+    apply_btc_context, fetch_analytics_weights, stabilize_consensus_side, ConsensusLatchState,
+    InvalidSignalDrop, LatestSignalsSnapshot,
 };
 use crate::exchanges::fetch_market_signal;
 
@@ -46,13 +44,13 @@ async fn shutdown_signal() {
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "viper_market_data=info".into()),
         )
         .json()
-        .init();
+        .try_init();
 
     tracing::info!("Starting viper-market-data");
 
@@ -151,11 +149,17 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(20)
         .max(1);
+    let min_exchanges = std::env::var("MARKET_DATA_MIN_EXCHANGES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(2)
+        .clamp(1, 3);
     let mut consensus_latch = HashMap::<String, ConsensusLatchState>::new();
     tracing::info!(
         bybit_env = %bybit_env,
         base_url = %base_url,
         analytics_scores_url = %analytics_scores_url,
+        min_exchanges = min_exchanges,
         pairs = %universe.join(","),
         "Market-data config"
     );
@@ -174,7 +178,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         let weights =
             fetch_analytics_weights(&http, &analytics_scores_url, analytics_min_evaluated).await;
 
-        let btc_context = match fetch_market_signal(&http, &base_url, "BTCUSDT", &weights).await {
+        let btc_context = match fetch_market_signal(
+            &http,
+            &base_url,
+            "BTCUSDT",
+            &weights,
+            min_exchanges,
+        )
+        .await
+        {
             Ok(mut signal) => {
                 stabilize_consensus_side(&mut signal, &mut consensus_latch);
                 signal
@@ -196,7 +208,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         let mut cycle_signals = HashMap::<String, MarketSignal>::new();
 
         for symbol in universe.iter() {
-            match fetch_market_signal(&http, &base_url, symbol, &weights).await {
+            match fetch_market_signal(&http, &base_url, symbol, &weights, min_exchanges).await {
                 Ok(mut signal) => {
                     stabilize_consensus_side(&mut signal, &mut consensus_latch);
                     apply_btc_context(&mut signal, &btc_context);
@@ -266,7 +278,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
                 let json = serde_json::to_string(&event)?;
-                if let Err(e) = conn.publish::<_, _, ()>(REDIS_CHANNEL_MARKET_DATA, json).await {
+                if let Err(e) = stream_publish(&mut conn, REDIS_STREAM_MARKET_DATA, &json).await {
                     tracing::warn!(error = %e, "Failed to publish market data");
                     break;
                 }
@@ -290,10 +302,11 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
+    use super::consensus::*;
     use super::exchanges::*;
     use super::indicators::*;
-    use super::consensus::*;
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn c(close: f64) -> Candle {
         Candle {
@@ -938,5 +951,211 @@ mod tests {
             err.contains("incomplete"),
             "expected alignment error: {err}"
         );
+    }
+
+    // ── score_key ────────────────────────────────────────────────
+    #[test]
+    fn score_key_joins_exchange_and_symbol() {
+        assert_eq!(score_key("bybit", "BTCUSDT"), "bybit:BTCUSDT");
+        assert_eq!(score_key("binance", "ETHUSDT"), "binance:ETHUSDT");
+        assert_eq!(score_key("", ""), ":");
+    }
+
+    // ── unix_time_ms ─────────────────────────────────────────────
+    #[test]
+    fn unix_time_ms_is_recent_and_positive() {
+        let ts = unix_time_ms();
+        assert!(ts > 1_700_000_000_000, "ts={ts} looks prehistoric");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        assert!(
+            (ts - now).abs() < 1000,
+            "ts={ts} should be near current time"
+        );
+    }
+
+    // ── okx_inst_id ──────────────────────────────────────────────
+    #[test]
+    fn okx_inst_id_transforms_symbol() {
+        assert_eq!(okx_inst_id("BTCUSDT"), "BTC-USDT-SWAP");
+        assert_eq!(okx_inst_id("ETHUSDT"), "ETH-USDT-SWAP");
+        assert_eq!(okx_inst_id("1000PEPEUSDT"), "1000PEPE-USDT-SWAP");
+    }
+
+    #[test]
+    fn okx_inst_id_passes_through_non_usdt_suffix() {
+        // strip_suffix only removes "USDT" when it appears at the end
+        assert_eq!(okx_inst_id("BTC-USD"), "BTC-USD-USDT-SWAP");
+        assert_eq!(okx_inst_id("SOL"), "SOL-USDT-SWAP");
+    }
+
+    // ── parse_candles (Bybit format) ─────────────────────────────
+    #[test]
+    fn parse_candles_valid_rows() {
+        let rows = vec![vec![
+            "1000000".into(),
+            "open".into(),
+            "50000.0".into(),
+            "49900.0".into(),
+            "50100.0".into(),
+            "100.5".into(),
+        ]];
+        let candles = parse_candles(rows);
+        assert_eq!(candles.len(), 1);
+        assert_eq!(candles[0].open_time_ms, 1_000_000);
+        assert!((candles[0].high - 50000.0).abs() < 1e-6);
+        assert!((candles[0].low - 49900.0).abs() < 1e-6);
+        assert!((candles[0].close - 50100.0).abs() < 1e-6);
+        assert!((candles[0].volume_quote - 100.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_candles_skips_too_few_columns() {
+        let rows = vec![vec!["1000000".into(), "open".into()]];
+        let candles = parse_candles(rows);
+        assert!(candles.is_empty(), "should skip rows with <5 columns");
+    }
+
+    #[test]
+    fn parse_candles_skips_zero_close() {
+        let rows = vec![vec![
+            "1000000".into(),
+            "open".into(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+            "0".into(),
+        ]];
+        let candles = parse_candles(rows);
+        assert!(candles.is_empty(), "should skip rows where close <= 0");
+    }
+
+    #[test]
+    fn parse_candles_handles_missing_volume() {
+        // volume is in column 5 (0-indexed); if missing, defaults to 0
+        let rows = vec![vec![
+            "1000000".into(),
+            "open".into(),
+            "100.0".into(),
+            "99.0".into(),
+            "101.0".into(),
+        ]];
+        let candles = parse_candles(rows);
+        assert_eq!(candles.len(), 1);
+        assert!((candles[0].volume_quote - 0.0).abs() < 1e-6);
+    }
+
+    // ── parse_candles_binance ────────────────────────────────────
+    #[test]
+    fn parse_candles_binance_valid_rows() {
+        use serde_json::json;
+        let rows = vec![vec![
+            json!(1000000),
+            json!("open"),
+            json!(50000.0),
+            json!(49900.0),
+            json!(50100.0),
+            json!(200.5),
+        ]];
+        let candles = parse_candles_binance(rows);
+        assert_eq!(candles.len(), 1);
+        assert_eq!(candles[0].open_time_ms, 1_000_000);
+        assert!((candles[0].volume_quote - 200.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_candles_binance_skips_invalid_timestamp() {
+        use serde_json::json;
+        let rows = vec![vec![
+            json!("not_a_number"),
+            json!("open"),
+            json!(100.0),
+            json!(99.0),
+            json!(101.0),
+        ]];
+        let candles = parse_candles_binance(rows);
+        assert!(
+            candles.is_empty(),
+            "should skip rows with non-numeric timestamp"
+        );
+    }
+
+    // ── parse_candles_okx ────────────────────────────────────────
+    #[test]
+    fn parse_candles_okx_valid_rows() {
+        let rows = vec![vec![
+            "1000000".into(),
+            "open".into(),
+            "50000.0".into(),
+            "49900.0".into(),
+            "50100.0".into(),
+            "vol".into(),
+            "volCcy".into(),
+            "300.5".into(),
+        ]];
+        let candles = parse_candles_okx(rows);
+        assert_eq!(candles.len(), 1);
+        assert!(
+            (candles[0].volume_quote - 300.5).abs() < 1e-6,
+            "OKX volume at index 7"
+        );
+    }
+
+    #[test]
+    fn parse_candles_okx_missing_volume_defaults_zero() {
+        let rows = vec![vec![
+            "1000000".into(),
+            "open".into(),
+            "100.0".into(),
+            "99.0".into(),
+            "101.0".into(),
+        ]];
+        let candles = parse_candles_okx(rows);
+        assert_eq!(candles.len(), 1);
+        assert!((candles[0].volume_quote - 0.0).abs() < 1e-6);
+    }
+
+    // ── build_exchange_signal ────────────────────────────────────
+    #[test]
+    fn build_exchange_signal_rejects_empty_candles() {
+        let snap = RawExchangeSnapshot {
+            source: "bybit",
+            current_price: 100.0,
+            volume_24h: 1_000_000,
+            funding_rate: 0.01,
+            spread_pct: 0.05,
+            candles: vec![],
+        };
+        let err = build_exchange_signal("BTCUSDT", snap).unwrap_err();
+        assert!(err.contains("empty"), "error: {err}");
+    }
+
+    #[test]
+    fn build_exchange_signal_computes_indicators() {
+        let n = REQUIRED_CANDLE_COUNT + 10;
+        let candles: Vec<Candle> = (0..n)
+            .map(|i| Candle {
+                open_time_ms: i as i64 * 60_000,
+                high: 100.0 + (i % 5) as f64,
+                low: 99.0,
+                close: 100.0 + (i % 10) as f64,
+                volume_quote: 1000.0,
+            })
+            .collect();
+        let snap = RawExchangeSnapshot {
+            source: "bybit",
+            current_price: 105.0,
+            volume_24h: 1_000_000,
+            funding_rate: 0.01,
+            spread_pct: 0.05,
+            candles,
+        };
+        let signal = build_exchange_signal("BTCUSDT", snap).expect("build signal");
+        assert_eq!(signal.source, "bybit");
+        assert!((signal.current_price - 105.0).abs() < 1e-6);
+        assert!(signal.rsi_14 > 0.0, "rsi should be computed");
+        assert!(signal.trend_score != 0.0, "trend_score should be computed");
     }
 }

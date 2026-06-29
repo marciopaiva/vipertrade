@@ -1,6 +1,6 @@
 [package]
 name = "viper-domain"
-version = "0.8.1"
+version.workspace = true
 edition = "2021"
 description = "Shared domain contracts for ViperTrade event streams"
 
@@ -10,3 +10,4 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+redis = { workspace = true }

@@ -23,6 +23,7 @@ struct AppState {
     http_client: Client,
     engine: Executor,
     default_lookback_hours: i64,
+    symbol_limit: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,13 +334,13 @@ enum AnalystError {
 }
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "viper_ai_analyst=info".into()),
         )
         .json()
-        .init();
+        .try_init();
 
     let db_url =
         resolve_database_url().ok_or("DATABASE_URL or DB_* environment variables missing")?;
@@ -360,6 +361,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|value| value.parse::<i64>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(24),
+        symbol_limit: env::var("AI_ANALYST_SYMBOL_LIMIT")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(12),
     });
 
     let health = warp::path!("health")
@@ -434,7 +440,7 @@ async fn handle_recent_analysis(
         .filter(|value| *value > 0 && *value <= 24 * 14)
         .unwrap_or(state.default_lookback_hours);
 
-    match build_analysis(hours, &state).await {
+    match build_analysis(hours, state.symbol_limit, &state).await {
         Ok(response) => Ok(warp::reply::with_status(
             warp::reply::json(&response),
             StatusCode::OK,
@@ -641,7 +647,11 @@ async fn handle_tuning(req: TuningRequest, state: Arc<AppState>) -> Result<impl 
     }
 }
 
-async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse, AnalystError> {
+async fn build_analysis(
+    hours: i64,
+    symbol_limit: i64,
+    state: &AppState,
+) -> Result<AnalysisResponse, AnalystError> {
     let summary = fetch_summary(hours, 0, &state.db_pool).await?;
     let expectancy = fetch_expectancy(hours, 0, &state.db_pool).await?;
     let by_close_reason = fetch_breakdown(
@@ -671,8 +681,9 @@ async fn build_analysis(hours: i64, state: &AppState) -> Result<AnalysisResponse
     let top_entry_blockers = fetch_top_blockers(hours, 0, &state.db_pool).await?;
     let thesis_summary = fetch_thesis_summary(hours, 0, &state.db_pool).await?;
     let thesis_invalidation_breakdown =
-        fetch_thesis_invalidation_breakdown(hours, 0, &state.db_pool).await?;
-    let symbol_diagnostics = fetch_symbol_diagnostics(hours, 0, &state.db_pool).await?;
+        fetch_thesis_invalidation_breakdown(hours, 0, symbol_limit, &state.db_pool).await?;
+    let symbol_diagnostics =
+        fetch_symbol_diagnostics(hours, 0, symbol_limit, &state.db_pool).await?;
 
     let previous_summary = fetch_summary(hours, hours, &state.db_pool).await?;
     let previous_expectancy = fetch_expectancy(hours, hours, &state.db_pool).await?;
@@ -982,6 +993,7 @@ async fn fetch_thesis_summary(
 async fn fetch_thesis_invalidation_breakdown(
     hours: i64,
     offset_hours: i64,
+    symbol_limit: i64,
     pool: &PgPool,
 ) -> Result<Vec<ThesisReasonItem>, AnalystError> {
     let rows = sqlx::query_as::<_, (String, i64)>(
@@ -996,11 +1008,12 @@ async fn fetch_thesis_invalidation_breakdown(
           and reason like 'thesis_invalidated%'
         group by reason
         order by total desc
-        limit 12
+        limit $3
         "#,
     )
     .bind(hours)
     .bind(offset_hours)
+    .bind(symbol_limit)
     .fetch_all(pool)
     .await?;
 
@@ -1013,6 +1026,7 @@ async fn fetch_thesis_invalidation_breakdown(
 async fn fetch_symbol_diagnostics(
     hours: i64,
     offset_hours: i64,
+    symbol_limit: i64,
     pool: &PgPool,
 ) -> Result<Vec<SymbolDiagnosticItem>, AnalystError> {
     let rows = sqlx::query_as::<_, SymbolDiagnosticRow>(
@@ -1031,11 +1045,12 @@ async fn fetch_symbol_diagnostics(
           and opened_at < now() - ($2 * interval '1 hour')
         group by symbol
         order by avg_pnl_pct asc, trades desc
-        limit 12
+        limit $3
         "#,
     )
     .bind(hours)
     .bind(offset_hours)
+    .bind(symbol_limit)
     .fetch_all(pool)
     .await?;
 

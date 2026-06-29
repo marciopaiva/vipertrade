@@ -388,7 +388,10 @@ async fn publish_recon_event(redis_url: &str, result: &ReconResult) {
     };
 
     let publish_result: Result<(), redis::RedisError> = conn
-        .publish(viper_domain::REDIS_CHANNEL_RECONCILIATION, payload.to_string())
+        .publish(
+            viper_domain::REDIS_CHANNEL_RECONCILIATION,
+            payload.to_string(),
+        )
         .await;
 
     if let Err(err) = publish_result {
@@ -546,13 +549,13 @@ async fn shutdown_signal() {
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "viper_monitor=info".into()),
         )
         .json()
-        .init();
+        .try_init();
 
     tracing::info!("Starting viper-monitor");
 

@@ -98,11 +98,13 @@ pub struct RiskLimitsRequest {
 #[derive(Deserialize)]
 pub struct TradesQuery {
     pub limit: Option<u32>,
+    pub page: Option<u32>,
 }
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
     pub limit: Option<u32>,
+    pub page: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -153,11 +155,21 @@ pub struct PositionsResponse {
 #[derive(Serialize)]
 pub struct TradesResponse {
     pub items: Vec<TradeItem>,
+    pub pagination: PaginationMeta,
 }
 
 #[derive(Deserialize)]
 pub struct DecisionsQuery {
     pub limit: Option<u32>,
+    pub page: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct PaginationMeta {
+    pub page: u32,
+    pub limit: u32,
+    pub total: i64,
+    pub total_pages: u32,
 }
 
 /// Latest strategy decision per symbol, with the multi-exchange consensus
@@ -183,11 +195,13 @@ pub struct DecisionItem {
 #[derive(Serialize)]
 pub struct DecisionsResponse {
     pub items: Vec<DecisionItem>,
+    pub pagination: PaginationMeta,
 }
 
 #[derive(Serialize)]
 pub struct EventsResponse {
     pub items: Vec<EventItem>,
+    pub pagination: PaginationMeta,
 }
 
 #[derive(Serialize)]
@@ -335,6 +349,7 @@ pub struct PerformanceWindow {
 #[derive(Serialize, Clone)]
 pub struct KillSwitchResponse {
     pub updated: bool,
+    pub acknowledged: bool,
     pub kill_switch: KillSwitchStatus,
 }
 

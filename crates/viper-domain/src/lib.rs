@@ -10,6 +10,52 @@ pub const REDIS_CHANNEL_MARKET_DATA: &str = "viper:market_data";
 pub const REDIS_CHANNEL_DECISIONS: &str = "viper:decisions";
 pub const REDIS_CHANNEL_EXECUTOR_EVENTS: &str = "viper:executor_events";
 pub const REDIS_CHANNEL_RECONCILIATION: &str = "viper:reconciliation";
+pub const REDIS_CHANNEL_CONTROL_EVENTS: &str = "viper:control_events";
+
+pub const REDIS_STREAM_MARKET_DATA: &str = "viper:market_data";
+pub const REDIS_STREAM_DECISIONS: &str = "viper:decisions";
+pub const REDIS_STREAM_EXECUTOR_EVENTS: &str = "viper:executor_events";
+pub const REDIS_STREAM_CONTROL_EVENTS: &str = "viper:control_events";
+
+pub const STREAM_GROUP_STRATEGY: &str = "strategy";
+pub const STREAM_GROUP_EXECUTOR: &str = "executor";
+pub const STREAM_GROUP_WS_BRIDGE: &str = "ws-bridge";
+
+/// Redis stream XREAD/XREADGROUP result type.
+pub type StreamEntries = Vec<(String, Vec<(String, Vec<(String, String)>)>)>;
+
+pub async fn stream_publish(
+    conn: &mut redis::aio::MultiplexedConnection,
+    stream_key: &str,
+    payload: &str,
+) -> Result<(), redis::RedisError> {
+    use redis::streams::StreamMaxlen;
+    use redis::AsyncCommands;
+    let _: String = conn
+        .xadd_maxlen(
+            stream_key,
+            StreamMaxlen::Approx(10000),
+            "*",
+            &[("payload", payload)],
+        )
+        .await?;
+    Ok(())
+}
+
+pub async fn stream_ensure_group(
+    conn: &mut redis::aio::MultiplexedConnection,
+    stream_key: &str,
+    group: &str,
+) {
+    let _: Result<String, _> = redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(stream_key)
+        .arg(group)
+        .arg("$")
+        .arg("MKSTREAM")
+        .query_async(conn)
+        .await;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MarketSignal {

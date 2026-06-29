@@ -2,7 +2,7 @@
 
 export type ConnectionStatus = 'connecting' | 'live' | 'stale' | 'down';
 
-function resolveWsUrl(): string {
+function resolveBaseWsUrl(): string {
   const override = process.env.NEXT_PUBLIC_WS_URL;
   if (override) return override;
   if (typeof window === 'undefined') return '';
@@ -10,9 +10,21 @@ function resolveWsUrl(): string {
   return `${proto}://${window.location.hostname}:8443/ws`;
 }
 
+async function fetchWsToken(): Promise<string | null> {
+  try {
+    const res = await fetch('/api/v1/auth/ws-token');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
-  private url: string;
+  private baseUrl: string;
+  private token: string | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Map<string, Set<(data: any) => void>>();
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
@@ -28,8 +40,8 @@ export class WebSocketClient {
   static STALE_AFTER_MS = 20000;
   static STALE_CHECK_MS = 5000;
 
-  constructor(url: string) {
-    this.url = url;
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
   }
 
   get status(): ConnectionStatus {
@@ -45,14 +57,21 @@ export class WebSocketClient {
     return () => this.statusListeners.delete(cb);
   }
 
+  private resolveUrl(): string {
+    if (this.token) {
+      return `${this.baseUrl}?token=${encodeURIComponent(this.token)}`;
+    }
+    return this.baseUrl;
+  }
+
   connect() {
     if (!this.active) return;
-    if (!this.url) return;
+    if (!this.baseUrl) return;
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
 
     this.setStatus('connecting');
     try {
-      this.ws = new WebSocket(this.url);
+      this.ws = new WebSocket(this.resolveUrl());
       this.ws.onopen = () => {
         this.retryCount = 0;
         this.lastMessageAt = Date.now();
@@ -71,8 +90,13 @@ export class WebSocketClient {
           // ignore malformed messages
         }
       };
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.stopStaleCheck();
+        // If unauthorized, fetch a fresh token before reconnecting
+        if (event.code === 4001 || event.code === 4401) {
+          this.token = null;
+          this.refreshToken();
+        }
         if (!this.active) return;
         this.scheduleReconnect();
       };
@@ -82,6 +106,10 @@ export class WebSocketClient {
     } catch {
       this.scheduleReconnect();
     }
+  }
+
+  async refreshToken(): Promise<void> {
+    this.token = await fetchWsToken();
   }
 
   private dispatch(data: Record<string, unknown>) {
@@ -161,10 +189,17 @@ export class WebSocketClient {
 }
 
 let wsClient: WebSocketClient | null = null;
+let tokenPromise: Promise<void> | null = null;
 
-export function getWebSocketClient(): WebSocketClient {
+export async function getWebSocketClient(): Promise<WebSocketClient> {
   if (!wsClient) {
-    wsClient = new WebSocketClient(resolveWsUrl());
+    wsClient = new WebSocketClient(resolveBaseWsUrl());
+    tokenPromise = wsClient.refreshToken();
+  }
+  // Ensure token is fetched before returning on first call
+  if (tokenPromise) {
+    await tokenPromise;
+    tokenPromise = null;
   }
   return wsClient;
 }

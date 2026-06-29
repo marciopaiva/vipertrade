@@ -2745,7 +2745,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viper"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "tokio",
  "viper-ai-analyst",
@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "viper-ai-analyst"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "viper-analytics"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -2796,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "viper-api"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "bcrypt",
  "chrono",
@@ -2822,9 +2822,10 @@ dependencies = [
 
 [[package]]
 name = "viper-domain"
-version = "0.8.1"
+version = "0.17.0"
 dependencies = [
  "chrono",
+ "redis",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2833,12 +2834,13 @@ dependencies = [
 
 [[package]]
 name = "viper-executor"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "futures-util",
  "hex",
  "hmac",
+ "rand 0.8.5",
  "redis",
  "reqwest",
  "serde",
@@ -2855,7 +2857,7 @@ dependencies = [
 
 [[package]]
 name = "viper-market-data"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2872,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "viper-monitor"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "hex",
@@ -2893,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "viper-strategy"
-version = "0.9.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "futures-util",

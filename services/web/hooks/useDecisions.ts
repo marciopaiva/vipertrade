@@ -50,70 +50,79 @@ export function useDecisions() {
 
   // WebSocket push via the shared singleton.
   useEffect(() => {
-    const ws = getWebSocketClient();
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    getWebSocketClient().then((ws) => {
+      if (cancelled) return;
 
-    const apply = (raw: any) => {
-      // market_data event => refresh consensus indicators
-      const sig = raw?.signal;
-      if (sig?.symbol) {
-        setBySymbol((prev) => {
-          const cur = prev[sig.symbol] ?? {
-            symbol: sig.symbol,
-            action: 'HOLD',
-            executed_at: new Date().toISOString(),
-          };
-          return {
-            ...prev,
-            [sig.symbol]: {
-              ...cur,
-              consensus_side: sig.consensus_side ?? cur.consensus_side,
-              consensus_count: num(sig.consensus_count) ?? cur.consensus_count,
-              exchanges_available:
-                num(sig.exchanges_available) ?? cur.exchanges_available,
-              bullish_exchanges:
-                num(sig.bullish_exchanges) ?? cur.bullish_exchanges,
-              bearish_exchanges:
-                num(sig.bearish_exchanges) ?? cur.bearish_exchanges,
-              consensus_rsi_14:
-                num(sig.consensus_rsi_14) ?? cur.consensus_rsi_14,
-              consensus_bollinger_percent_b:
-                num(sig.consensus_bollinger_percent_b) ??
-                cur.consensus_bollinger_percent_b,
-              consensus_trend_score:
-                num(sig.consensus_trend_score) ?? cur.consensus_trend_score,
-              consensus_macd_histogram:
-                num(sig.consensus_macd_histogram) ??
-                cur.consensus_macd_histogram,
-              consensus_adx_14:
-                num(sig.consensus_adx_14) ?? cur.consensus_adx_14,
-              current_price: num(sig.current_price) ?? cur.current_price,
+      const apply = (raw: any) => {
+        // market_data event => refresh consensus indicators
+        const sig = raw?.signal;
+        if (sig?.symbol) {
+          setBySymbol((prev) => {
+            const cur = prev[sig.symbol] ?? {
+              symbol: sig.symbol,
+              action: 'HOLD',
               executed_at: new Date().toISOString(),
-            },
-          };
-        });
-        setUpdatedAt(Date.now());
-        return;
-      }
-      // decision event => refresh action
-      const action = raw?.decision?.action ?? raw?.action;
-      const symbol = raw?.symbol ?? raw?.decision?.symbol;
-      if (action && symbol) {
-        setBySymbol((prev) =>
-          prev[symbol]
-            ? { ...prev, [symbol]: { ...prev[symbol], action } }
-            : prev
-        );
-        setUpdatedAt(Date.now());
-      }
-    };
+            };
+            return {
+              ...prev,
+              [sig.symbol]: {
+                ...cur,
+                consensus_side: sig.consensus_side ?? cur.consensus_side,
+                consensus_count: num(sig.consensus_count) ?? cur.consensus_count,
+                exchanges_available:
+                  num(sig.exchanges_available) ?? cur.exchanges_available,
+                bullish_exchanges:
+                  num(sig.bullish_exchanges) ?? cur.bullish_exchanges,
+                bearish_exchanges:
+                  num(sig.bearish_exchanges) ?? cur.bearish_exchanges,
+                consensus_rsi_14:
+                  num(sig.consensus_rsi_14) ?? cur.consensus_rsi_14,
+                consensus_bollinger_percent_b:
+                  num(sig.consensus_bollinger_percent_b) ??
+                  cur.consensus_bollinger_percent_b,
+                consensus_trend_score:
+                  num(sig.consensus_trend_score) ?? cur.consensus_trend_score,
+                consensus_macd_histogram:
+                  num(sig.consensus_macd_histogram) ??
+                  cur.consensus_macd_histogram,
+                consensus_adx_14:
+                  num(sig.consensus_adx_14) ?? cur.consensus_adx_14,
+                current_price: num(sig.current_price) ?? cur.current_price,
+                executed_at: new Date().toISOString(),
+              },
+            };
+          });
+          setUpdatedAt(Date.now());
+          return;
+        }
+        // decision event => refresh action
+        const action = raw?.decision?.action ?? raw?.action;
+        const symbol = raw?.symbol ?? raw?.decision?.symbol;
+        if (action && symbol) {
+          setBySymbol((prev) =>
+            prev[symbol]
+              ? { ...prev, [symbol]: { ...prev[symbol], action } }
+              : prev
+          );
+          setUpdatedAt(Date.now());
+        }
+      };
 
-    const unsubStatus = ws.onStatusChange((s) => setLive(s === 'live'));
-    const unsubMessage = ws.on('message', (data: any) => apply(data));
-    ws.connect();
+      const unsubStatus = ws.onStatusChange((s) => setLive(s === 'live'));
+      const unsubMessage = ws.on('message', (data: any) => apply(data));
+      ws.connect();
+
+      cleanup = () => {
+        unsubMessage();
+        unsubStatus();
+      };
+    });
 
     return () => {
-      unsubMessage();
-      unsubStatus();
+      cancelled = true;
+      cleanup?.();
     };
   }, []);
 

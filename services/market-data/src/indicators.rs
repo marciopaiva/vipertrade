@@ -174,7 +174,10 @@ pub(crate) fn compute_macd(candles: &[Candle]) -> Option<(f64, f64, f64)> {
     Some((macd_line, signal, histogram))
 }
 
-pub(crate) fn compute_bollinger(candles: &[Candle], period: usize) -> Option<(f64, f64, f64, f64, f64)> {
+pub(crate) fn compute_bollinger(
+    candles: &[Candle],
+    period: usize,
+) -> Option<(f64, f64, f64, f64, f64)> {
     if candles.len() < period || period == 0 {
         return None;
     }

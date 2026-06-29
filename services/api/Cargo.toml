@@ -1,6 +1,6 @@
 [package]
 name = "viper-api"
-version = "0.9.0"
+version.workspace = true
 edition = "2021"
 description = "ViperTrade REST API service"
 

@@ -23,10 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "strategy" => viper_strategy::run().await,
         "executor" => viper_executor::run().await,
         "monitor" => viper_monitor::run().await,
-        "api" => {
-            viper_api::run().await;
-            Ok(())
-        }
+        "api" => viper_api::run().await,
         other => {
             eprintln!(
                 "unknown role {other:?}; set VIPER_ROLE or pass a role arg: \

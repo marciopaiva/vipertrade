@@ -3,6 +3,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,9 +12,27 @@ use tracing::{error, info, warn};
 use viper_domain::config::*;
 use warp::Filter;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct Candle {
+    timestamp: i64,
     close: f64,
+}
+
+type CandleCache = Arc<RwLock<HashMap<String, HashMap<String, Vec<Candle>>>>>;
+
+/// Merge incoming candles into a cached vector sorted by timestamp ascending.
+/// Replaces any entry with a matching timestamp, then trims to `max` newest.
+fn merge_candles(cache: &mut Vec<Candle>, incoming: &[Candle], max: usize) {
+    for c in incoming {
+        let pos = cache.binary_search_by(|e| e.timestamp.cmp(&c.timestamp));
+        match pos {
+            Ok(i) => cache[i] = c.clone(),
+            Err(i) => cache.insert(i, c.clone()),
+        }
+    }
+    if cache.len() > max {
+        cache.drain(0..cache.len() - max);
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -119,10 +138,11 @@ async fn fetch_bybit_snapshot(
     http: &reqwest::Client,
     base_url: &str,
     symbol: &str,
-) -> Result<(f64, f64), String> {
+    limit: u32,
+) -> Result<Vec<Candle>, String> {
     let kline_url = format!(
-        "{}/v5/market/kline?category=linear&symbol={}&interval=1&limit=200",
-        base_url, symbol
+        "{}/v5/market/kline?category=linear&symbol={}&interval=1&limit={}",
+        base_url, symbol, limit
     );
 
     let body = http
@@ -149,25 +169,24 @@ async fn fetch_bybit_snapshot(
         .iter()
         .filter_map(|row| {
             let arr = row.as_array()?;
+            let timestamp = arr.first()?.as_str().and_then(|s| s.parse::<i64>().ok())?;
             let close = arr.get(4)?.as_str().and_then(parse_f64)?;
-            Some(Candle { close })
+            Some(Candle { timestamp, close })
         })
         .collect();
     candles.reverse();
 
-    let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
-    let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
-    Ok((price, trend_score))
+    Ok(candles)
 }
 
 async fn fetch_binance_snapshot(
     http: &reqwest::Client,
     symbol: &str,
-) -> Result<(f64, f64), String> {
+    limit: u32,
+) -> Result<Vec<Candle>, String> {
     let kline_url = format!(
-        "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit=200",
-        symbol
+        "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}",
+        symbol, limit
     );
 
     let body = http
@@ -188,15 +207,13 @@ async fn fetch_binance_snapshot(
     let candles: Vec<Candle> = rows
         .iter()
         .filter_map(|row| {
+            let timestamp = row.first()?.as_i64()?;
             let close = row.get(4)?.as_str().and_then(parse_f64)?;
-            Some(Candle { close })
+            Some(Candle { timestamp, close })
         })
         .collect();
 
-    let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
-    let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
-    Ok((price, trend_score))
+    Ok(candles)
 }
 
 fn okx_inst_id(symbol: &str) -> String {
@@ -204,11 +221,15 @@ fn okx_inst_id(symbol: &str) -> String {
     format!("{}-USDT-SWAP", base)
 }
 
-async fn fetch_okx_snapshot(http: &reqwest::Client, symbol: &str) -> Result<(f64, f64), String> {
+async fn fetch_okx_snapshot(
+    http: &reqwest::Client,
+    symbol: &str,
+    limit: u32,
+) -> Result<Vec<Candle>, String> {
     let inst_id = okx_inst_id(symbol);
     let kline_url = format!(
-        "https://www.okx.com/api/v5/market/candles?instId={}&bar=1m&limit=200",
-        inst_id
+        "https://www.okx.com/api/v5/market/candles?instId={}&bar=1m&limit={}",
+        inst_id, limit
     );
 
     let body = http
@@ -234,16 +255,21 @@ async fn fetch_okx_snapshot(http: &reqwest::Client, symbol: &str) -> Result<(f64
         .iter()
         .filter_map(|row| {
             let arr = row.as_array()?;
+            let timestamp = arr.first()?.as_str().and_then(|s| s.parse::<i64>().ok())?;
             let close = arr.get(4)?.as_str().and_then(parse_f64)?;
-            Some(Candle { close })
+            Some(Candle { timestamp, close })
         })
         .collect();
     candles.reverse();
 
+    Ok(candles)
+}
+
+fn compute_trend(candles: &[Candle]) -> (f64, f64) {
     let price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let rsi = compute_rsi_wilder(&candles).unwrap_or(50.0);
+    let rsi = compute_rsi_wilder(candles).unwrap_or(50.0);
     let trend_score = ((rsi - 50.0) / 50.0).clamp(-1.0, 1.0);
-    Ok((price, trend_score))
+    (price, trend_score)
 }
 
 async fn ensure_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -453,13 +479,13 @@ async fn shutdown_signal() {
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "viper_analytics=info".into()),
         )
         .json()
-        .init();
+        .try_init();
 
     info!("Starting viper-analytics");
 
@@ -532,6 +558,8 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         let _ = score_cache_api;
     });
 
+    let candle_cache: CandleCache = Arc::new(RwLock::new(HashMap::new()));
+
     info!(
         horizon = horizon_minutes,
         lookback = lookback_hours,
@@ -557,6 +585,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             let sem_clone = semaphore.clone();
             let bybit_base_clone = bybit_base.clone();
             let symbol_owned = symbol.clone();
+            let cache = candle_cache.clone();
 
             tasks.push(tokio::spawn(async move {
                 let _permit = sem_clone
@@ -564,31 +593,160 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     .await
                     .expect("analytics semaphore is never closed while permits are held");
 
-                match fetch_bybit_snapshot(&http_bybit, &bybit_base_clone, &symbol_owned).await {
-                    Ok((price, trend_score)) => {
-                        if let Err(e) = insert_snapshot(&pool_clone, "bybit", &symbol_owned, price, trend_score).await {
-                            warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "insert failed");
+                // ── Bybit ──────────────────────────────────────────────
+                {
+                    let needs_bootstrap = {
+                        let r = cache.read().await;
+                        r.get("bybit")
+                            .and_then(|m| m.get(&symbol_owned))
+                            .map(|v| v.len() < 200)
+                            .unwrap_or(true)
+                    };
+
+                    if needs_bootstrap {
+                        if let Ok(candles) =
+                            fetch_bybit_snapshot(&http_bybit, &bybit_base_clone, &symbol_owned, 200).await
+                        {
+                            let (price, trend) = compute_trend(&candles);
+                            let mut w = cache.write().await;
+                            w.entry("bybit".to_string())
+                                .or_default()
+                                .insert(symbol_owned.clone(), candles);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "bybit", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else {
+                            warn!(exchange = "bybit", symbol = %symbol_owned, "bootstrap fetch failed");
+                        }
+                    } else {
+                        let candles =
+                            fetch_bybit_snapshot(&http_bybit, &bybit_base_clone, &symbol_owned, 2).await;
+                        if let Ok(new_candles) = candles {
+                            let mut w = cache.write().await;
+                            let entry = w
+                                .entry("bybit".to_string())
+                                .or_default()
+                                .entry(symbol_owned.clone())
+                                .or_default();
+                            merge_candles(entry, &new_candles, 200);
+                            let (price, trend) = compute_trend(entry);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "bybit", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else if let Err(e) = candles {
+                            warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "incremental fetch failed");
                         }
                     }
-                    Err(e) => warn!(exchange = "bybit", symbol = %symbol_owned, error = %e, "fetch failed"),
                 }
 
-                match fetch_binance_snapshot(&http_binance, &symbol_owned).await {
-                    Ok((price, trend_score)) => {
-                        if let Err(e) = insert_snapshot(&pool_clone, "binance", &symbol_owned, price, trend_score).await {
-                            warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "insert failed");
+                // ── Binance ────────────────────────────────────────────
+                {
+                    let needs_bootstrap = {
+                        let r = cache.read().await;
+                        r.get("binance")
+                            .and_then(|m| m.get(&symbol_owned))
+                            .map(|v| v.len() < 200)
+                            .unwrap_or(true)
+                    };
+
+                    if needs_bootstrap {
+                        if let Ok(candles) =
+                            fetch_binance_snapshot(&http_binance, &symbol_owned, 200).await
+                        {
+                            let (price, trend) = compute_trend(&candles);
+                            let mut w = cache.write().await;
+                            w.entry("binance".to_string())
+                                .or_default()
+                                .insert(symbol_owned.clone(), candles);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "binance", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else {
+                            warn!(exchange = "binance", symbol = %symbol_owned, "bootstrap fetch failed");
+                        }
+                    } else {
+                        let candles =
+                            fetch_binance_snapshot(&http_binance, &symbol_owned, 2).await;
+                        if let Ok(new_candles) = candles {
+                            let mut w = cache.write().await;
+                            let entry = w
+                                .entry("binance".to_string())
+                                .or_default()
+                                .entry(symbol_owned.clone())
+                                .or_default();
+                            merge_candles(entry, &new_candles, 200);
+                            let (price, trend) = compute_trend(entry);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "binance", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else if let Err(e) = candles {
+                            warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "incremental fetch failed");
                         }
                     }
-                    Err(e) => warn!(exchange = "binance", symbol = %symbol_owned, error = %e, "fetch failed"),
                 }
 
-                match fetch_okx_snapshot(&http_okx, &symbol_owned).await {
-                    Ok((price, trend_score)) => {
-                        if let Err(e) = insert_snapshot(&pool_clone, "okx", &symbol_owned, price, trend_score).await {
-                            warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "insert failed");
+                // ── OKX ────────────────────────────────────────────────
+                {
+                    let needs_bootstrap = {
+                        let r = cache.read().await;
+                        r.get("okx")
+                            .and_then(|m| m.get(&symbol_owned))
+                            .map(|v| v.len() < 200)
+                            .unwrap_or(true)
+                    };
+
+                    if needs_bootstrap {
+                        if let Ok(candles) =
+                            fetch_okx_snapshot(&http_okx, &symbol_owned, 200).await
+                        {
+                            let (price, trend) = compute_trend(&candles);
+                            let mut w = cache.write().await;
+                            w.entry("okx".to_string())
+                                .or_default()
+                                .insert(symbol_owned.clone(), candles);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "okx", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else {
+                            warn!(exchange = "okx", symbol = %symbol_owned, "bootstrap fetch failed");
+                        }
+                    } else {
+                        let candles =
+                            fetch_okx_snapshot(&http_okx, &symbol_owned, 2).await;
+                        if let Ok(new_candles) = candles {
+                            let mut w = cache.write().await;
+                            let entry = w
+                                .entry("okx".to_string())
+                                .or_default()
+                                .entry(symbol_owned.clone())
+                                .or_default();
+                            merge_candles(entry, &new_candles, 200);
+                            let (price, trend) = compute_trend(entry);
+                            drop(w);
+                            if let Err(e) =
+                                insert_snapshot(&pool_clone, "okx", &symbol_owned, price, trend).await
+                            {
+                                warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "insert failed");
+                            }
+                        } else if let Err(e) = candles {
+                            warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "incremental fetch failed");
                         }
                     }
-                    Err(e) => warn!(exchange = "okx", symbol = %symbol_owned, error = %e, "fetch failed"),
                 }
             }));
         }
@@ -663,7 +821,14 @@ mod tests {
     use super::*;
 
     fn make_candles(prices: &[f64]) -> Vec<Candle> {
-        prices.iter().map(|p| Candle { close: *p }).collect()
+        prices
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Candle {
+                timestamp: i as i64 * 60000,
+                close: *p,
+            })
+            .collect()
     }
 
     #[test]
@@ -708,5 +873,58 @@ mod tests {
         ]);
         let rsi = compute_rsi_wilder(&candles);
         assert!(rsi.unwrap() > 40.0 && rsi.unwrap() < 70.0);
+    }
+
+    #[test]
+    fn test_merge_candles_dedup() {
+        let mut cache = make_candles(&[100.0, 101.0, 102.0]);
+        // incoming with newer timestamps: one overlap (60000ms), one new (180000ms)
+        let incoming = vec![
+            Candle {
+                timestamp: 60000,
+                close: 101.5,
+            },
+            Candle {
+                timestamp: 180000,
+                close: 103.0,
+            },
+        ];
+        merge_candles(&mut cache, &incoming, 200);
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache[0].close, 100.0);
+        assert_eq!(cache[1].close, 101.5); // updated
+        assert_eq!(cache[2].close, 102.0);
+        assert_eq!(cache[3].close, 103.0);
+    }
+
+    #[test]
+    fn test_merge_candles_trim() {
+        let mut cache = make_candles(&[100.0, 101.0, 102.0, 103.0]);
+        // incoming with newer timestamps (no overlap)
+        let incoming = vec![
+            Candle {
+                timestamp: 240000,
+                close: 104.0,
+            },
+            Candle {
+                timestamp: 300000,
+                close: 105.0,
+            },
+        ];
+        merge_candles(&mut cache, &incoming, 4);
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache[0].close, 102.0); // oldest two dropped
+        assert_eq!(cache[3].close, 105.0);
+    }
+
+    #[test]
+    fn test_compute_trend_uptrend() {
+        let candles = make_candles(&[
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+            112.0, 113.0, 114.0, 115.0,
+        ]);
+        let (price, trend) = compute_trend(&candles);
+        assert!((price - 115.0).abs() < 0.001);
+        assert!(trend > 0.0);
     }
 }

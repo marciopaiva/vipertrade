@@ -29,22 +29,30 @@ export function usePositions() {
     fetchPositions();
 
     // Setup WebSocket for real-time position updates
-    const ws = getWebSocketClient();
-    const handlePositionUpdate = (data: any) => {
-      setPositions(((prev: any[]) => {
-        const index = prev.findIndex(p => p.trade_id === data.trade_id);
-        if (index >= 0) {
-          const updated = [...prev];
-          updated[index] = data;
-          return updated;
-        }
-        return [data, ...prev];
-      }) as any);
-    };
-    ws.on('position_update', handlePositionUpdate);
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    getWebSocketClient().then((ws) => {
+      if (cancelled) return;
+      const handlePositionUpdate = (data: any) => {
+        setPositions(((prev: any[]) => {
+          const index = prev.findIndex(p => p.trade_id === data.trade_id);
+          if (index >= 0) {
+            const updated = [...prev];
+            updated[index] = data;
+            return updated;
+          }
+          return [data, ...prev];
+        }) as any);
+      };
+      ws.on('position_update', handlePositionUpdate);
+      cleanup = () => {
+        ws.off('position_update', handlePositionUpdate);
+      };
+    });
 
     return () => {
-      ws.off('position_update', handlePositionUpdate);
+      cancelled = true;
+      cleanup?.();
     };
   }, [setPositions]);
 

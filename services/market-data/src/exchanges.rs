@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::consensus::{aggregate_signals, ExchangeSignal};
 use crate::indicators::{
-    Candle, compute_atr14, compute_adx14, classify_regime,
-    composite_trend_score, compute_indicator_bundle_complete, REQUIRED_CANDLE_COUNT,
+    classify_regime, composite_trend_score, compute_adx14, compute_atr14,
+    compute_indicator_bundle_complete, Candle, REQUIRED_CANDLE_COUNT,
 };
 
 pub(crate) const FETCH_CANDLE_LIMIT: usize = 220;
@@ -190,7 +190,7 @@ pub(crate) fn align_exchange_candles(
     Ok(())
 }
 
-fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
+pub(crate) fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
             if row.len() < 5 {
@@ -200,7 +200,11 @@ fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
             let high = row[2].parse::<f64>().unwrap_or(0.0).max(0.0);
             let low = row[3].parse::<f64>().unwrap_or(0.0).max(0.0);
             let close = row[4].parse::<f64>().unwrap_or(0.0).max(0.0);
-            let volume_quote = row.get(5).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0).max(0.0);
+            let volume_quote = row
+                .get(5)
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0)
+                .max(0.0);
             if close <= 0.0 {
                 return None;
             }
@@ -215,7 +219,7 @@ fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
         .collect()
 }
 
-fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
+pub(crate) fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
             if row.len() < 5 {
@@ -240,7 +244,7 @@ fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
         .collect()
 }
 
-fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
+pub(crate) fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
             if row.len() < 5 {
@@ -250,7 +254,11 @@ fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
             let high = row[2].parse::<f64>().unwrap_or(0.0).max(0.0);
             let low = row[3].parse::<f64>().unwrap_or(0.0).max(0.0);
             let close = row[4].parse::<f64>().unwrap_or(0.0).max(0.0);
-            let volume_quote = row.get(7).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0).max(0.0);
+            let volume_quote = row
+                .get(7)
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0)
+                .max(0.0);
             if close <= 0.0 {
                 return None;
             }
@@ -265,7 +273,7 @@ fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
         .collect()
 }
 
-fn okx_inst_id(symbol: &str) -> String {
+pub(crate) fn okx_inst_id(symbol: &str) -> String {
     let base = symbol.strip_suffix("USDT").unwrap_or(symbol);
     format!("{}-USDT-SWAP", base)
 }
@@ -290,7 +298,7 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
         .map_err(|e| format!("decode failed: {}", e))
 }
 
-fn build_exchange_signal(
+pub(crate) fn build_exchange_signal(
     symbol: &str,
     snapshot: RawExchangeSnapshot,
 ) -> Result<ExchangeSignal, String> {
@@ -414,7 +422,8 @@ async fn fetch_market_signal_bybit(
     };
 
     let turnover_24h = viper_domain::config::parse_f64(&ticker.turnover_24h).unwrap_or(0.0);
-    let fallback_volume = viper_domain::config::parse_f64(&ticker.volume_24h).unwrap_or(0.0) * current_price;
+    let fallback_volume =
+        viper_domain::config::parse_f64(&ticker.volume_24h).unwrap_or(0.0) * current_price;
     let volume_24h = turnover_24h.max(fallback_volume).round() as i64;
 
     let funding_rate = ticker
@@ -503,7 +512,9 @@ async fn fetch_market_signal_binance(
         0.0
     };
 
-    let volume_24h = viper_domain::config::parse_f64(&ticker_24h.quote_volume).unwrap_or(0.0).round() as i64;
+    let volume_24h = viper_domain::config::parse_f64(&ticker_24h.quote_volume)
+        .unwrap_or(0.0)
+        .round() as i64;
 
     Ok(RawExchangeSnapshot {
         source: "binance",
@@ -576,7 +587,9 @@ async fn fetch_market_signal_okx(
         .ok_or_else(|| "missing okx ticker item".to_string())?;
 
     let fallback_price = candles.last().map(|c| c.close).unwrap_or(0.0);
-    let current_price = viper_domain::config::parse_f64(&ticker.last).unwrap_or(fallback_price).max(0.0);
+    let current_price = viper_domain::config::parse_f64(&ticker.last)
+        .unwrap_or(fallback_price)
+        .max(0.0);
 
     let bid = viper_domain::config::parse_f64(&ticker.bid_px).unwrap_or(0.0);
     let ask = viper_domain::config::parse_f64(&ticker.ask_px).unwrap_or(0.0);
@@ -591,7 +604,9 @@ async fn fetch_market_signal_okx(
         0.0
     };
 
-    let volume_24h = viper_domain::config::parse_f64(&ticker.vol_ccy_24h).unwrap_or(0.0).round() as i64;
+    let volume_24h = viper_domain::config::parse_f64(&ticker.vol_ccy_24h)
+        .unwrap_or(0.0)
+        .round() as i64;
 
     Ok(RawExchangeSnapshot {
         source: "okx",
@@ -608,6 +623,7 @@ pub(crate) async fn fetch_market_signal(
     base_url: &str,
     symbol: &str,
     weights: &HashMap<String, f64>,
+    min_exchanges: usize,
 ) -> Result<viper_domain::MarketSignal, String> {
     let mut raw_snapshots = Vec::<RawExchangeSnapshot>::new();
     let mut errors = Vec::<String>::new();
@@ -625,19 +641,13 @@ pub(crate) async fn fetch_market_signal(
         Err(e) => errors.push(format!("okx={}", e)),
     }
 
-    if !errors.is_empty() {
+    if raw_snapshots.len() < min_exchanges {
         return Err(format!(
-            "incomplete source set for {}: {}",
+            "incomplete source set for {}: got {} exchanges, need at least {}. Errors: {}",
             symbol,
+            raw_snapshots.len(),
+            min_exchanges,
             errors.join(" | ")
-        ));
-    }
-
-    if raw_snapshots.len() != 3 {
-        return Err(format!(
-            "incomplete source set for {}: expected 3 exchanges, got {}",
-            symbol,
-            raw_snapshots.len()
         ));
     }
 

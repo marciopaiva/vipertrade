@@ -1,6 +1,6 @@
 [package]
 name = "viper-ai-analyst"
-version = "0.9.0"
+version.workspace = true
 edition = "2021"
 description = "ViperTrade AI-assisted trade analytics service"
 

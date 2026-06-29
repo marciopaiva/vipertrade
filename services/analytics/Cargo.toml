@@ -1,6 +1,6 @@
 [package]
 name = "viper-analytics"
-version = "0.9.0"
+version.workspace = true
 edition = "2021"
 description = "ViperTrade analytics service for exchange trend scoring"
 

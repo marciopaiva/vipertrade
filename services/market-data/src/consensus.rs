@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use viper_domain::MarketSignal;
 
 pub(crate) const CONSENSUS_SIDE_CONFIRMATION_CYCLES: u8 = 2;
@@ -72,7 +72,7 @@ struct AnalyticsSymbolScore {
     evaluated: i64,
 }
 
-fn score_key(exchange: &str, symbol: &str) -> String {
+pub(crate) fn score_key(exchange: &str, symbol: &str) -> String {
     format!("{}:{}", exchange, symbol)
 }
 

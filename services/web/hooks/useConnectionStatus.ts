@@ -13,22 +13,30 @@ export function useConnectionStatus(): {
   status: LiveStatus;
   lastMessageAt: number | null;
 } {
-  const ws = getWebSocketClient();
-  const [status, setStatus] = useState<ConnectionStatus>(ws.status);
-  const [lastMessageAt, setLastMessageAt] = useState<number | null>(
-    ws.lastMessageTimestamp > 0 ? ws.lastMessageTimestamp : null
-  );
+  const [status, setStatus] = useState<ConnectionStatus>('connecting');
+  const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
 
   useEffect(() => {
-    const unsubStatus = ws.onStatusChange(setStatus);
-    const unsubMessage = ws.on('message', () => setLastMessageAt(Date.now()));
-    ws.connect();
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    getWebSocketClient().then((ws) => {
+      if (cancelled) return;
+      setStatus(ws.status);
+      if (ws.lastMessageTimestamp > 0) {
+        setLastMessageAt(ws.lastMessageTimestamp);
+      }
+      const unsubStatus = ws.onStatusChange(setStatus);
+      const unsubMessage = ws.on('message', () => setLastMessageAt(Date.now()));
+      ws.connect();
+      cleanup = () => {
+        unsubStatus();
+        unsubMessage();
+      };
+    });
     return () => {
-      unsubStatus();
-      unsubMessage();
+      cancelled = true;
+      cleanup?.();
     };
-    // ws is the module-level singleton — stable reference, safe to exclude.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { status, lastMessageAt };
