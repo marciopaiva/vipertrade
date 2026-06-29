@@ -117,7 +117,7 @@ impl RateLimiter {
                 let window_ms = (self.window_secs * 1000) as i64;
                 let cutoff = now_ms - window_ms;
 
-                let count: Result<usize, _> = redis::pipe()
+                let count: Result<(usize,), _> = redis::pipe()
                     .zrembyscore(key, 0, cutoff)
                     .ignore()
                     .zadd(key, now_ms, now_ms)
@@ -129,7 +129,7 @@ impl RateLimiter {
                     .await;
 
                 match count {
-                    Ok(n) => n <= self.max_requests,
+                    Ok((n,)) => n <= self.max_requests,
                     Err(e) => {
                         tracing::warn!(
                             error = %e,

@@ -47,7 +47,7 @@ global:
           - at_profit_pct: 0.006
             trail_pct: 0.0003
         move_to_break_even_at: 0.0016
-      min_hold_seconds: 300                      # minimum time before any exit
+      min_hold_seconds: 300                      # defers thesis-invalidation exits only (stop/trailing fire freely)
       min_trend_score_long: 0.50                 # entry trend-score floor (long)
       min_trend_score_short: 0.55                # entry trend-score floor (short)
       min_signal_confirmation_ticks_long: 4      # consecutive confirming ticks (long)
