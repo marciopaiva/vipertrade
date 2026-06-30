@@ -151,8 +151,8 @@ global:
       bollinger_extension: 13.0
       macd_cross: 15.0
       macd_quality: 6.0
-      entry_confluence: 8.0
-      volume_ratio: 5.0
+      entry_confluence: 5.0
+      volume_ratio: 8.0
       trend_score: 10.0
     decision:
       entry_policy: 40.0
