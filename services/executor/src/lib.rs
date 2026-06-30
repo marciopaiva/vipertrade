@@ -506,13 +506,28 @@ fn body_preview(body: &str) -> String {
 // Checking only (symbol, side) let an ENTER_LONG open while a Short was still
 // open (and vice versa), leaving simultaneous long+short on the same symbol.
 
-const PAPER_SLIPPAGE_MIN: f64 = 0.0003;
-const PAPER_SLIPPAGE_MAX: f64 = 0.0008;
-const PAPER_FILL_PROB: f64 = 0.97;
+fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64, f64) {
+    let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok();
+    let root: Option<YamlValue> = raw.as_deref().and_then(|r| serde_yaml::from_str(r).ok());
+    let mode_key = cfg.trading_mode.as_str();
+    let mode_cfg = root
+        .as_ref()
+        .and_then(|r| yaml_get(r, &["global", "mode_profiles", mode_key]));
+    let slip_min = mode_cfg
+        .and_then(|v| yaml_f64(v, &["paper_slippage_min"]))
+        .unwrap_or(0.0003);
+    let slip_max = mode_cfg
+        .and_then(|v| yaml_f64(v, &["paper_slippage_max"]))
+        .unwrap_or(0.0008);
+    let fill_prob = mode_cfg
+        .and_then(|v| yaml_f64(v, &["paper_fill_probability"]))
+        .unwrap_or(0.97);
+    (slip_min, slip_max, fill_prob)
+}
 
-fn paper_adverse_slippage(action: &str, price: f64) -> f64 {
+fn paper_adverse_slippage(action: &str, price: f64, slip_min: f64, slip_max: f64) -> f64 {
     use rand::Rng;
-    let slip_pct: f64 = rand::thread_rng().gen_range(PAPER_SLIPPAGE_MIN..PAPER_SLIPPAGE_MAX);
+    let slip_pct: f64 = rand::thread_rng().gen_range(slip_min..slip_max);
     match action {
         "ENTER_LONG" | "CLOSE_SHORT" => price * (1.0 + slip_pct),
         "ENTER_SHORT" | "CLOSE_LONG" => price * (1.0 - slip_pct),
@@ -520,8 +535,8 @@ fn paper_adverse_slippage(action: &str, price: f64) -> f64 {
     }
 }
 
-fn paper_fill_check() -> bool {
-    rand::thread_rng().gen_bool(PAPER_FILL_PROB)
+fn paper_fill_check(fill_prob: f64) -> bool {
+    rand::thread_rng().gen_bool(fill_prob)
 }
 
 async fn handle_decision_event(
@@ -603,7 +618,9 @@ async fn handle_decision_event(
             "Live orders disabled; paper-trade dry-run"
         );
 
-        if !paper_fill_check() {
+        let (slip_min, slip_max, fill_prob) = load_paper_slippage_config(cfg);
+
+        if !paper_fill_check(fill_prob) {
             mark_processed(
                 state,
                 &idem_key,
@@ -619,8 +636,12 @@ async fn handle_decision_event(
 
         let status = if is_close_action(&event.decision.action) {
             let close_qty = event.decision.quantity;
-            let close_price =
-                paper_adverse_slippage(&event.decision.action, event.decision.entry_price);
+            let close_price = paper_adverse_slippage(
+                &event.decision.action,
+                event.decision.entry_price,
+                slip_min,
+                slip_max,
+            );
             match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
                 Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
                 Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
@@ -713,8 +734,12 @@ async fn handle_decision_event(
             }
 
             let entry_qty = event.decision.quantity;
-            let entry_price =
-                paper_adverse_slippage(&event.decision.action, event.decision.entry_price);
+            let entry_price = paper_adverse_slippage(
+                &event.decision.action,
+                event.decision.entry_price,
+                slip_min,
+                slip_max,
+            );
             if let Err(e) = persist_trade(
                 state,
                 &event,

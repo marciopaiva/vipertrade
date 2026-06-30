@@ -43,14 +43,25 @@ pub(crate) fn execute_calc_smart_size(
     };
 
     let mut components = Vec::new();
+    let sw = |key: &str, def: f64| cfg.size_weight(key, def);
     push_weighted_size_proposal_component(
         &mut components,
         "volatility_discount",
         discount_score,
-        40.0,
+        sw("volatility_discount", 40.0),
     );
-    push_weighted_size_proposal_component(&mut components, "risk_budget", budget_score, 30.0);
-    push_weighted_size_proposal_component(&mut components, "position_cap_fit", cap_score, 30.0);
+    push_weighted_size_proposal_component(
+        &mut components,
+        "risk_budget",
+        budget_score,
+        sw("risk_budget", 30.0),
+    );
+    push_weighted_size_proposal_component(
+        &mut components,
+        "position_cap_fit",
+        cap_score,
+        sw("position_cap_fit", 30.0),
+    );
 
     let raw_score: i32 = components.iter().map(|c| c.contribution).sum();
     let clamped_score = clamp_i32(raw_score, -100, 100);
