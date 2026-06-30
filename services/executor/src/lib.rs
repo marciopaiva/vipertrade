@@ -508,9 +508,7 @@ fn body_preview(body: &str) -> String {
 
 fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64, f64) {
     let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok();
-    let root: Option<YamlValue> = raw
-        .as_deref()
-        .and_then(|r| serde_yaml::from_str(r).ok());
+    let root: Option<YamlValue> = raw.as_deref().and_then(|r| serde_yaml::from_str(r).ok());
     let mode_key = cfg.trading_mode.as_str();
     let mode_cfg = root
         .as_ref()
@@ -638,8 +636,12 @@ async fn handle_decision_event(
 
         let status = if is_close_action(&event.decision.action) {
             let close_qty = event.decision.quantity;
-            let close_price =
-                paper_adverse_slippage(&event.decision.action, event.decision.entry_price, slip_min, slip_max);
+            let close_price = paper_adverse_slippage(
+                &event.decision.action,
+                event.decision.entry_price,
+                slip_min,
+                slip_max,
+            );
             match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
                 Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
                 Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
@@ -732,8 +734,12 @@ async fn handle_decision_event(
             }
 
             let entry_qty = event.decision.quantity;
-            let entry_price =
-                paper_adverse_slippage(&event.decision.action, event.decision.entry_price, slip_min, slip_max);
+            let entry_price = paper_adverse_slippage(
+                &event.decision.action,
+                event.decision.entry_price,
+                slip_min,
+                slip_max,
+            );
             if let Err(e) = persist_trade(
                 state,
                 &event,

@@ -199,7 +199,12 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
         },
         1,
     ) as f64;
-    push_weighted_entry_component(&mut components, "bybit_regime", bybit_regime_score, ew("bybit_regime", 20.0));
+    push_weighted_entry_component(
+        &mut components,
+        "bybit_regime",
+        bybit_regime_score,
+        ew("bybit_regime", 20.0),
+    );
 
     let consensus_score = if entry_side == "long" {
         if consensus_long_ok {
@@ -212,10 +217,20 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
     } else {
         -1.0
     };
-    push_weighted_entry_component(&mut components, "exchange_consensus", consensus_score, ew("exchange_consensus", 20.0));
+    push_weighted_entry_component(
+        &mut components,
+        "exchange_consensus",
+        consensus_score,
+        ew("exchange_consensus", 20.0),
+    );
 
     let trend_slope_score = (consensus_trend_slope * directional_bias).clamp(-1.0, 1.0);
-    push_weighted_entry_component(&mut components, "trend_slope", trend_slope_score, ew("trend_slope", 10.0));
+    push_weighted_entry_component(
+        &mut components,
+        "trend_slope",
+        trend_slope_score,
+        ew("trend_slope", 10.0),
+    );
 
     let ema_alignment_score = if entry_side == "long" {
         if consensus_ema_fast > consensus_ema_slow {
@@ -232,10 +247,20 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
     } else {
         0.0
     };
-    push_weighted_entry_component(&mut components, "ema_alignment", ema_alignment_score, ew("ema_alignment", 10.0));
+    push_weighted_entry_component(
+        &mut components,
+        "ema_alignment",
+        ema_alignment_score,
+        ew("ema_alignment", 10.0),
+    );
 
     let rsi_quality_score = rsi_quality_score_for_side(entry_side, consensus_rsi_14);
-    push_weighted_entry_component(&mut components, "rsi_quality", rsi_quality_score, ew("rsi_quality", 6.0));
+    push_weighted_entry_component(
+        &mut components,
+        "rsi_quality",
+        rsi_quality_score,
+        ew("rsi_quality", 6.0),
+    );
 
     let bollinger_bw_score = ((consensus_bollinger_bandwidth - 0.003) / 0.003).clamp(-1.0, 1.0);
     let bollinger_extension_score =
@@ -266,7 +291,12 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
     };
     let macd_hist_score = (consensus_macd_histogram * directional_bias).clamp(-1.0, 1.0);
     let macd_score = (macd_cross_score * 10.0 + macd_hist_score * 5.0) / 15.0;
-    push_weighted_entry_component(&mut components, "macd_cross", macd_score, ew("macd_cross", 15.0));
+    push_weighted_entry_component(
+        &mut components,
+        "macd_cross",
+        macd_score,
+        ew("macd_cross", 15.0),
+    );
 
     let macd_quality_score = macd_quality_score_for_side(
         entry_side,
@@ -274,7 +304,12 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
         consensus_macd_signal,
         consensus_macd_histogram,
     );
-    push_weighted_entry_component(&mut components, "macd_quality", macd_quality_score, ew("macd_quality", 6.0));
+    push_weighted_entry_component(
+        &mut components,
+        "macd_quality",
+        macd_quality_score,
+        ew("macd_quality", 6.0),
+    );
 
     let entry_confluence_score =
         ((rsi_quality_score + macd_quality_score + bollinger_extension_score) / 3.0)
@@ -291,14 +326,24 @@ pub(crate) fn execute_validate_entry(state: &Value, cfg: &StrategyConfig) -> Res
     } else {
         0.0
     };
-    push_weighted_entry_component(&mut components, "volume_ratio", volume_ratio_score, ew("volume_ratio", 5.0));
+    push_weighted_entry_component(
+        &mut components,
+        "volume_ratio",
+        volume_ratio_score,
+        ew("volume_ratio", 5.0),
+    );
 
     let trend_score_ratio = if min_trend_score > 0.0 {
         (consensus_trend_score / min_trend_score - 1.0).clamp(-1.0, 1.0)
     } else {
         0.0
     };
-    push_weighted_entry_component(&mut components, "trend_score", trend_score_ratio, ew("trend_score", 10.0));
+    push_weighted_entry_component(
+        &mut components,
+        "trend_score",
+        trend_score_ratio,
+        ew("trend_score", 10.0),
+    );
 
     let entry_raw_score: i32 = components.iter().map(|c| c.contribution).sum();
     let entry_clamped_score = clamp_i32(entry_raw_score, -100, 100);
