@@ -32,7 +32,7 @@ global:
       max_spread_pct: 0.0008                   # reject wide-spread books
       max_atr_pct: 0.035                        # skip over-volatile symbols
       max_funding_rate_pct: 0.01                # skip expensive funding
-      stop_loss_pct: 0.012                      # hard stop distance from entry
+      stop_loss_pct: 0.010                      # hard stop distance from entry
       fixed_take_profit_enabled: false          # use trailing instead of a fixed TP
       trailing_enabled: true
       trailing_stop:
