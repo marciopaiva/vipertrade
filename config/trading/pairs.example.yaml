@@ -96,6 +96,10 @@ global:
         thesis_invalidation_confirmation_ticks: 4
         thesis_invalidation_cooldown_minutes_long: 8
         thesis_invalidation_cooldown_minutes_short: 10
+      # Paper-trading simulation parameters (ignored in MAINNET/TESTNET).
+      paper_slippage_min: 0.0003      # minimum adverse slippage fraction
+      paper_slippage_max: 0.0008      # maximum adverse slippage fraction
+      paper_fill_probability: 0.97    # probability an order gets "filled"
     # ── TESTNET: permissive smoke profile (fire often, validate plumbing). ──
     TESTNET:
       name: "testnet_smoke"
@@ -134,6 +138,32 @@ global:
       stop_loss_cooldown_minutes_short: 0
     # ── MAINNET: inherits PAPER via the YAML anchor. Tune PAPER, not this. ──
     MAINNET: *paper_profile
+
+  # ── Scoring weights (externalized from code). Omit any key to use the default. ──
+  weights:
+    entry:
+      consensus_regime: 20.0
+      bybit_regime: 20.0
+      exchange_consensus: 20.0
+      trend_slope: 10.0
+      ema_alignment: 10.0
+      rsi_quality: 6.0
+      bollinger_extension: 13.0
+      macd_cross: 15.0
+      macd_quality: 6.0
+      entry_confluence: 8.0
+      volume_ratio: 5.0
+      trend_score: 10.0
+    decision:
+      entry_policy: 40.0
+      funding_policy: 20.0
+      size_proposal: 20.0
+      size_policy: 10.0
+      trailing_policy: 10.0
+    size:
+      volatility_discount: 40.0
+      risk_budget: 30.0
+      position_cap_fit: 30.0
 
   # Smart Copy constraints (Bybit copy-trade follower sizing bounds).
   smart_copy:
