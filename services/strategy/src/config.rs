@@ -760,4 +760,18 @@ impl StrategyConfig {
             min_move_threshold_pct: self.trailing_min_move_threshold_pct(),
         }
     }
+
+    // ── Weight accessors (externalized from hardcoded constants) ──
+
+    pub(crate) fn entry_weight(&self, key: &str, default: f64) -> f64 {
+        cfg_f64(&self.global, &["weights", "entry", key], default)
+    }
+
+    pub(crate) fn decision_weight(&self, key: &str, default: f64) -> f64 {
+        cfg_f64(&self.global, &["weights", "decision", key], default)
+    }
+
+    pub(crate) fn size_weight(&self, key: &str, default: f64) -> f64 {
+        cfg_f64(&self.global, &["weights", "size", key], default)
+    }
 }

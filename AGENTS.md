@@ -226,11 +226,11 @@ web                  │ 6 (WS client auth)          ~4h                       �
 | **v0.17.0** ✅ | Fase 6 | 13 | ~8h 🟡 | Médio (auto-fix reconciliação live mode) — concluído |
 | **v1.0.0-rc** | Fase 3 (TLS) | 8 | ~24h ⚫ | Médio (infra cross-cutting) |
 
-## Estado Atual (28-Jun-2026)
+## Estado Atual (30-Jun-2026)
 
 ### Concluído (Fase 1 + Fase 2 + Fase 3)
 - **Fase 1 (Quick Wins) — 6/6 concluídos:**
-  - Item 16: Versões unificadas (root + viper-domain → 0.9.0)
+  - Item 16: Versões unificadas (root + viper-domain → 0.17.0) com `version.workspace = true` em todos os 9 sub-crates
   - Item 17: `viper_api::run` com `Result<(), Box<dyn Error>>`
   - Item 18: DLQ capacity alinhado com broadcast buffer (2000→8192)
   - Item 20: `AI_ANALYST_SYMBOL_LIMIT` env var (default 12)
@@ -256,13 +256,13 @@ web                  │ 6 (WS client auth)          ~4h                       �
   - **helpers.rs** (214 linhas): 22 funções utilitárias
   - **types.rs** (310 linhas): todos os structs compartilhados
   - **thesis.rs** (577 linhas): avaliação de tese (8 funções)
-  - **config.rs** (754 linhas): `StrategyConfig` struct + impl completo. `pub use config::StrategyConfig;`
+  - **config.rs** (~790 linhas): `StrategyConfig` struct + impl completo. `pub use config::StrategyConfig;`
   - **trailing.rs** (396 linhas): trailing stop, ratchet, break-even, exit evaluation
   - **trailing_config.rs** (46 linhas): trailing config step
   - **filters.rs** (342 linhas): entry guard policy, temporal pipeline state
   - **db.rs** (207 linhas): fetch/update trades, hashing, audit log
   - **fetch.rs** (58 linhas): wallet & ai-analyst API clients
-  - **validate_entry.rs** (347 linhas): entry validation, RSI/Bollinger/MACD quality scores
+  - **validate_entry.rs** (~350 linhas): entry validation, RSI/Bollinger/MACD quality scores
   - **decision.rs** (127 linhas): decision step and summary
   - **smart_size.rs** (91 linhas): smart position sizing
   - **funding.rs** (73 linhas): funding rate check
@@ -309,6 +309,19 @@ web                  │ 6 (WS client auth)          ~4h                       �
 
 ### Concluído (Fase 6 — Reconciliação Auto-Fix)
 - **Item 13 — Ativar auto-fix na reconciliação (live mode)**: Aprimorado `run_reconciliation_tick` com auto-fix via Bybit market orders quando `reconcile_auto_fix && trading_mode == Mainnet`. Limites configuráveis: `RECONCILE_MAX_CORRECTION_PCT` (5%) por tick (drift > limite é detect-only), `RECONCILE_MAX_DAILY` (5) por símbolo+side com reset diário via `reconcile_daily_counts`. Drift positivo (bybit > local) → submit market order ENTER_*. Drift negativo (local > bybit) → submit market order CLOSE_* + `apply_reconciliation_reduce_local`. 3 novas env vars: `EXECUTOR_RECONCILE_AUTO_FIX`, `RECONCILE_MAX_CORRECTION_PCT`, `RECONCILE_MAX_DAILY`. Logging obrigatório em todos os pontos de decisão. `cargo check --workspace` 0 warnings, 172/172 testes.
+
+### Concluído (Config Externalization — branch `feature/config-externalization`)
+- **Análise**: Identificados ~20 valores hardcoded elegíveis para externalização em 5 categorias (pesos entry/decision/size, paper slippage, mode profiles). `min_size_usdt` no pairs.example.yaml já chamava `min_position_usdt` — bug reportado era falso positivo.
+- **pairs.yaml**: Adicionado `paper_slippage_min: 0.0003`, `paper_slippage_max: 0.0008`, `paper_fill_probability: 0.97` sob `global.mode_profiles.PAPER`.
+- **pairs.yaml**: Adicionado `global.weights.entry.*` (10 pesos), `global.weights.decision.*` (5 pesos), `global.weights.size.*` (3 pesos).
+- **config.rs (strategy)**: Adicionados `entry_weight(key, default)`, `decision_weight(key, default)`, `size_weight(key, default)` — lêem de `global.weights.<category>.<key>` com fallback hardcoded. Métodos de paper removidos (executor carrega pairs.yaml independentemente).
+- **Executor**: Paper slippage refatorado — `PAPER_SLIPPAGE_MIN/MAX` e `PAPER_FILL_PROB` substituídos por `load_paper_slippage_config()` que lê `global.mode_profiles.<mode>.paper_slippage_*` do pairs.yaml via `config/trading/`. Funções `paper_adverse_slippage(slip_min, slip_max)` e `paper_fill_check(fill_prob)` recebem parâmetros em vez de globais.
+- **validate_entry.rs**: 12 pesos substituídos por `cfg.entry_weight("key", default)` com closure `ew()`.
+- **decision.rs**: 5 pesos substituídos por `cfg.decision_weight("key", default)` com closure `dw()`.
+- **smart_size.rs**: 3 pesos substituídos por `cfg.size_weight("key", default)` com closure `sw()`.
+- **Clippy**: zero warnings (`-D warnings`).
+- **Testes**: 172/172 passam.
+- **Commit único**: `26cfaab` (62 files, +9249/-6337) pusheado em `main`. Branch `feature/config-externalization` criada a partir de `main` com o trabalho de externalização.
 
 ### Bloqueado
 - Redis não instalado — E2E test requer Redis externo

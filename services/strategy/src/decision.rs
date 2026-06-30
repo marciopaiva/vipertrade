@@ -52,35 +52,36 @@ pub(crate) fn execute_decision(state: &Value, cfg: &StrategyConfig) -> Result<Va
     let trailing_score = get_record_f64(state, "get_trailing_config", "trailing_score", 0.0);
 
     let mut components = Vec::new();
+    let dw = |key: &str, def: f64| cfg.decision_weight(key, def);
     push_weighted_decision_component(
         &mut components,
         "entry_policy",
         (entry_score / 100.0).clamp(-1.0, 1.0),
-        40.0,
+        dw("entry_policy", 40.0),
     );
     push_weighted_decision_component(
         &mut components,
         "funding_policy",
         (funding_score / 100.0).clamp(-1.0, 1.0),
-        20.0,
+        dw("funding_policy", 20.0),
     );
     push_weighted_decision_component(
         &mut components,
         "size_proposal",
         (size_proposal_score / 100.0).clamp(-1.0, 1.0),
-        20.0,
+        dw("size_proposal", 20.0),
     );
     push_weighted_decision_component(
         &mut components,
         "size_policy",
         (size_score / 100.0).clamp(-1.0, 1.0),
-        10.0,
+        dw("size_policy", 10.0),
     );
     push_weighted_decision_component(
         &mut components,
         "trailing_policy",
         (trailing_score / 100.0).clamp(0.0, 1.0),
-        10.0,
+        dw("trailing_policy", 10.0),
     );
 
     let decision_raw_score: i32 = components.iter().map(|c| c.contribution).sum();
