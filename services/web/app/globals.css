@@ -43,6 +43,24 @@
      the faint instrument grid behind the console. Consumed with an alpha:
      `hsl(var(--hud-line) / 0.06)`. */
   --hud-line: 200 60% 60%;
+
+  /* Pipeline stage identity (ServiceFlow diagram). The flow reads market-data →
+     strategy → executor, and each stage needs its own hue to be followed at a
+     glance. Data is `--primary` (cyan) and execution is `--accent` (green);
+     decision needed a third, which used to be Tailwind's `violet-*`. Now a token,
+     tuned to sit between the other two in saturation so the trio reads as a set. */
+  --decision: 265 85% 72%;
+
+  /* Sequential data scale (Fear & Greed gauge). NOT semantic UI color — it maps
+     a 0-100 reading to five steps. Anchored to the theme: the ends and middle
+     are `--destructive`, `--warn` and `--accent`; steps 2 and 4 interpolate the
+     hue between them, so the scale reads as one family instead of importing a
+     foreign palette. */
+  --scale-1: 348 100% 65%; /* = --destructive */
+  --scale-2: 20 95% 58%;
+  --scale-3: 44 100% 48%; /* = --warn */
+  --scale-4: 100 70% 48%;
+  --scale-5: 164 100% 45%; /* = --accent */
 }
 
 @layer base {

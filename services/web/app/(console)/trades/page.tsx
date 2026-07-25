@@ -7,7 +7,10 @@ import { CloseReasonAttribution } from '@/components/trades/CloseReasonAttributi
 import { TradesTable } from '@/components/trades/TradesTable';
 import { reasonLabel } from '@/components/trades/reasonLabel';
 import { cn } from '@/lib/utils';
+import { SelectField, DateField, FilterChip } from '@/components/ui/Field';
 import type { Trade } from '@/types/trading';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Skeleton, SkeletonRegion } from '@/components/ui/Skeleton';
 
 type SideFilter = 'all' | 'long' | 'short';
 type StatusFilter = 'all' | 'closed' | 'open';
@@ -36,60 +39,6 @@ function inDateRange(t: Trade, from: string, to: string): boolean {
     if (!Number.isNaN(e) && ts > e) return false;
   }
   return true;
-}
-
-function DateField({
-  label,
-  value,
-  onChange,
-  max,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  max?: string;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="uppercase tracking-wide">{label}</span>
-      <input
-        type="date"
-        value={value}
-        max={max}
-        onChange={e => onChange(e.target.value)}
-        className="rounded-md border border-border bg-card px-2 py-1 text-foreground outline-none transition-colors [color-scheme:dark] focus:border-primary/50"
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="uppercase tracking-wide">{label}</span>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="rounded-md border border-border bg-card px-2 py-1 text-foreground outline-none transition-colors focus:border-primary/50"
-      >
-        {options.map(o => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 export default function TradesPage() {
@@ -152,37 +101,36 @@ export default function TradesPage() {
 
   return (
     <div className="space-y-5">
-      {/* header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-            {t('title')}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-5 font-mono text-sm tabular-nums">
-          <span className="text-muted-foreground">
-            {t('net')}{' '}
-            <span className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}>
-              {formatUsd(locale, netPnl)}
+      <PageHeader
+        title={t('title')}
+        subtitle={t('subtitle')}
+        right={
+          <div className="flex items-center gap-5 font-mono text-sm tabular-nums">
+            <span className="text-muted-foreground">
+              {t('net')}{' '}
+              <span
+                className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}
+              >
+                {formatUsd(locale, netPnl)}
+              </span>
             </span>
-          </span>
-          <span className="text-muted-foreground">
-            <span className="text-foreground">{closed.length}</span>{' '}
-            {t('closed')}
-          </span>
-          <span className="text-muted-foreground">
-            <span className="text-foreground">
-              {formatNumber(locale, winRate, 0)}%
-            </span>{' '}
-            {t('win')}
-          </span>
-        </div>
-      </div>
+            <span className="text-muted-foreground">
+              <span className="text-foreground">{closed.length}</span>{' '}
+              {t('closed')}
+            </span>
+            <span className="text-muted-foreground">
+              <span className="text-foreground">
+                {formatNumber(locale, winRate, 0)}%
+              </span>{' '}
+              {t('win')}
+            </span>
+          </div>
+        }
+      />
 
       {/* filters */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <Select
+        <SelectField
           label={t('fSymbol')}
           value={symbol}
           onChange={setSymbol}
@@ -191,7 +139,7 @@ export default function TradesPage() {
             ...symbols.map(s => ({ value: s, label: s })),
           ]}
         />
-        <Select
+        <SelectField
           label={t('fSide')}
           value={side}
           onChange={v => setSide(v as SideFilter)}
@@ -201,7 +149,7 @@ export default function TradesPage() {
             { value: 'short', label: t('short') },
           ]}
         />
-        <Select
+        <SelectField
           label={t('fStatus')}
           value={status}
           onChange={v => setStatus(v as StatusFilter)}
@@ -217,43 +165,38 @@ export default function TradesPage() {
           onChange={setDateFrom}
           max={dateTo || today}
         />
-        <DateField label={t('fTo')} value={dateTo} onChange={setDateTo} max={today} />
+        <DateField
+          label={t('fTo')}
+          value={dateTo}
+          onChange={setDateTo}
+          max={today}
+        />
         <div className="flex items-center gap-1">
           {[
             { label: t('rangeToday'), days: 0 },
             { label: t('range7d'), days: 7 },
             { label: t('range30d'), days: 30 },
           ].map(p => (
-            <button
-              key={p.days}
-              type="button"
-              onClick={() => setRange(p.days)}
-              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-            >
+            <FilterChip key={p.days} onClick={() => setRange(p.days)}>
               {p.label}
-            </button>
+            </FilterChip>
           ))}
           {(dateFrom || dateTo) && (
-            <button
-              type="button"
+            <FilterChip
+              active
               onClick={() => {
                 setDateFrom('');
                 setDateTo('');
               }}
-              className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
             >
               {t('clearDates')}
-            </button>
+            </FilterChip>
           )}
         </div>
         {reason && (
-          <button
-            type="button"
-            onClick={() => setReason(null)}
-            className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
-          >
+          <FilterChip active onClick={() => setReason(null)}>
             {t('reasonChip', { reason: reasonLabel(t, reason) })}
-          </button>
+          </FilterChip>
         )}
       </div>
 
@@ -264,10 +207,10 @@ export default function TradesPage() {
       )}
 
       {loading && trades.length === 0 ? (
-        <div className="space-y-3">
-          <div className="h-24 animate-pulse rounded-xl border border-border bg-card" />
-          <div className="h-96 animate-pulse rounded-xl border border-border bg-card" />
-        </div>
+        <SkeletonRegion label={t('title')} className="space-y-3">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-96" />
+        </SkeletonRegion>
       ) : (
         <>
           <CloseReasonAttribution

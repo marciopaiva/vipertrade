@@ -3,6 +3,7 @@
 import { useDashboard } from '@/hooks/useDashboard';
 import { useT } from '@/lib/i18n';
 import { RadialGauge, type GaugeStop } from '@/components/ui/RadialGauge';
+import { scale5, scaleStep } from '@/lib/chartColors';
 
 type T = ReturnType<typeof useT<'console'>>;
 
@@ -26,22 +27,21 @@ interface SentimentResponse {
 }
 
 // Fear & Greed gradient (low/red → high/green), shared by the dial arc.
-const FNG_STOPS: GaugeStop[] = [
-  { offset: 0, color: '#ef4444' },
-  { offset: 25, color: '#f97316' },
-  { offset: 50, color: '#eab308' },
-  { offset: 75, color: '#84cc16' },
-  { offset: 100, color: '#22c55e' },
-];
+// Escala sequencial do tema (`--scale-1..5`), não hex solto.
+const FNG_STOPS: GaugeStop[] = scale5.map((color, i) => ({
+  offset: i * 25,
+  color,
+}));
 
 // Zone color + classification label (note/blurb intentionally dropped — the
 // dial + label carry the signal without a wall of text).
 function zone(value: number, t: T): { color: string; label: string } {
-  if (value < 25) return { color: '#ef4444', label: t('fngExtremeFear') };
-  if (value < 45) return { color: '#f97316', label: t('fngFear') };
-  if (value < 55) return { color: '#eab308', label: t('fngNeutral') };
-  if (value < 75) return { color: '#84cc16', label: t('fngGreed') };
-  return { color: '#22c55e', label: t('fngExtremeGreed') };
+  const color = scaleStep(value);
+  if (value < 25) return { color, label: t('fngExtremeFear') };
+  if (value < 45) return { color, label: t('fngFear') };
+  if (value < 55) return { color, label: t('fngNeutral') };
+  if (value < 75) return { color, label: t('fngGreed') };
+  return { color, label: t('fngExtremeGreed') };
 }
 
 function LongShortBar({ ls, t }: { ls: LongShort; t: T }) {
@@ -56,16 +56,21 @@ function LongShortBar({ ls, t }: { ls: LongShort; t: T }) {
         <span>{t('bybitPerps')}</span>
       </div>
       <div className="flex h-2.5 overflow-hidden rounded-full bg-secondary">
-        <div className="h-full bg-emerald-500" style={{ width: `${ls.longPct}%` }} />
-        <div className="h-full bg-red-500" style={{ width: `${ls.shortPct}%` }} />
+        <div className="h-full bg-accent" style={{ width: `${ls.longPct}%` }} />
+        <div
+          className="h-full bg-destructive"
+          style={{ width: `${ls.shortPct}%` }}
+        />
       </div>
       <div className="flex items-center justify-between text-xs">
-        <span className="font-semibold text-emerald-500">
+        <span className="font-semibold text-accent">
           {long}%{' '}
           <span className="font-normal text-muted-foreground">{t('long')}</span>
         </span>
-        <span className="font-semibold text-red-500">
-          <span className="font-normal text-muted-foreground">{t('short')}</span>{' '}
+        <span className="font-semibold text-destructive">
+          <span className="font-normal text-muted-foreground">
+            {t('short')}
+          </span>{' '}
           {short}%
         </span>
       </div>

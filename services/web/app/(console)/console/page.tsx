@@ -6,11 +6,13 @@ import { useDecisions } from '@/hooks/useDecisions';
 import { useT, useLocale, formatNumber, formatUsd } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { HudFrame } from '@/components/ui/HudFrame';
+import { PageHeader } from '@/components/ui/PageHeader';
 import { StatRail } from '@/components/ui/StatRail';
 import { Sparkline } from '@/components/console/Sparkline';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
 import { PositionGauge } from '@/components/console/PositionGauge';
 import { LiveFeed } from '@/components/console/LiveFeed';
+import { DeckSkeleton } from '@/components/console/DeckSkeleton';
 import { EquityCurve } from '@/components/analysis/EquityCurve';
 import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
@@ -56,7 +58,6 @@ type LooseSignal = any;
 export default function CommandDeckPage() {
   const t = useT('deck');
   const tc = useT('console');
-  const tcm = useT('common');
   const ts = useT('strategy');
   const locale = useLocale();
 
@@ -103,17 +104,10 @@ export default function CommandDeckPage() {
     return points;
   }, [closedTrades, now]);
 
+  // Esqueleto no formato do painel, em vez de um "Carregando…" centralizado que
+  // esvaziava a tela inteira e a fazia saltar quando os dados chegavam.
   if (loading && !dashboardData) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <div className="mb-2 text-2xl font-bold text-primary hud-glow">
-            {tcm('loading')}
-          </div>
-          <div className="text-muted-foreground">{tc('connecting')}</div>
-        </div>
-      </div>
-    );
+    return <DeckSkeleton />;
   }
 
   const openPositions = dashboardData?.positions?.items ?? [];
@@ -143,21 +137,26 @@ export default function CommandDeckPage() {
 
   return (
     <div className="space-y-4">
-      {/* Status bar */}
-      <div className="flex items-center gap-2 font-display text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
-        <span className="relative flex h-2 w-2">
-          {live && (
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-          )}
-          <span
-            className={cn(
-              'relative inline-flex h-2 w-2 rounded-full',
-              live ? 'bg-accent' : 'bg-muted-foreground'
-            )}
-          />
-        </span>
-        {t('statusLive', { n: decisions.length })}
-      </div>
+      <PageHeader
+        title={t('title')}
+        subtitle={t('subtitle')}
+        right={
+          <div className="flex items-center gap-2 font-display text-2xs uppercase tracking-[0.25em] text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              {live && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+              )}
+              <span
+                className={cn(
+                  'relative inline-flex h-2 w-2 rounded-full',
+                  live ? 'bg-accent' : 'bg-muted-foreground'
+                )}
+              />
+            </span>
+            {t('statusLive', { n: decisions.length })}
+          </div>
+        }
+      />
 
       {/* Instrument cluster — equity + sentiment dial. Win rate / net / open /
           today live in the rail below, so nothing is shown twice. */}
@@ -173,11 +172,13 @@ export default function CommandDeckPage() {
               <div
                 className={cn(
                   'mt-1 font-mono text-sm font-semibold tabular-nums',
-                  up ? 'text-accent hud-glow-accent' : 'text-destructive hud-glow-danger'
+                  up
+                    ? 'text-accent hud-glow-accent'
+                    : 'text-destructive hud-glow-danger'
                 )}
               >
                 {up ? '▴' : '▾'} {formatUsd(locale, pnl24h)}{' '}
-                <span className="text-[11px] font-normal text-muted-foreground">
+                <span className="text-2xs font-normal text-muted-foreground">
                   24h
                 </span>
               </div>
@@ -242,7 +243,7 @@ export default function CommandDeckPage() {
             <div
               className={cn(
                 ROW_GRID,
-                'border-b border-border px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground'
+                'border-b border-border px-3 py-2 text-3xs uppercase tracking-[0.15em] text-muted-foreground'
               )}
             >
               <span>{ts('colSymbol')}</span>

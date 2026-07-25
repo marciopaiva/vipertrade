@@ -3,6 +3,7 @@ import type { Messages } from './en';
 // Portuguese (Brazil) catalog. Must match the shape of en.ts (the type source).
 const ptBR: Messages = {
   nav: {
+    primary: 'Principal',
     console: 'Command Deck',
     strategy: 'Estratégia',
     trades: 'Trades',
@@ -10,6 +11,9 @@ const ptBR: Messages = {
     system: 'Sistema',
   },
   deck: {
+    title: 'Command Deck',
+    subtitle:
+      'Decisões ao vivo, risco aberto e PnL realizado — a tela para deixar aberta enquanto a estratégia roda.',
     statusLive: 'AO VIVO · {n} ativos',
     equity: 'Patrimônio',
     sentiment: 'Sentimento',
@@ -17,11 +21,13 @@ const ptBR: Messages = {
     net24h: 'net 24h',
     decisionMatrix: 'Matriz de decisão',
     liveFeed: 'Feed ao vivo',
-    feedEmpty: 'Nenhuma execução ainda — o feed atualiza conforme os trades fecham.',
+    feedEmpty:
+      'Nenhuma execução ainda — o feed atualiza conforme os trades fecham.',
   },
   common: {
     language: 'Idioma',
     density: 'Densidade',
+    accountMenu: 'Conta e preferências',
     logout: 'Sair',
     loading: 'Carregando…',
     error: 'Erro',
@@ -85,7 +91,8 @@ const ptBR: Messages = {
     colDelta: 'Δ net PnL',
     colNet: 'net PnL',
     colWL: 'W/L',
-    subTitle: 'Substituição de token · hipótese (candidatos sem corpus, não backtestados)',
+    subTitle:
+      'Substituição de token · hipótese (candidatos sem corpus, não backtestados)',
     subWorst: 'Pior símbolo: {symbol}',
     subPool: 'Pool de substitutos (desabilitados, validar em paper antes):',
     subNone: 'Nenhum candidato a drop com trades suficientes.',
@@ -130,7 +137,8 @@ const ptBR: Messages = {
     fngExtremeFearNote:
       'Investidores muito temerosos — costuma ser uma zona de sobrevenda com potenciais oportunidades de compra.',
     fngFear: 'Medo',
-    fngFearNote: 'A cautela domina o mercado — o sentimento pende para baixista.',
+    fngFearNote:
+      'A cautela domina o mercado — o sentimento pende para baixista.',
     fngNeutral: 'Neutro',
     fngNeutralNote: 'Sentimento equilibrado — sem viés direcional forte.',
     fngGreed: 'Ganância',
@@ -150,7 +158,8 @@ const ptBR: Messages = {
       'PnL realizado acumulado em {n} trades fechados · marcador por execução',
     equityNet: 'net',
     equityPeak: 'pico',
-    equityEmpty: 'Nenhum trade fechado ainda — a curva é plotada conforme as execuções ocorrem.',
+    equityEmpty:
+      'Nenhum trade fechado ainda — a curva é plotada conforme as execuções ocorrem.',
     fill: 'execução',
     equityLabel: 'patrimônio',
   },

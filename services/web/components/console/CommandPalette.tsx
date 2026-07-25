@@ -29,10 +29,30 @@ export function CommandPalette() {
 
   const commands = useMemo<Command[]>(
     () => [
-      { id: 'console', label: t('goConsole'), hint: 'g c', run: () => router.push('/console') },
-      { id: 'trades', label: t('goTrades'), hint: 'g t', run: () => router.push('/trades') },
-      { id: 'analysis', label: t('goAnalysis'), hint: 'g a', run: () => router.push('/analysis') },
-      { id: 'system', label: t('goSystem'), hint: 'g y', run: () => router.push('/system') },
+      {
+        id: 'console',
+        label: t('goConsole'),
+        hint: 'g c',
+        run: () => router.push('/console'),
+      },
+      {
+        id: 'trades',
+        label: t('goTrades'),
+        hint: 'g t',
+        run: () => router.push('/trades'),
+      },
+      {
+        id: 'analysis',
+        label: t('goAnalysis'),
+        hint: 'g a',
+        run: () => router.push('/analysis'),
+      },
+      {
+        id: 'system',
+        label: t('goSystem'),
+        hint: 'g y',
+        run: () => router.push('/system'),
+      },
     ],
     [router, t]
   );
@@ -164,7 +184,7 @@ export function CommandPalette() {
                 >
                   <span>{c.label}</span>
                   {c.hint && (
-                    <span className="font-mono text-[11px] text-muted-foreground">
+                    <span className="font-mono text-2xs text-muted-foreground">
                       {c.hint}
                     </span>
                   )}

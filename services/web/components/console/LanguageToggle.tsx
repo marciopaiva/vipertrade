@@ -15,7 +15,10 @@ export function LanguageToggle({ className }: { className?: string }) {
 
   return (
     <div
-      className={cn('flex items-center rounded-md border border-border/60 p-0.5', className)}
+      className={cn(
+        'flex items-center rounded-md border border-border/60 p-0.5',
+        className
+      )}
       role="group"
       aria-label={t('language')}
     >
@@ -26,7 +29,7 @@ export function LanguageToggle({ className }: { className?: string }) {
           onClick={() => setLocale(l)}
           aria-pressed={locale === l}
           className={cn(
-            'rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors',
+            'rounded px-1.5 py-0.5 text-2xs font-medium tabular-nums transition-colors',
             locale === l
               ? 'bg-secondary text-foreground'
               : 'text-muted-foreground hover:text-foreground'

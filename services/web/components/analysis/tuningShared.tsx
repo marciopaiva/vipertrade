@@ -59,10 +59,10 @@ export function ClassBadge({ klass }: { klass: VariantClass }) {
   return (
     <span
       className={cn(
-        'rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+        'rounded-md border px-1.5 py-0.5 text-3xs uppercase tracking-wide',
         klass === 'alpha'
           ? 'border-accent/40 bg-accent/10 text-accent'
-          : 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+          : 'border-warn/40 bg-warn/10 text-warn'
       )}
     >
       {klass}
@@ -78,7 +78,9 @@ export function SubstitutionCard({ sub }: { sub: Substitution }) {
       {sub.drop_candidate ? (
         <p className="text-sm text-foreground">
           {t('subWorst', { symbol: sub.drop_candidate })}
-          {sub.drop_reason && <span className="text-muted-foreground"> — {sub.drop_reason}</span>}
+          {sub.drop_reason && (
+            <span className="text-muted-foreground"> — {sub.drop_reason}</span>
+          )}
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">{t('subNone')}</p>

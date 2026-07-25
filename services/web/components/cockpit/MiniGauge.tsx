@@ -47,7 +47,7 @@ export function MiniGauge({
       >
         {has ? (format ? format(v) : v.toFixed(2)) : '—'}
       </span>
-      <span className={cn('w-2 shrink-0 text-[10px] leading-none', toneText)}>
+      <span className={cn('w-2 shrink-0 text-3xs leading-none', toneText)}>
         {tone ? '⚠' : ''}
       </span>
       <div className="relative h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-secondary">

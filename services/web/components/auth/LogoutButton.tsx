@@ -16,7 +16,7 @@ export default function LogoutButton() {
         method: 'POST',
         credentials: 'include',
         cache: 'no-store',
-        redirect: 'manual'
+        redirect: 'manual',
       });
 
       // Remove cookie no cliente (backup)
@@ -34,10 +34,9 @@ export default function LogoutButton() {
     <button
       onClick={handleLogout}
       disabled={loggingOut}
-      className="text-sm text-slate-400 hover:text-red-400 disabled:opacity-50"
+      className="text-sm text-muted-foreground hover:text-destructive disabled:opacity-50"
     >
       {loggingOut ? t('loggingOut') : t('logout')}
     </button>
   );
 }
-

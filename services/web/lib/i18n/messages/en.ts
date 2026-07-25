@@ -3,6 +3,7 @@
 // interpolated by useT(). Keep keys stable; add a namespace as a screen is migrated.
 const en = {
   nav: {
+    primary: 'Primary',
     console: 'Command Deck',
     strategy: 'Strategy',
     trades: 'Trades',
@@ -10,6 +11,9 @@ const en = {
     system: 'System',
   },
   deck: {
+    title: 'Command Deck',
+    subtitle:
+      'Live decisions, open risk and realized PnL — the screen to keep open while the strategy runs.',
     statusLive: 'LIVE · {n} assets',
     equity: 'Equity',
     sentiment: 'Sentiment',
@@ -22,6 +26,7 @@ const en = {
   common: {
     language: 'Language',
     density: 'Density',
+    accountMenu: 'Account and preferences',
     logout: 'Log out',
     loading: 'Loading…',
     error: 'Error',
@@ -85,7 +90,8 @@ const en = {
     colDelta: 'Δ net PnL',
     colNet: 'net PnL',
     colWL: 'W/L',
-    subTitle: 'Token substitution · hypothesis (candidates have no corpus, not backtested)',
+    subTitle:
+      'Token substitution · hypothesis (candidates have no corpus, not backtested)',
     subWorst: 'Worst symbol: {symbol}',
     subPool: 'Substitution pool (disabled, validate in paper first):',
     subNone: 'No drop candidate with enough trades.',
@@ -134,7 +140,8 @@ const en = {
     fngNeutral: 'Neutral',
     fngNeutralNote: 'Sentiment is balanced — no strong directional bias.',
     fngGreed: 'Greed',
-    fngGreedNote: 'Optimism is rising — momentum is bullish, but watch for froth.',
+    fngGreedNote:
+      'Optimism is rising — momentum is bullish, but watch for froth.',
     fngExtremeGreed: 'Extreme Greed',
     fngExtremeGreedNote:
       'Markets are euphoric — historically a zone of elevated pullback risk.',

@@ -4,9 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ViperTradeLogo } from './ViperTradeLogo';
 import { HealthPill } from './HealthPill';
-import LogoutButton from './auth/LogoutButton';
-import { DensityToggle } from './console/DensityToggle';
-import { LanguageToggle } from './console/LanguageToggle';
+import { OperatorMenu } from './console/OperatorMenu';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 
@@ -25,46 +23,52 @@ export function AppHeader() {
   const t = useT('nav');
 
   return (
-    <header className="border-b border-border/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
+    <header className="border-b border-border/50 bg-background/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <Link href="/console" className="flex items-center gap-3">
             <ViperTradeLogo size="md" showText={true} />
           </Link>
-          <nav className="flex items-center gap-4">
-            {NAV.map(item => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'text-sm transition-colors',
-                    active
-                      ? 'text-viper-cyan'
-                      : 'text-muted-foreground hover:text-viper-cyan'
-                  )}
-                >
-                  {t(item.key)}
-                </Link>
-              );
-            })}
+          {/* Navegação e ferramentas ficam em grupos separados: o que se
+              consulta em operação (rotas, busca, saúde) de um lado; o que se
+              ajusta uma vez (idioma, densidade, sair) atrás do menu. */}
+          <div className="flex items-center gap-4">
+            <nav className="flex items-center gap-4" aria-label={t('primary')}>
+              {NAV.map(item => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'text-sm transition-colors',
+                      active
+                        ? 'text-primary'
+                        : 'text-muted-foreground hover:text-primary'
+                    )}
+                  >
+                    {t(item.key)}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            <span aria-hidden className="h-4 w-px bg-border" />
+
             <button
               type="button"
               onClick={() =>
                 window.dispatchEvent(new Event('command-palette:open'))
               }
               title="Command palette"
-              className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-2xs text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
             >
               ⌘K
             </button>
-            <LanguageToggle />
-            <DensityToggle />
-            <HealthPill className="ml-1" />
-            <LogoutButton />
-          </nav>
+            <HealthPill />
+            <OperatorMenu />
+          </div>
         </div>
       </div>
     </header>

@@ -39,53 +39,61 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-900">
-      <div className="w-96 rounded-lg bg-gray-800 p-8 shadow-lg">
-        <h1 className="mb-6 text-2xl font-bold text-white">{t('loginTitle')}</h1>
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div className="w-96 rounded-lg border border-border bg-card p-8 shadow-lg">
+        <h1 className="mb-6 text-2xl font-bold text-foreground">
+          {t('loginTitle')}
+        </h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-300">
+            <label
+              htmlFor="username"
+              className="block text-sm font-medium text-muted-foreground"
+            >
               {t('username')}
             </label>
             <input
               id="username"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={e => setUsername(e.target.value)}
               placeholder="viperadmin"
               required
               disabled={loading}
-              className="mt-1 w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-viper-cyan"
+              className="mt-1 w-full rounded border border-border bg-secondary px-3 py-2 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-300">
+            <label
+              htmlFor="password"
+              className="block text-sm font-medium text-muted-foreground"
+            >
               {t('password')}
             </label>
             <input
               id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={e => setPassword(e.target.value)}
               placeholder="1234"
               required
               disabled={loading}
-              className="mt-1 w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-viper-cyan"
+              className="mt-1 w-full rounded border border-border bg-secondary px-3 py-2 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded bg-viper-cyan py-2 px-4 font-bold text-gray-900 hover:bg-cyan-400 disabled:opacity-50"
+            className="w-full rounded bg-primary px-4 py-2 font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? t('signingIn') : t('signIn')}
           </button>
         </form>
-        <p className="mt-4 text-xs text-gray-500">
+        <p className="mt-4 text-xs text-muted-foreground">
           {t('localDevPre')}
-          <code className="rounded bg-gray-700 px-1">viperadmin</code> /{' '}
-          <code className="rounded bg-gray-700 px-1">1234</code>
+          <code className="rounded bg-secondary px-1">viperadmin</code> /{' '}
+          <code className="rounded bg-secondary px-1">1234</code>
         </p>
       </div>
     </div>

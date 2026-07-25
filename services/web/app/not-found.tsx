@@ -6,21 +6,23 @@ import { useT } from '@/lib/i18n';
 export default function NotFound() {
   const t = useT('app');
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-viper-navy">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-background">
       <div className="text-center space-y-6 p-8">
         {/* 404 Text */}
-        <h1 className="text-9xl font-bold text-viper-cyan opacity-20">404</h1>
+        <h1 className="text-9xl font-bold text-primary opacity-20">404</h1>
 
         {/* Message */}
         <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-slate-200">{t('notFoundTitle')}</h2>
-          <p className="text-slate-400">{t('notFoundBody')}</p>
+          <h2 className="text-2xl font-bold text-foreground">
+            {t('notFoundTitle')}
+          </h2>
+          <p className="text-muted-foreground">{t('notFoundBody')}</p>
         </div>
 
         {/* Back Button */}
         <Link
           href="/"
-          className="inline-block px-6 py-2 bg-viper-cyan text-viper-navy font-semibold rounded-lg hover:bg-cyan-400 transition-colors"
+          className="inline-block rounded-lg bg-primary px-6 py-2 font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
         >
           {t('goDashboard')}
         </Link>

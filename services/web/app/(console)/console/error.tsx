@@ -17,7 +17,9 @@ export default function DashboardError({
         <div className="text-4xl">❌</div>
 
         {/* Error Message */}
-        <h3 className="text-xl font-bold text-viper-red">{t('dashboardError')}</h3>
+        <h3 className="text-xl font-bold text-destructive">
+          {t('dashboardError')}
+        </h3>
 
         {/* Error Details (dev only) */}
         {process.env.NODE_ENV === 'development' && (
@@ -30,7 +32,7 @@ export default function DashboardError({
         <div className="flex gap-3 justify-center">
           <button
             onClick={reset}
-            className="px-4 py-2 bg-viper-cyan text-viper-navy font-semibold rounded hover:bg-primary transition-colors"
+            className="rounded bg-primary px-4 py-2 font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
           >
             {t('retry')}
           </button>

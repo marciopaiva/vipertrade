@@ -47,19 +47,6 @@ export function formatDuration(seconds: number): string {
   return `${seconds}s`;
 }
 
-export function truncateAddress(address: string, length = 4): string {
-  if (address.length <= length * 2) return address;
-  return `${address.slice(0, length)}...${address.slice(-length)}`;
-}
-
-export function getStatusColor(
-  status: 'success' | 'warning' | 'error' | 'neutral'
-): string {
-  const colors = {
-    success: '#00ff88',
-    warning: '#f59e0b',
-    error: '#ef4444',
-    neutral: '#64748b',
-  };
-  return colors[status];
-}
+// `getStatusColor` e `truncateAddress` saíram aqui: ambos sem nenhuma chamada.
+// O primeiro devolvia hex cru (o quarto verde do app); o segundo encurtava
+// endereço de carteira, que esta interface nunca exibe.
