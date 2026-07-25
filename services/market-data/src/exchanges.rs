@@ -219,17 +219,35 @@ pub(crate) fn parse_candles(rows: Vec<Vec<String>>) -> Vec<Candle> {
         .collect()
 }
 
+/// Binance devolve os campos OHLCV como STRINGS JSON (`"0.069610"`) e o timestamp
+/// como número — `as_f64()` sozinho retorna `None` nas strings e zera a vela.
+fn json_f64(v: Option<&Value>) -> Option<f64> {
+    match v? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn json_i64(v: Option<&Value>) -> Option<i64> {
+    match v? {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
 pub(crate) fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
             if row.len() < 5 {
                 return None;
             }
-            let open_time_ms = row[0].as_i64()?;
-            let high = row[2].as_f64().unwrap_or(0.0).max(0.0);
-            let low = row[3].as_f64().unwrap_or(0.0).max(0.0);
-            let close = row[4].as_f64().unwrap_or(0.0).max(0.0);
-            let volume_quote = row[5].as_f64().unwrap_or(0.0).max(0.0);
+            let open_time_ms = json_i64(row.first())?;
+            let high = json_f64(row.get(2)).unwrap_or(0.0).max(0.0);
+            let low = json_f64(row.get(3)).unwrap_or(0.0).max(0.0);
+            let close = json_f64(row.get(4)).unwrap_or(0.0).max(0.0);
+            let volume_quote = json_f64(row.get(5)).unwrap_or(0.0).max(0.0);
             if close <= 0.0 {
                 return None;
             }
