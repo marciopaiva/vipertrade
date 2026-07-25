@@ -12,6 +12,7 @@ import { Sparkline } from '@/components/console/Sparkline';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
 import { PositionGauge } from '@/components/console/PositionGauge';
 import { LiveFeed } from '@/components/console/LiveFeed';
+import { DeckSkeleton } from '@/components/console/DeckSkeleton';
 import { EquityCurve } from '@/components/analysis/EquityCurve';
 import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
@@ -57,7 +58,6 @@ type LooseSignal = any;
 export default function CommandDeckPage() {
   const t = useT('deck');
   const tc = useT('console');
-  const tcm = useT('common');
   const ts = useT('strategy');
   const locale = useLocale();
 
@@ -104,17 +104,10 @@ export default function CommandDeckPage() {
     return points;
   }, [closedTrades, now]);
 
+  // Esqueleto no formato do painel, em vez de um "Carregando…" centralizado que
+  // esvaziava a tela inteira e a fazia saltar quando os dados chegavam.
   if (loading && !dashboardData) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <div className="mb-2 text-2xl font-bold text-primary hud-glow">
-            {tcm('loading')}
-          </div>
-          <div className="text-muted-foreground">{tc('connecting')}</div>
-        </div>
-      </div>
-    );
+    return <DeckSkeleton />;
   }
 
   const openPositions = dashboardData?.positions?.items ?? [];

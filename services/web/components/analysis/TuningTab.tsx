@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useLocale, useT, formatSigned, formatNumber } from '@/lib/i18n';
 import { Kpi } from '@/components/ui/Kpi';
 import { SectionCard } from '@/components/ui/SectionCard';
+import { Skeleton } from '@/components/ui/Skeleton';
 import {
   ClassBadge,
   GridVariant,
@@ -159,9 +160,7 @@ export default function TuningTab({ tuning }: { tuning: TuningState }) {
         </div>
       )}
 
-      {loading && (
-        <div className="h-40 animate-pulse rounded-xl border border-border bg-card" />
-      )}
+      {loading && <Skeleton className="h-40" />}
 
       {data && !loading && (
         <>

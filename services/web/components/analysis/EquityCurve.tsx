@@ -16,6 +16,7 @@ import { useLocale, useT, formatUsd, type Locale } from '@/lib/i18n';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { chart } from '@/lib/chartColors';
 import type { Trade } from '@/types/trading';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 type T = ReturnType<typeof useT<'console'>>;
 
@@ -163,7 +164,7 @@ export function EquityCurve() {
           {error}
         </div>
       ) : loading && points.length === 0 ? (
-        <div className="h-64 animate-pulse rounded-lg bg-secondary/40" />
+        <Skeleton className="h-64" />
       ) : points.length === 0 ? (
         <div className="flex h-64 items-center justify-center rounded-lg bg-secondary/40 text-sm text-muted-foreground">
           {t('equityEmpty')}

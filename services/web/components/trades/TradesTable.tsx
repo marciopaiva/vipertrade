@@ -124,37 +124,48 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       <div className="hud-frame overflow-hidden rounded-md border border-border bg-card">
         {/* header */}
         <div className="hidden gap-4 border-b border-border px-4 py-2.5 text-2xs uppercase tracking-[0.16em] text-muted-foreground lg:flex">
-          {COLUMNS.map(col => (
-            <div
-              key={col.label}
-              className={cn(
-                col.className,
-                col.align === 'right' && 'text-right'
-              )}
-            >
-              {col.key ? (
-                <button
-                  type="button"
-                  onClick={() => toggleSort(col.key as SortKey)}
-                  className={cn(
-                    'inline-flex items-center gap-1 transition-colors hover:text-foreground',
-                    sortKey === col.key && 'text-foreground'
-                  )}
-                >
-                  {t(col.label)}
-                  <span className="text-3xs">
-                    {sortKey === col.key
+          {COLUMNS.map(col => {
+            const sorted = col.key && sortKey === col.key;
+            return (
+              <div
+                key={col.label}
+                // aria-sort na coluna: sem isso o leitor de tela não anuncia
+                // por onde a tabela está ordenada nem em que direção.
+                aria-sort={
+                  !col.key
+                    ? undefined
+                    : sorted
                       ? sortDir === 'asc'
-                        ? '▲'
-                        : '▼'
-                      : '↕'}
-                  </span>
-                </button>
-              ) : (
-                t(col.label)
-              )}
-            </div>
-          ))}
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                }
+                className={cn(
+                  col.className,
+                  col.align === 'right' && 'text-right'
+                )}
+              >
+                {col.key ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(col.key as SortKey)}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-sm transition-colors hover:text-foreground',
+                      sorted && 'text-foreground'
+                    )}
+                  >
+                    {t(col.label)}
+                    {/* decorativo: a direção já é anunciada pelo aria-sort */}
+                    <span aria-hidden className="text-3xs">
+                      {sorted ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                    </span>
+                  </button>
+                ) : (
+                  t(col.label)
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* rows */}

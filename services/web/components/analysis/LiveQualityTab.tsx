@@ -13,6 +13,7 @@ import {
 } from '@/lib/i18n';
 import { Kpi } from '@/components/ui/Kpi';
 import { SectionCard } from '@/components/ui/SectionCard';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 type CloseReasonStat = {
   reason: string;
@@ -105,7 +106,7 @@ export default function LiveQualityTab() {
       )}
 
       {loading && !data ? (
-        <div className="h-72 animate-pulse rounded-xl border border-border bg-card" />
+        <Skeleton className="h-72" />
       ) : data && data.closed_trades === 0 ? (
         <div className="flex h-40 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
           {t('empty', { days: data.window_days })}

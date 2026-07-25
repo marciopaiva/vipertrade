@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { SelectField, DateField, FilterChip } from '@/components/ui/Field';
 import type { Trade } from '@/types/trading';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { Skeleton, SkeletonRegion } from '@/components/ui/Skeleton';
 
 type SideFilter = 'all' | 'long' | 'short';
 type StatusFilter = 'all' | 'closed' | 'open';
@@ -206,10 +207,10 @@ export default function TradesPage() {
       )}
 
       {loading && trades.length === 0 ? (
-        <div className="space-y-3">
-          <div className="h-24 animate-pulse rounded-xl border border-border bg-card" />
-          <div className="h-96 animate-pulse rounded-xl border border-border bg-card" />
-        </div>
+        <SkeletonRegion label={t('title')} className="space-y-3">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-96" />
+        </SkeletonRegion>
       ) : (
         <>
           <CloseReasonAttribution
