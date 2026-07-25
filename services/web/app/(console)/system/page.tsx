@@ -7,6 +7,7 @@ import { HudFrame } from '@/components/ui/HudFrame';
 import { ConfirmAction } from '@/components/system/ConfirmAction';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 interface ControlActor {
   enabled: boolean;
@@ -118,16 +119,16 @@ export default function SystemPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          {t('title')}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('subtitlePre')}
-          <code className="text-foreground/80">kubectl</code>
-          {t('subtitlePost')}
-        </p>
-      </div>
+      <PageHeader
+        title={t('title')}
+        subtitle={
+          <>
+            {t('subtitlePre')}
+            <code className="text-foreground/80">kubectl</code>
+            {t('subtitlePost')}
+          </>
+        }
+      />
 
       {!opEnabled && (
         <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">

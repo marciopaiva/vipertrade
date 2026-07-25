@@ -8,6 +8,7 @@ import { TradesTable } from '@/components/trades/TradesTable';
 import { reasonLabel } from '@/components/trades/reasonLabel';
 import { cn } from '@/lib/utils';
 import type { Trade } from '@/types/trading';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 type SideFilter = 'all' | 'long' | 'short';
 type StatusFilter = 'all' | 'closed' | 'open';
@@ -152,33 +153,32 @@ export default function TradesPage() {
 
   return (
     <div className="space-y-5">
-      {/* header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-            {t('title')}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-5 font-mono text-sm tabular-nums">
-          <span className="text-muted-foreground">
-            {t('net')}{' '}
-            <span className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}>
-              {formatUsd(locale, netPnl)}
+      <PageHeader
+        title={t('title')}
+        subtitle={t('subtitle')}
+        right={
+          <div className="flex items-center gap-5 font-mono text-sm tabular-nums">
+            <span className="text-muted-foreground">
+              {t('net')}{' '}
+              <span
+                className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}
+              >
+                {formatUsd(locale, netPnl)}
+              </span>
             </span>
-          </span>
-          <span className="text-muted-foreground">
-            <span className="text-foreground">{closed.length}</span>{' '}
-            {t('closed')}
-          </span>
-          <span className="text-muted-foreground">
-            <span className="text-foreground">
-              {formatNumber(locale, winRate, 0)}%
-            </span>{' '}
-            {t('win')}
-          </span>
-        </div>
-      </div>
+            <span className="text-muted-foreground">
+              <span className="text-foreground">{closed.length}</span>{' '}
+              {t('closed')}
+            </span>
+            <span className="text-muted-foreground">
+              <span className="text-foreground">
+                {formatNumber(locale, winRate, 0)}%
+              </span>{' '}
+              {t('win')}
+            </span>
+          </div>
+        }
+      />
 
       {/* filters */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -217,7 +217,12 @@ export default function TradesPage() {
           onChange={setDateFrom}
           max={dateTo || today}
         />
-        <DateField label={t('fTo')} value={dateTo} onChange={setDateTo} max={today} />
+        <DateField
+          label={t('fTo')}
+          value={dateTo}
+          onChange={setDateTo}
+          max={today}
+        />
         <div className="flex items-center gap-1">
           {[
             { label: t('rangeToday'), days: 0 },

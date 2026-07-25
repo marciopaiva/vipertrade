@@ -6,6 +6,7 @@ import { useT } from '@/lib/i18n';
 import LiveQualityTab from '@/components/analysis/LiveQualityTab';
 import TuningTab from '@/components/analysis/TuningTab';
 import { useTuning } from '@/components/analysis/tuningShared';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 type TabId = 'live' | 'whatif';
 
@@ -21,10 +22,7 @@ export default function AnalysisPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{t('title')}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-      </div>
+      <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
       <div className="flex gap-1 border-b border-border">
         {tabs.map(t => (

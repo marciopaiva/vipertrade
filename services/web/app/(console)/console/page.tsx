@@ -6,6 +6,7 @@ import { useDecisions } from '@/hooks/useDecisions';
 import { useT, useLocale, formatNumber, formatUsd } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { HudFrame } from '@/components/ui/HudFrame';
+import { PageHeader } from '@/components/ui/PageHeader';
 import { StatRail } from '@/components/ui/StatRail';
 import { Sparkline } from '@/components/console/Sparkline';
 import { MarketSentiment } from '@/components/console/MarketSentiment';
@@ -143,21 +144,26 @@ export default function CommandDeckPage() {
 
   return (
     <div className="space-y-4">
-      {/* Status bar */}
-      <div className="flex items-center gap-2 font-display text-2xs uppercase tracking-[0.25em] text-muted-foreground">
-        <span className="relative flex h-2 w-2">
-          {live && (
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-          )}
-          <span
-            className={cn(
-              'relative inline-flex h-2 w-2 rounded-full',
-              live ? 'bg-accent' : 'bg-muted-foreground'
-            )}
-          />
-        </span>
-        {t('statusLive', { n: decisions.length })}
-      </div>
+      <PageHeader
+        title={t('title')}
+        subtitle={t('subtitle')}
+        right={
+          <div className="flex items-center gap-2 font-display text-2xs uppercase tracking-[0.25em] text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              {live && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+              )}
+              <span
+                className={cn(
+                  'relative inline-flex h-2 w-2 rounded-full',
+                  live ? 'bg-accent' : 'bg-muted-foreground'
+                )}
+              />
+            </span>
+            {t('statusLive', { n: decisions.length })}
+          </div>
+        }
+      />
 
       {/* Instrument cluster — equity + sentiment dial. Win rate / net / open /
           today live in the rail below, so nothing is shown twice. */}
