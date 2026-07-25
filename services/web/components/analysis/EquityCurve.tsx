@@ -14,6 +14,7 @@ import {
 import { useDashboard } from '@/hooks/useDashboard';
 import { useLocale, useT, formatUsd, type Locale } from '@/lib/i18n';
 import { SectionCard } from '@/components/ui/SectionCard';
+import { chart } from '@/lib/chartColors';
 import type { Trade } from '@/types/trading';
 
 type T = ReturnType<typeof useT<'console'>>;
@@ -73,8 +74,8 @@ function FillDot(props: any) {
       cx={cx}
       cy={cy}
       r={2.5}
-      fill={win ? '#00ff88' : '#ef4444'}
-      stroke="#0a1120"
+      fill={win ? chart.positive : chart.negative}
+      stroke={chart.surface}
       strokeWidth={0.5}
     />
   );
@@ -177,40 +178,52 @@ export function EquityCurve() {
               <defs>
                 {/* Fill: green above the zero line, red below it. */}
                 <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset={0} stopColor="#10b981" stopOpacity={0.3} />
+                  <stop
+                    offset={0}
+                    stopColor={chart.positive}
+                    stopOpacity={0.3}
+                  />
                   <stop
                     offset={zeroOffset}
-                    stopColor="#10b981"
+                    stopColor={chart.positive}
                     stopOpacity={0.04}
                   />
                   <stop
                     offset={zeroOffset}
-                    stopColor="#ef4444"
+                    stopColor={chart.negative}
                     stopOpacity={0.04}
                   />
-                  <stop offset={1} stopColor="#ef4444" stopOpacity={0.3} />
+                  <stop
+                    offset={1}
+                    stopColor={chart.negative}
+                    stopOpacity={0.3}
+                  />
                 </linearGradient>
                 {/* Stroke: the line itself turns red while underwater. */}
                 <linearGradient id="equityStroke" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset={zeroOffset} stopColor="#10b981" />
-                  <stop offset={zeroOffset} stopColor="#ef4444" />
+                  <stop offset={zeroOffset} stopColor={chart.positive} />
+                  <stop offset={zeroOffset} stopColor={chart.negative} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
               <XAxis
                 dataKey="i"
-                stroke="#64748b"
+                stroke={chart.axis}
                 fontSize={11}
                 tickFormatter={() => ''}
                 tickLine={false}
               />
               <YAxis
-                stroke="#64748b"
+                stroke={chart.axis}
                 fontSize={11}
                 width={48}
                 tickFormatter={v => `$${v}`}
               />
-              <ReferenceLine y={0} stroke="#475569" strokeDasharray="2 4" />
+              <ReferenceLine
+                y={0}
+                stroke={chart.reference}
+                strokeDasharray="2 4"
+              />
               <Tooltip content={<CurveTooltip t={t} locale={locale} />} />
               <Area
                 type="monotone"

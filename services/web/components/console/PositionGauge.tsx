@@ -3,7 +3,14 @@
 import { HudFrame } from '@/components/ui/HudFrame';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { useLocale, useT, formatPrice, formatPct, formatUsd, formatNumber } from '@/lib/i18n';
+import {
+  useLocale,
+  useT,
+  formatPrice,
+  formatPct,
+  formatUsd,
+  formatNumber,
+} from '@/lib/i18n';
 
 interface MarketSignal {
   symbol: string;
@@ -77,7 +84,8 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
       : null;
 
   const unrealizedPnl = (isLong ? mark - entry : entry - mark) * p.quantity;
-  const unrealizedPct = p.notional_usdt > 0 ? unrealizedPnl / p.notional_usdt : 0;
+  const unrealizedPct =
+    p.notional_usdt > 0 ? unrealizedPnl / p.notional_usdt : 0;
   const cushionPct = entry > 0 ? Math.abs(mark - stop) / entry : 0;
   const inProfit = unrealizedPnl >= 0;
   const pnlClass = inProfit ? 'text-accent' : 'text-destructive';
@@ -107,7 +115,8 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
   const tpPos = tpTrigger !== null ? posOf(tpTrigger) : null;
 
   // TP-trigger economics. armed = price has crossed the activation point.
-  const tpProfitPct = tpTrigger !== null ? Math.abs(tpTrigger - entry) / entry : null;
+  const tpProfitPct =
+    tpTrigger !== null ? Math.abs(tpTrigger - entry) / entry : null;
   const armed = tpTrigger !== null && f(mark) >= f(tpTrigger);
   const overTriggerPct =
     tpTrigger !== null ? (f(mark) - f(tpTrigger)) / entry : null; // signed
@@ -144,7 +153,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
               className={cn(
                 'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
                 armed
-                  ? 'bg-amber-400/15 text-amber-400'
+                  ? 'bg-warn/15 text-warn'
                   : 'bg-muted/60 text-muted-foreground'
               )}
               title="TP trigger = trailing-stop activation"
@@ -152,10 +161,14 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
               {armed
                 ? `${t('tpBeyond', { pct: formatPct(locale, (overTriggerPct ?? 0) * 100) })}${
                     peakOverTriggerPct && peakOverTriggerPct > 0
-                      ? t('tpMax', { pct: formatPct(locale, peakOverTriggerPct * 100) })
+                      ? t('tpMax', {
+                          pct: formatPct(locale, peakOverTriggerPct * 100),
+                        })
                       : ''
                   }`
-                : t('tpAt', { pct: formatPct(locale, (tpProfitPct ?? 0) * 100) })}
+                : t('tpAt', {
+                    pct: formatPct(locale, (tpProfitPct ?? 0) * 100),
+                  })}
             </span>
           )}
           {trailing && (
@@ -164,7 +177,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
                 'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
                 trailLocking
                   ? 'bg-accent/15 text-accent'
-                  : 'bg-amber-400/15 text-amber-400'
+                  : 'bg-warn/15 text-warn'
               )}
             >
               {trailLocking
@@ -230,7 +243,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           {/* over-trigger profit segment (TP armed): amber from trigger→mark */}
           {armed && tpPos !== null && markPos > tpPos && (
             <div
-              className="absolute inset-y-0 bg-amber-400/35"
+              className="absolute inset-y-0 bg-warn/35"
               style={{
                 left: `${tpPos * 100}%`,
                 width: `${(markPos - tpPos) * 100}%`,
@@ -245,7 +258,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           {/* TP trigger flag (amber) */}
           {tpPos !== null && (
             <div
-              className="absolute inset-y-0 w-px bg-amber-400/80"
+              className="absolute inset-y-0 w-px bg-warn/80"
               style={{ left: `${tpPos * 100}%` }}
             >
               <span className="absolute -top-px left-1/2 -translate-x-1/2 border-x-[3px] border-t-[4px] border-x-transparent border-t-amber-400" />
@@ -279,7 +292,11 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           dotClass={inProfit ? 'bg-accent' : 'bg-destructive'}
         />
         {tpTrigger !== null && (
-          <Stat label={t('tpArm')} value={formatPrice(locale, tpTrigger)} tpFlag />
+          <Stat
+            label={t('tpArm')}
+            value={formatPrice(locale, tpTrigger)}
+            tpFlag
+          />
         )}
         <Stat
           label={trailing ? t('trail') : t('stop')}
@@ -364,7 +381,10 @@ export function PositionGauge({
   const marketBySymbol = new Map(marketSignals.map(s => [s.symbol, s]));
 
   return (
-    <HudFrame title={t('titleCount', { n: positions.length })} className={className}>
+    <HudFrame
+      title={t('titleCount', { n: positions.length })}
+      className={className}
+    >
       <div className="flex flex-col gap-2">
         {positions.map(p => (
           <PositionRow

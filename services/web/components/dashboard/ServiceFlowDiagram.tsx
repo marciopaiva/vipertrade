@@ -3,7 +3,11 @@
 import React, { useMemo } from 'react';
 import { useT } from '@/lib/i18n';
 
-const TONE_KEY = { down: 'flowDown', slow: 'flowSlow', live: 'flowLive' } as const;
+const TONE_KEY = {
+  down: 'flowDown',
+  slow: 'flowSlow',
+  live: 'flowLive',
+} as const;
 
 interface ServiceFlowDiagramProps {
   services?: Array<{ name: string; ok: boolean; latency_ms: number }>;
@@ -31,23 +35,23 @@ const STAGE_COLORS = {
   marketData: {
     border: 'border-primary/55',
     panel: 'bg-primary/[0.06]',
-    glow: 'shadow-[0_0_0_1px_rgba(56,189,248,0.14),0_14px_30px_rgba(14,165,233,0.10)]',
+    glow: 'shadow-[0_0_0_1px_hsl(var(--primary)/0.14),0_14px_30px_hsl(var(--primary)/0.10)]',
     accent: 'text-primary',
     dot: 'bg-primary',
     rail: 'from-primary/35 via-primary/10 to-transparent',
   },
   strategy: {
-    border: 'border-violet-400/55',
-    panel: 'bg-violet-500/[0.06]',
-    glow: 'shadow-[0_0_0_1px_rgba(192,132,252,0.14),0_14px_30px_rgba(139,92,246,0.10)]',
-    accent: 'text-violet-300',
-    dot: 'bg-violet-400',
-    rail: 'from-violet-400/35 via-violet-400/10 to-transparent',
+    border: 'border-decision/55',
+    panel: 'bg-decision/[0.06]',
+    glow: 'shadow-[0_0_0_1px_hsl(var(--decision)/0.14),0_14px_30px_hsl(var(--decision)/0.10)]',
+    accent: 'text-decision',
+    dot: 'bg-decision',
+    rail: 'from-decision/35 via-decision/10 to-transparent',
   },
   executor: {
     border: 'border-accent/65',
     panel: 'bg-accent/[0.07]',
-    glow: 'shadow-[0_0_0_1px_rgba(52,211,153,0.18),0_0_38px_rgba(16,185,129,0.14)]',
+    glow: 'shadow-[0_0_0_1px_hsl(var(--accent)/0.18),0_0_38px_hsl(var(--accent)/0.14)]',
     accent: 'text-accent',
     dot: 'bg-accent',
     rail: 'from-accent/40 via-accent/12 to-transparent',
@@ -183,7 +187,9 @@ function StageCard({
             </div>
           )}
           {detailLine && (
-            <div className="mt-1 text-[11px] text-muted-foreground">{detailLine}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {detailLine}
+            </div>
           )}
         </div>
       )}
@@ -358,12 +364,10 @@ export default function ServiceFlowDiagram({
     t('flowClosedObserved', { n: closedTradesCount });
   const executorStatusLine = flowContext?.executorSymbol
     ? `${flowContext.executorSymbol} · ${flowContext.executorAction || t('flowIdle')}`
-    : t(
-        openPositionsCount === 1 ? 'flowPositionLine' : 'flowPositionsLine',
-        { n: openPositionsCount }
-      );
-  const executorDetailLine =
-    flowContext?.executorContext || t('flowAwaiting');
+    : t(openPositionsCount === 1 ? 'flowPositionLine' : 'flowPositionsLine', {
+        n: openPositionsCount,
+      });
+  const executorDetailLine = flowContext?.executorContext || t('flowAwaiting');
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_auto_1.9fr_auto_0.9fr] xl:items-stretch">
@@ -408,7 +412,9 @@ export default function ServiceFlowDiagram({
               {t('flowSources')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              {showMultiSource ? t('flowExchangeFeeds') : t('flowExecutionVenue')}
+              {showMultiSource
+                ? t('flowExchangeFeeds')
+                : t('flowExecutionVenue')}
             </div>
           </div>
           <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -444,7 +450,7 @@ export default function ServiceFlowDiagram({
 
       <BlockConnector
         from="from-secondary/15 via-primary/55"
-        to="to-violet-400/35"
+        to="to-decision/35"
         mobileLabel={t('flowMarketFlow')}
         dotClass={strategyTone.dot}
       />
@@ -464,7 +470,7 @@ export default function ServiceFlowDiagram({
           </div>
         </div>
 
-        <div className="pointer-events-none absolute left-8 right-8 top-[74px] hidden h-px bg-gradient-to-r from-primary/20 via-violet-400/20 to-accent/20 lg:block" />
+        <div className="pointer-events-none absolute left-8 right-8 top-[74px] hidden h-px bg-gradient-to-r from-primary/20 via-decision/20 to-accent/20 lg:block" />
 
         <div className="grid gap-3 lg:grid-cols-3">
           <StageCard
@@ -510,7 +516,7 @@ export default function ServiceFlowDiagram({
       </div>
 
       <BlockConnector
-        from="from-violet-400/35 via-accent/55"
+        from="from-decision/35 via-accent/55"
         to="to-primary/25"
         mobileLabel={t('flowFanOut')}
         dotClass={executorTone.dot}

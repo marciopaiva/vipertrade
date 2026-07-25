@@ -25,7 +25,7 @@ export function AppHeader() {
   const t = useT('nav');
 
   return (
-    <header className="border-b border-border/50 bg-viper-navy/90 backdrop-blur-sm sticky top-0 z-50">
+    <header className="border-b border-border/50 bg-background/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <Link href="/console" className="flex items-center gap-3">
@@ -42,8 +42,8 @@ export function AppHeader() {
                   className={cn(
                     'text-sm transition-colors',
                     active
-                      ? 'text-viper-cyan'
-                      : 'text-muted-foreground hover:text-viper-cyan'
+                      ? 'text-primary'
+                      : 'text-muted-foreground hover:text-primary'
                   )}
                 >
                   {t(item.key)}

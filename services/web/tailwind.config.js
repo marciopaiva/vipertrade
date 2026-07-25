@@ -49,22 +49,7 @@ module.exports = {
           foreground: 'hsl(var(--card-foreground))',
         },
         warn: 'hsl(var(--warn))',
-
-        // ViperTrade Brand Palette
-        viper: {
-          navy: '#0a1929', // Deep navy background
-          cyan: '#00d4ff', // Primary accent
-          green: '#00ff88', // Success/profit
-          purple: '#a855f7', // Strategy/AI
-          orange: '#f59e0b', // Warning/attention
-          red: '#ef4444', // Error/loss
-          slate: {
-            800: '#1e293b',
-            850: '#152030',
-            900: '#0f172a',
-            950: '#0a1120',
-          },
-        },
+        decision: 'hsl(var(--decision))',
       },
 
       // Custom Fonts (loaded via next/font, wired through CSS variables)
@@ -74,13 +59,13 @@ module.exports = {
         sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'], // Body
       },
 
-      // Custom Shadows (Glow Effects)
+      // Glows derivados dos tokens — acompanham o tema em vez de fixar o hex
+      // antigo da paleta `viper.*`. `glow-purple` saiu junto: nada usava.
       boxShadow: {
-        glow: '0 0 20px rgba(0, 212, 255, 0.3)',
-        'glow-lg': '0 0 30px rgba(0, 212, 255, 0.5)',
-        'glow-xl': '0 0 40px rgba(0, 212, 255, 0.6)',
-        'glow-green': '0 0 20px rgba(0, 255, 136, 0.3)',
-        'glow-purple': '0 0 20px rgba(168, 85, 247, 0.3)',
+        glow: '0 0 20px hsl(var(--primary) / 0.3)',
+        'glow-lg': '0 0 30px hsl(var(--primary) / 0.5)',
+        'glow-xl': '0 0 40px hsl(var(--primary) / 0.6)',
+        'glow-accent': '0 0 20px hsl(var(--accent) / 0.3)',
       },
 
       borderRadius: {

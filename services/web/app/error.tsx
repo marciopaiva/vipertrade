@@ -17,15 +17,15 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[#0a1929]">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-background">
       <div className="text-center space-y-4">
-        <h2 className="text-2xl font-bold text-red-400">
+        <h2 className="text-2xl font-bold text-destructive">
           {t('somethingWrong')}
         </h2>
-        <p className="text-cyan-300 text-sm">{error.message}</p>
+        <p className="text-sm text-muted-foreground">{error.message}</p>
         <button
           onClick={reset}
-          className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-green-500 text-black font-semibold rounded-lg hover:opacity-90 transition"
+          className="px-6 py-2 bg-gradient-to-r from-primary to-accent text-primary-foreground font-semibold rounded-lg hover:opacity-90 transition"
         >
           {t('tryAgain')}
         </button>
