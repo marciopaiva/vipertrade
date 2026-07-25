@@ -35,8 +35,7 @@ export function CloseReasonAttribution({
     for (const t of trades) {
       if (t.status !== 'closed') continue;
       const reason = t.close_reason || 'unknown';
-      const s =
-        byReason.get(reason) ?? { reason, count: 0, net: 0, wins: 0 };
+      const s = byReason.get(reason) ?? { reason, count: 0, net: 0, wins: 0 };
       s.count += 1;
       s.net += t.pnl ?? 0;
       if ((t.pnl ?? 0) >= 0) s.wins += 1;
@@ -51,7 +50,7 @@ export function CloseReasonAttribution({
 
   return (
     <section className="space-y-2">
-      <h2 className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+      <h2 className="text-3xs uppercase tracking-[0.2em] text-muted-foreground">
         {t('attributionTitle')}
       </h2>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -92,7 +91,7 @@ export function CloseReasonAttribution({
                   style={{ width: `${(Math.abs(s.net) / maxAbs) * 100}%` }}
                 />
               </div>
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="font-mono text-2xs tabular-nums text-muted-foreground">
                 {t(s.count === 1 ? 'cardTrade' : 'cardTrades', {
                   n: s.count,
                   win: Math.round(winRate),

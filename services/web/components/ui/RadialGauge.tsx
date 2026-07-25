@@ -144,7 +144,7 @@ export function RadialGauge({
           </span>
         )}
         {label && (
-          <span className="mt-1 font-display text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          <span className="mt-1 font-display text-3xs uppercase tracking-[0.22em] text-muted-foreground">
             {label}
           </span>
         )}

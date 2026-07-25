@@ -3,7 +3,14 @@
 import { useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { cn } from '@/lib/utils';
-import { useLocale, useT, formatSigned, formatRate, formatPct, formatNumber } from '@/lib/i18n';
+import {
+  useLocale,
+  useT,
+  formatSigned,
+  formatRate,
+  formatPct,
+  formatNumber,
+} from '@/lib/i18n';
 import { Kpi } from '@/components/ui/Kpi';
 import { SectionCard } from '@/components/ui/SectionCard';
 
@@ -106,7 +113,11 @@ export default function LiveQualityTab() {
       ) : data ? (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Kpi label={t('kpiNet')} value={formatSigned(locale, data.net_pnl, 4)} tone={tone(data.net_pnl)} />
+            <Kpi
+              label={t('kpiNet')}
+              value={formatSigned(locale, data.net_pnl, 4)}
+              tone={tone(data.net_pnl)}
+            />
             <Kpi
               label={t('kpiWin')}
               value={formatRate(locale, data.win_rate)}
@@ -115,8 +126,14 @@ export default function LiveQualityTab() {
             <Kpi label={t('kpiClosed')} value={String(data.closed_trades)} />
             <Kpi
               label={t('kpiCapture')}
-              value={cap ? `${formatNumber(locale, cap.pct_captured, 1)}%` : '—'}
-              tone={cap && cap.pct_captured >= 50 ? 'text-accent' : 'text-foreground'}
+              value={
+                cap ? `${formatNumber(locale, cap.pct_captured, 1)}%` : '—'
+              }
+              tone={
+                cap && cap.pct_captured >= 50
+                  ? 'text-accent'
+                  : 'text-foreground'
+              }
             />
           </div>
 
@@ -128,7 +145,9 @@ export default function LiveQualityTab() {
                     key={i}
                     className={cn(
                       'rounded-lg border p-3',
-                      f.armed ? 'border-accent/30 bg-accent/5' : 'border-destructive/30 bg-destructive/5'
+                      f.armed
+                        ? 'border-accent/30 bg-accent/5'
+                        : 'border-destructive/30 bg-destructive/5'
                     )}
                   >
                     <div className="text-sm font-medium text-foreground">
@@ -136,7 +155,10 @@ export default function LiveQualityTab() {
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted-foreground">
                       <span>
-                        net <span className={cn('font-mono', tone(f.net_pnl))}>{formatSigned(locale, f.net_pnl, 4)}</span>
+                        net{' '}
+                        <span className={cn('font-mono', tone(f.net_pnl))}>
+                          {formatSigned(locale, f.net_pnl, 4)}
+                        </span>
                       </span>
                       <span>{t('statTrades', { n: f.trades })}</span>
                       <span>{t('statWins', { n: f.wins })}</span>
@@ -158,7 +180,9 @@ export default function LiveQualityTab() {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
                 <span className="text-muted-foreground">
                   {t('peakAvg')}{' '}
-                  <span className="font-mono text-foreground">{formatPct(locale, cap.avg_peak_pct, 3)}</span>
+                  <span className="font-mono text-foreground">
+                    {formatPct(locale, cap.avg_peak_pct, 3)}
+                  </span>
                 </span>
                 <span className="text-muted-foreground">
                   {t('peakRealized')}{' '}
@@ -184,19 +208,35 @@ export default function LiveQualityTab() {
           <SectionCard title={t('reasonsTitle')}>
             <div className="space-y-1.5">
               {data.by_close_reason.map(r => {
-                const max = Math.max(1, ...data.by_close_reason.map(x => Math.abs(x.net_pnl)));
+                const max = Math.max(
+                  1,
+                  ...data.by_close_reason.map(x => Math.abs(x.net_pnl))
+                );
                 const up = r.net_pnl >= 0;
                 return (
-                  <div key={r.reason} className="grid grid-cols-[150px_1fr_140px] items-center gap-3 text-xs">
-                    <span className="truncate text-foreground">{prettyReason(r.reason)}</span>
+                  <div
+                    key={r.reason}
+                    className="grid grid-cols-[150px_1fr_140px] items-center gap-3 text-xs"
+                  >
+                    <span className="truncate text-foreground">
+                      {prettyReason(r.reason)}
+                    </span>
                     <div className="h-2 rounded-full bg-background/60">
                       <div
-                        className={cn('h-full rounded-full', up ? 'bg-accent/70' : 'bg-destructive/70')}
-                        style={{ width: `${(Math.abs(r.net_pnl) / max) * 100}%` }}
+                        className={cn(
+                          'h-full rounded-full',
+                          up ? 'bg-accent/70' : 'bg-destructive/70'
+                        )}
+                        style={{
+                          width: `${(Math.abs(r.net_pnl) / max) * 100}%`,
+                        }}
                       />
                     </div>
                     <span className="text-right font-mono tabular-nums text-muted-foreground">
-                      <span className={tone(r.net_pnl)}>{formatSigned(locale, r.net_pnl, 4)}</span> · {r.trades}t · {r.wins}w
+                      <span className={tone(r.net_pnl)}>
+                        {formatSigned(locale, r.net_pnl, 4)}
+                      </span>{' '}
+                      · {r.trades}t · {r.wins}w
                     </span>
                   </div>
                 );
@@ -208,21 +248,36 @@ export default function LiveQualityTab() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <tr className="text-left text-3xs uppercase tracking-wider text-muted-foreground">
                     <th className="pb-2 pr-3 font-medium">{t('colSymbol')}</th>
-                    <th className="pb-2 pr-3 text-right font-medium">{t('colNet')}</th>
-                    <th className="pb-2 pr-3 text-right font-medium">{t('colTrades')}</th>
-                    <th className="pb-2 text-right font-medium">{t('colWin')}</th>
+                    <th className="pb-2 pr-3 text-right font-medium">
+                      {t('colNet')}
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-medium">
+                      {t('colTrades')}
+                    </th>
+                    <th className="pb-2 text-right font-medium">
+                      {t('colWin')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="font-mono tabular-nums">
                   {data.worst_symbols.map(s => (
                     <tr key={s.symbol} className="border-t border-border/50">
-                      <td className="py-1.5 pr-3 text-foreground">{s.symbol}</td>
-                      <td className={cn('py-1.5 pr-3 text-right', tone(s.realized_pnl))}>
+                      <td className="py-1.5 pr-3 text-foreground">
+                        {s.symbol}
+                      </td>
+                      <td
+                        className={cn(
+                          'py-1.5 pr-3 text-right',
+                          tone(s.realized_pnl)
+                        )}
+                      >
                         {formatSigned(locale, s.realized_pnl, 4)}
                       </td>
-                      <td className="py-1.5 pr-3 text-right text-muted-foreground">{s.trades}</td>
+                      <td className="py-1.5 pr-3 text-right text-muted-foreground">
+                        {s.trades}
+                      </td>
                       <td className="py-1.5 text-right text-muted-foreground">
                         {formatNumber(locale, s.win_rate * 100, 0)}%
                       </td>

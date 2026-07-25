@@ -123,7 +123,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     <div className="space-y-3">
       <div className="hud-frame overflow-hidden rounded-md border border-border bg-card">
         {/* header */}
-        <div className="hidden gap-4 border-b border-border px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-muted-foreground lg:flex">
+        <div className="hidden gap-4 border-b border-border px-4 py-2.5 text-2xs uppercase tracking-[0.16em] text-muted-foreground lg:flex">
           {COLUMNS.map(col => (
             <div
               key={col.label}
@@ -142,7 +142,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   )}
                 >
                   {t(col.label)}
-                  <span className="text-[9px]">
+                  <span className="text-3xs">
                     {sortKey === col.key
                       ? sortDir === 'asc'
                         ? '▲'
@@ -184,7 +184,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                 </div>
                 <div className="w-[110px] text-right">
                   {open ? (
-                    <span className="text-muted-foreground">{t('rowOpen')}</span>
+                    <span className="text-muted-foreground">
+                      {t('rowOpen')}
+                    </span>
                   ) : (
                     <>
                       <div

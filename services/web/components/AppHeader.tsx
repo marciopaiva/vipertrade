@@ -56,7 +56,7 @@ export function AppHeader() {
                 window.dispatchEvent(new Event('command-palette:open'))
               }
               title="Command palette"
-              className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-2xs text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
             >
               ⌘K
             </button>

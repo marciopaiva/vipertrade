@@ -137,7 +137,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           <span className="text-sm font-bold text-foreground">{p.symbol}</span>
           <Badge
             className={cn(
-              'h-5 px-1.5 text-[10px]',
+              'h-5 px-1.5 text-3xs',
               isLong
                 ? 'border-accent/40 bg-accent/10 text-accent'
                 : 'border-destructive/40 bg-destructive/10 text-destructive'
@@ -151,7 +151,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           {tpTrigger !== null && (
             <span
               className={cn(
-                'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
+                'rounded px-1.5 py-0.5 font-mono text-3xs font-semibold tabular-nums',
                 armed
                   ? 'bg-warn/15 text-warn'
                   : 'bg-muted/60 text-muted-foreground'
@@ -174,7 +174,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           {trailing && (
             <span
               className={cn(
-                'rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums',
+                'rounded px-1.5 py-0.5 font-mono text-3xs font-semibold tabular-nums',
                 trailLocking
                   ? 'bg-accent/15 text-accent'
                   : 'bg-warn/15 text-warn'
@@ -208,7 +208,9 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
       <div className="mt-2 flex items-center gap-2">
         <span
           className={cn(
-            'w-8 shrink-0 text-right text-[9px] uppercase tracking-wide',
+            // w-10, não w-8: em 3xs (10px) "TRAIL" ocupa os 32px inteiros da
+            // coluna antiga, que fora dimensionada para os 9px de antes.
+            'w-10 shrink-0 text-right text-3xs uppercase tracking-wide',
             trailLocking ? 'text-accent/80' : 'text-destructive/70'
           )}
         >
@@ -278,13 +280,13 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
             style={{ left: `${markPos * 100}%` }}
           />
         </div>
-        <span className="w-8 shrink-0 text-[9px] uppercase tracking-wide text-muted-foreground/70">
+        <span className="w-10 shrink-0 text-3xs uppercase tracking-wide text-muted-foreground/70">
           {t('peak')}
         </span>
       </div>
 
       {/* numeric strip */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-10 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-10 text-2xs text-muted-foreground">
         <Stat label={t('entry')} value={formatPrice(locale, entry)} dashed />
         <Stat
           label={t('mark')}

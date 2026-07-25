@@ -59,7 +59,7 @@ function CurveTooltip({ active, payload, t, locale }: any) {
       <div className="mt-0.5 font-mono tabular-nums text-foreground/80">
         {(t as T)('equityLabel')} {formatUsd(locale as Locale, p.cum)}
       </div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">{p.when}</div>
+      <div className="mt-0.5 text-2xs text-muted-foreground">{p.when}</div>
     </div>
   );
 }

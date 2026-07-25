@@ -144,7 +144,7 @@ export default function CommandDeckPage() {
   return (
     <div className="space-y-4">
       {/* Status bar */}
-      <div className="flex items-center gap-2 font-display text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+      <div className="flex items-center gap-2 font-display text-2xs uppercase tracking-[0.25em] text-muted-foreground">
         <span className="relative flex h-2 w-2">
           {live && (
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
@@ -173,11 +173,13 @@ export default function CommandDeckPage() {
               <div
                 className={cn(
                   'mt-1 font-mono text-sm font-semibold tabular-nums',
-                  up ? 'text-accent hud-glow-accent' : 'text-destructive hud-glow-danger'
+                  up
+                    ? 'text-accent hud-glow-accent'
+                    : 'text-destructive hud-glow-danger'
                 )}
               >
                 {up ? '▴' : '▾'} {formatUsd(locale, pnl24h)}{' '}
-                <span className="text-[11px] font-normal text-muted-foreground">
+                <span className="text-2xs font-normal text-muted-foreground">
                   24h
                 </span>
               </div>
@@ -242,7 +244,7 @@ export default function CommandDeckPage() {
             <div
               className={cn(
                 ROW_GRID,
-                'border-b border-border px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground'
+                'border-b border-border px-3 py-2 text-3xs uppercase tracking-[0.15em] text-muted-foreground'
               )}
             >
               <span>{ts('colSymbol')}</span>

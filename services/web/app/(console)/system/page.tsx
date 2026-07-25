@@ -158,7 +158,10 @@ export default function SystemPage() {
               : t('killArmed')
           }
         >
-          <StateDot ok={!killed} label={killed ? t('stTripped') : t('stArmed')} />
+          <StateDot
+            ok={!killed}
+            label={killed ? t('stTripped') : t('stArmed')}
+          />
           {killed ? (
             <ConfirmAction
               label={t('restore')}
@@ -195,7 +198,10 @@ export default function SystemPage() {
           label={t('executor')}
           hint={executorOn ? t('executorProcessing') : t('executorPaused')}
         >
-          <StateDot ok={executorOn} label={executorOn ? t('stOn') : t('stOff')} />
+          <StateDot
+            ok={executorOn}
+            label={executorOn ? t('stOn') : t('stOff')}
+          />
           <ConfirmAction
             label={executorOn ? t('disable') : t('enable')}
             confirmLabel={
@@ -214,10 +220,7 @@ export default function SystemPage() {
           />
         </Row>
 
-        <Row
-          label="STRATEGY_REAL_DECISIONS"
-          hint={t('realDecisionsHint')}
-        >
+        <Row label="STRATEGY_REAL_DECISIONS" hint={t('realDecisionsHint')}>
           <button
             type="button"
             onClick={copyCmd}
@@ -226,7 +229,7 @@ export default function SystemPage() {
             {copied ? t('copiedCmd') : t('copyCommand')}
           </button>
         </Row>
-        <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+        <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-2xs leading-relaxed text-muted-foreground">
           {FLAG_CMD}
         </pre>
       </HudFrame>

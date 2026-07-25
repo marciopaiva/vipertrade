@@ -60,7 +60,7 @@ export function HealthPill({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] tracking-wider',
+        'inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-2xs tracking-wider',
         c.text,
         className
       )}

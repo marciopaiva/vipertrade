@@ -59,7 +59,7 @@ export function ClassBadge({ klass }: { klass: VariantClass }) {
   return (
     <span
       className={cn(
-        'rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+        'rounded-md border px-1.5 py-0.5 text-3xs uppercase tracking-wide',
         klass === 'alpha'
           ? 'border-accent/40 bg-accent/10 text-accent'
           : 'border-warn/40 bg-warn/10 text-warn'

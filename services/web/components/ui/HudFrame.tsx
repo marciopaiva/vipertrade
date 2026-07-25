@@ -59,11 +59,11 @@ export function HudFrame({
 
       {title && (
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="font-display text-[11px] uppercase tracking-[0.25em] text-primary/80">
+          <span className="font-display text-2xs uppercase tracking-[0.25em] text-primary/80">
             {title}
           </span>
           {right && (
-            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            <span className="font-mono text-2xs tabular-nums text-muted-foreground">
               {right}
             </span>
           )}

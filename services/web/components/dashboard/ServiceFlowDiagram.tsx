@@ -143,7 +143,7 @@ function StageCard({
       />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          <div className="text-3xs uppercase tracking-[0.22em] text-muted-foreground">
             {t('flowStage')}
           </div>
           <div
@@ -153,7 +153,7 @@ function StageCard({
           </div>
         </div>
         <div
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-3xs uppercase tracking-[0.16em] ${tone.badge}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
           {t(TONE_KEY[tone.label as keyof typeof TONE_KEY])}
@@ -162,7 +162,7 @@ function StageCard({
 
       <div className="mt-5 flex items-end justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="text-3xs uppercase tracking-[0.18em] text-muted-foreground">
             {t('flowLatency')}
           </div>
           <div
@@ -172,7 +172,7 @@ function StageCard({
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="text-3xs uppercase tracking-[0.16em] text-muted-foreground">
             {t('flowRole')}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
@@ -182,12 +182,12 @@ function StageCard({
       {(statusLine || detailLine) && (
         <div className="mt-auto border-t border-white/5 pt-3">
           {statusLine && (
-            <div className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+            <div className="text-2xs font-medium tracking-[0.08em] text-muted-foreground">
               {statusLine}
             </div>
           )}
           {detailLine && (
-            <div className="mt-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 text-2xs text-muted-foreground">
               {detailLine}
             </div>
           )}
@@ -273,7 +273,7 @@ function BlockConnector({
   return (
     <>
       <div className="xl:hidden flex items-center justify-center py-1">
-        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/40 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/40 px-3 py-1 text-3xs uppercase tracking-[0.18em] text-muted-foreground">
           <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
           {mobileLabel}
         </div>
@@ -408,7 +408,7 @@ export default function ServiceFlowDiagram({
       <div className="flex h-full flex-col rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="text-3xs uppercase tracking-[0.2em] text-muted-foreground">
               {t('flowSources')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
@@ -417,7 +417,7 @@ export default function ServiceFlowDiagram({
                 : t('flowExecutionVenue')}
             </div>
           </div>
-          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="rounded-full border border-border px-2 py-1 text-3xs uppercase tracking-[0.16em] text-muted-foreground">
             {showMultiSource ? t('flowVenues3') : t('flowSingleVenue')}
           </div>
         </div>
@@ -458,14 +458,14 @@ export default function ServiceFlowDiagram({
       <div className="relative overflow-hidden rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_24px_56px_rgba(2,6,23,0.32)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="text-3xs uppercase tracking-[0.2em] text-muted-foreground">
               {t('flowCorePipeline')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
               {t('flowMarketToExec')}
             </div>
           </div>
-          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="rounded-full border border-border px-2 py-1 text-3xs uppercase tracking-[0.16em] text-muted-foreground">
             {t('flowRuntimePath')}
           </div>
         </div>
@@ -525,14 +525,14 @@ export default function ServiceFlowDiagram({
       <div className="flex h-full flex-col rounded-[28px] border border-border bg-card/45 p-4 shadow-[0_20px_50px_rgba(2,6,23,0.28)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="text-3xs uppercase tracking-[0.2em] text-muted-foreground">
               {t('flowSidecars')}
             </div>
             <div className="mt-1 text-sm font-semibold text-foreground">
               {t('flowStateAnalysis')}
             </div>
           </div>
-          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="rounded-full border border-border px-2 py-1 text-3xs uppercase tracking-[0.16em] text-muted-foreground">
             {t('flowObservers')}
           </div>
         </div>

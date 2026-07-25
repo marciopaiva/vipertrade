@@ -52,6 +52,18 @@ module.exports = {
         decision: 'hsl(var(--decision))',
       },
 
+      // Dois degraus abaixo de `text-xs` (12px), que a escala padrão não tem e
+      // os rótulos do HUD precisavam. Sem eles, cada tela inventava o seu
+      // `text-[10px]` / `text-[11px]` — 47 usos no total.
+      //
+      // Em rem, não px, e isso é o ponto: o modo cockpit encolhe o `font-size`
+      // da raiz (16px → 14px), então tamanho em rem acompanha a densidade e
+      // tamanho em px não. Os usos arbitrários ignoravam o toggle.
+      fontSize: {
+        '3xs': ['0.625rem', { lineHeight: '0.875rem' }], // 10px @ raiz 16
+        '2xs': ['0.6875rem', { lineHeight: '1rem' }], //    11px @ raiz 16
+      },
+
       // Custom Fonts (loaded via next/font, wired through CSS variables)
       fontFamily: {
         display: ['var(--font-display)', 'Space Grotesk', 'sans-serif'], // Headings / UI
