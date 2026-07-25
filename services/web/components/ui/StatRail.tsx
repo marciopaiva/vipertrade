@@ -37,7 +37,7 @@ export function StatRail({
           <span aria-hidden className="text-primary/70">
             ▸
           </span>
-          <span className="font-display text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <span className="font-display text-3xs uppercase tracking-[0.18em] text-muted-foreground">
             {it.label}
           </span>
           <span className={cn('font-semibold', TONE[it.tone ?? 'default'])}>

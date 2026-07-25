@@ -56,7 +56,9 @@ export function RadialGauge({
   const cy = 100;
   const R = 80;
   const marker = arcPoint(frac, R, cx, cy);
-  const ticks = Array.from({ length: 11 }, (_, i) => arcPoint(i / 10, R - 16, cx, cy));
+  const ticks = Array.from({ length: 11 }, (_, i) =>
+    arcPoint(i / 10, R - 16, cx, cy)
+  );
   const arcColor = stops ? `url(#${gid})` : color;
 
   const display = has ? (format ? format(v) : String(Math.round(v))) : '—';
@@ -90,7 +92,13 @@ export function RadialGauge({
 
         {/* dotted scale */}
         {ticks.map((t, i) => (
-          <circle key={i} cx={t.x} cy={t.y} r={1.6} fill="#475569" />
+          <circle
+            key={i}
+            cx={t.x}
+            cy={t.y}
+            r={1.6}
+            fill="hsl(var(--muted-foreground) / 0.55)"
+          />
         ))}
 
         {/* needle + marker (+ optional pulsing halo) */}
@@ -136,7 +144,7 @@ export function RadialGauge({
           </span>
         )}
         {label && (
-          <span className="mt-1 font-display text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          <span className="mt-1 font-display text-3xs uppercase tracking-[0.22em] text-muted-foreground">
             {label}
           </span>
         )}

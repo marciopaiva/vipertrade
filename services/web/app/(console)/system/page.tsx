@@ -7,6 +7,7 @@ import { HudFrame } from '@/components/ui/HudFrame';
 import { ConfirmAction } from '@/components/system/ConfirmAction';
 import ServiceFlowDiagram from '@/components/dashboard/ServiceFlowDiagram';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 interface ControlActor {
   enabled: boolean;
@@ -118,16 +119,16 @@ export default function SystemPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          {t('title')}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('subtitlePre')}
-          <code className="text-foreground/80">kubectl</code>
-          {t('subtitlePost')}
-        </p>
-      </div>
+      <PageHeader
+        title={t('title')}
+        subtitle={
+          <>
+            {t('subtitlePre')}
+            <code className="text-foreground/80">kubectl</code>
+            {t('subtitlePost')}
+          </>
+        }
+      />
 
       {!opEnabled && (
         <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
@@ -158,7 +159,10 @@ export default function SystemPage() {
               : t('killArmed')
           }
         >
-          <StateDot ok={!killed} label={killed ? t('stTripped') : t('stArmed')} />
+          <StateDot
+            ok={!killed}
+            label={killed ? t('stTripped') : t('stArmed')}
+          />
           {killed ? (
             <ConfirmAction
               label={t('restore')}
@@ -195,7 +199,10 @@ export default function SystemPage() {
           label={t('executor')}
           hint={executorOn ? t('executorProcessing') : t('executorPaused')}
         >
-          <StateDot ok={executorOn} label={executorOn ? t('stOn') : t('stOff')} />
+          <StateDot
+            ok={executorOn}
+            label={executorOn ? t('stOn') : t('stOff')}
+          />
           <ConfirmAction
             label={executorOn ? t('disable') : t('enable')}
             confirmLabel={
@@ -214,10 +221,7 @@ export default function SystemPage() {
           />
         </Row>
 
-        <Row
-          label="STRATEGY_REAL_DECISIONS"
-          hint={t('realDecisionsHint')}
-        >
+        <Row label="STRATEGY_REAL_DECISIONS" hint={t('realDecisionsHint')}>
           <button
             type="button"
             onClick={copyCmd}
@@ -226,7 +230,7 @@ export default function SystemPage() {
             {copied ? t('copiedCmd') : t('copyCommand')}
           </button>
         </Row>
-        <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+        <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-2xs leading-relaxed text-muted-foreground">
           {FLAG_CMD}
         </pre>
       </HudFrame>

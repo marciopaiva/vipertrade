@@ -18,9 +18,18 @@ export function Kpi({
   className?: string;
 }) {
   return (
-    <div className={cn('rounded-lg border border-border bg-card p-3', className)}>
-      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 font-mono text-lg tabular-nums', tone ?? 'text-foreground')}>
+    <div
+      className={cn('rounded-lg border border-border bg-card p-3', className)}
+    >
+      <div className="text-3xs uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          'mt-1 font-mono text-lg tabular-nums',
+          tone ?? 'text-foreground'
+        )}
+      >
         {value}
       </div>
     </div>

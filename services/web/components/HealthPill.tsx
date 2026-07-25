@@ -2,34 +2,46 @@
 
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
-import { useConnectionStatus, type LiveStatus } from '@/hooks/useConnectionStatus';
+import {
+  useConnectionStatus,
+  type LiveStatus,
+} from '@/hooks/useConnectionStatus';
 
 const CONFIG: Record<
   LiveStatus,
-  { labelKey: 'healthLive' | 'healthConnecting' | 'healthStale' | 'healthOffline'; dot: string; text: string; pulse: boolean }
+  {
+    labelKey:
+      | 'healthLive'
+      | 'healthConnecting'
+      | 'healthStale'
+      | 'healthOffline';
+    dot: string;
+    text: string;
+    pulse: boolean;
+  }
 > = {
   live: {
     labelKey: 'healthLive',
-    dot: 'bg-viper-green',
-    text: 'text-viper-green',
+    dot: 'bg-accent',
+    text: 'text-accent',
     pulse: true,
   },
   connecting: {
     labelKey: 'healthConnecting',
-    dot: 'bg-viper-cyan',
-    text: 'text-viper-cyan',
+    dot: 'bg-primary',
+    text: 'text-primary',
     pulse: true,
   },
   stale: {
     labelKey: 'healthStale',
-    dot: 'bg-viper-orange',
-    text: 'text-viper-orange',
+    dot: 'bg-warn',
+    text: 'text-warn',
     pulse: false,
   },
   down: {
     labelKey: 'healthOffline',
-    dot: 'bg-viper-red',
-    text: 'text-viper-red',
+    dot: 'bg-destructive',
+    text: 'text-destructive',
     pulse: false,
   },
 };
@@ -48,7 +60,7 @@ export function HealthPill({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] tracking-wider',
+        'inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-2xs tracking-wider',
         c.text,
         className
       )}
@@ -64,7 +76,9 @@ export function HealthPill({ className }: { className?: string }) {
             )}
           />
         )}
-        <span className={cn('relative inline-flex h-2 w-2 rounded-full', c.dot)} />
+        <span
+          className={cn('relative inline-flex h-2 w-2 rounded-full', c.dot)}
+        />
       </span>
       {label}
     </span>

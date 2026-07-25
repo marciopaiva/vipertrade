@@ -26,7 +26,8 @@ export const ROW_GRID =
   'grid grid-cols-[104px_92px_136px_116px_124px_112px_minmax(180px,1fr)] items-center gap-x-3';
 
 function actionStyle(action: string) {
-  if (action === 'ENTER_LONG') return 'bg-accent/15 text-accent border-accent/30';
+  if (action === 'ENTER_LONG')
+    return 'bg-accent/15 text-accent border-accent/30';
   if (action === 'ENTER_SHORT')
     return 'bg-destructive/15 text-destructive border-destructive/30';
   return 'bg-secondary text-muted-foreground border-border';
@@ -52,13 +53,9 @@ function explain(
   const reasons: string[] = [];
   if (side === 'neutral' || count === 0) reasons.push(t('rNoConsensus'));
   if (typeof pb === 'number' && pb > LONG_PB_CEILING)
-    reasons.push(
-      t('rPbLong', { pb: pb.toFixed(2), ceil: LONG_PB_CEILING })
-    );
+    reasons.push(t('rPbLong', { pb: pb.toFixed(2), ceil: LONG_PB_CEILING }));
   if (typeof pb === 'number' && pb < SHORT_PB_FLOOR)
-    reasons.push(
-      t('rPbShort', { pb: pb.toFixed(2), floor: SHORT_PB_FLOOR })
-    );
+    reasons.push(t('rPbShort', { pb: pb.toFixed(2), floor: SHORT_PB_FLOOR }));
   if (typeof adx === 'number' && adx < ADX_WEAK)
     reasons.push(t('rWeakTrend', { adx: adx.toFixed(0) }));
   return {
@@ -102,7 +99,7 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
           {d.symbol}
         </div>
         {typeof d.current_price === 'number' && (
-          <div className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          <div className="font-mono text-2xs tabular-nums text-muted-foreground">
             {d.current_price.toLocaleString(undefined, {
               maximumFractionDigits: 6,
             })}
@@ -113,7 +110,7 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
       {/* state */}
       <span
         className={cn(
-          'inline-flex justify-center rounded-md border px-2 py-1 text-[11px] font-semibold tracking-wide',
+          'inline-flex justify-center rounded-md border px-2 py-1 text-2xs font-semibold tracking-wide',
           actionStyle(d.action)
         )}
       >
@@ -122,7 +119,7 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
 
       {/* consensus */}
       <div className="min-w-0">
-        <div className="mb-1 truncate font-mono text-[11px] tabular-nums">
+        <div className="mb-1 truncate font-mono text-2xs tabular-nums">
           <span
             className={cn(
               d.consensus_side === 'bullish' && 'text-accent',
@@ -137,8 +134,14 @@ export function DecisionRow({ d }: { d: DecisionItem }) {
           </span>
         </div>
         <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-          <div className="bg-accent" style={{ width: `${(bull / total) * 100}%` }} />
-          <div className="bg-muted" style={{ width: `${(neutral / total) * 100}%` }} />
+          <div
+            className="bg-accent"
+            style={{ width: `${(bull / total) * 100}%` }}
+          />
+          <div
+            className="bg-muted"
+            style={{ width: `${(neutral / total) * 100}%` }}
+          />
           <div
             className="bg-destructive"
             style={{ width: `${(bear / total) * 100}%` }}

@@ -35,7 +35,7 @@ export function Sparkline({
         className={cn('flex items-center justify-center', className)}
         style={{ width, height }}
       >
-        <span className="text-[10px] text-muted-foreground">no data yet</span>
+        <span className="text-3xs text-muted-foreground">no data yet</span>
       </div>
     );
   }
@@ -45,8 +45,7 @@ export function Sparkline({
   const max = Math.max(...values, showZero ? 0 : -Infinity);
   const span = max - min || 1;
 
-  const x = (i: number) =>
-    pad + (i / (values.length - 1)) * (width - pad * 2);
+  const x = (i: number) => pad + (i / (values.length - 1)) * (width - pad * 2);
   const y = (v: number) =>
     height - pad - ((v - min) / span) * (height - pad * 2);
 

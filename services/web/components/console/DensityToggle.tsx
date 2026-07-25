@@ -58,7 +58,9 @@ export function DensityToggle({ className }: { className?: string }) {
       title={`Density: ${density} — click for ${density === 'comfortable' ? 'cockpit' : 'comfortable'}`}
       aria-label="Toggle density"
       className={cn(
-        'hidden items-center rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex',
+        // Sem `hidden sm:inline-flex`: escondia no mobile para poupar espaço no
+        // cabeçalho, mas agora vive dentro do menu, onde espaço não é problema.
+        'inline-flex items-center rounded-md border border-border px-2 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:text-foreground',
         className
       )}
     >
