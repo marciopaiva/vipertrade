@@ -1048,6 +1048,44 @@ mod tests {
     }
 
     // ── parse_candles_binance ────────────────────────────────────
+    /// Formato REAL da Binance (`GET /fapi/v1/klines`): timestamp numérico +
+    /// OHLCV como strings. Ler os preços com `as_f64()` zerava toda vela e
+    /// derrubava a Binance do consenso — este teste trava esse formato.
+    #[test]
+    fn parse_candles_binance_parses_string_ohlcv() {
+        use serde_json::json;
+        let rows = vec![vec![
+            json!(1784983500000i64),
+            json!("0.069610"),
+            json!("0.069660"),
+            json!("0.069590"),
+            json!("0.069620"),
+            json!("5549802"),
+            json!(1784983799999i64),
+            json!("386386.654890"),
+        ]];
+        let candles = parse_candles_binance(rows);
+        assert_eq!(candles.len(), 1, "linha OHLCV em string deve virar vela");
+        assert_eq!(candles[0].open_time_ms, 1_784_983_500_000);
+        assert!((candles[0].high - 0.069660).abs() < 1e-9);
+        assert!((candles[0].low - 0.069590).abs() < 1e-9);
+        assert!((candles[0].close - 0.069620).abs() < 1e-9);
+        assert!((candles[0].volume_quote - 5_549_802.0).abs() < 1e-6);
+    }
+
+    /// A resposta inteira, como chega em produção, não pode render lista vazia.
+    #[test]
+    fn parse_candles_binance_full_response_is_not_empty() {
+        let raw = r#"[
+            [1784983500000,"0.069610","0.069660","0.069590","0.069620","5549802",1784983799999,"386386.654890",1177,"3147083","219095.097740","0"],
+            [1784983800000,"0.069610","0.069690","0.069600","0.069680","5707560",1784984099999,"397516.359180",1087,"2720930","189511.027370","0"]
+        ]"#;
+        let rows: Vec<Vec<serde_json::Value>> = serde_json::from_str(raw).unwrap();
+        let candles = parse_candles_binance(rows);
+        assert_eq!(candles.len(), 2, "consenso perde a Binance se isto zerar");
+    }
+
+    /// Números crus continuam aceitos — o parser não deve regredir se a API mudar.
     #[test]
     fn parse_candles_binance_valid_rows() {
         use serde_json::json;
@@ -1063,6 +1101,21 @@ mod tests {
         assert_eq!(candles.len(), 1);
         assert_eq!(candles[0].open_time_ms, 1_000_000);
         assert!((candles[0].volume_quote - 200.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_candles_binance_skips_zero_close() {
+        use serde_json::json;
+        let rows = vec![vec![
+            json!(1000000),
+            json!("0"),
+            json!("0"),
+            json!("0"),
+            json!("0"),
+            json!("0"),
+        ]];
+        let candles = parse_candles_binance(rows);
+        assert!(candles.is_empty(), "close <= 0 deve descartar a linha");
     }
 
     #[test]
