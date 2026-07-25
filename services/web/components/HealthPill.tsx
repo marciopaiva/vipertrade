@@ -60,7 +60,10 @@ export function HealthPill({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-2xs tracking-wider',
+        // min-w reserva o espaço do maior rótulo ("CONECTANDO"). Sem isso a
+        // pílula encolhe e cresce a cada troca de estado, empurrando o menu e o
+        // resto do cabeçalho — o texto muda de largura, o ponto fica ancorado.
+        'inline-flex min-w-[6.75rem] items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 font-mono text-2xs tracking-wider',
         c.text,
         className
       )}
