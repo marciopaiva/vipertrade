@@ -3,6 +3,7 @@
 // interpolated by useT(). Keep keys stable; add a namespace as a screen is migrated.
 const en = {
   nav: {
+    primary: 'Primary',
     console: 'Command Deck',
     strategy: 'Strategy',
     trades: 'Trades',
@@ -25,6 +26,7 @@ const en = {
   common: {
     language: 'Language',
     density: 'Density',
+    accountMenu: 'Account and preferences',
     logout: 'Log out',
     loading: 'Loading…',
     error: 'Error',

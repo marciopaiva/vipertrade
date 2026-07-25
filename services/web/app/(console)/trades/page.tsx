@@ -7,6 +7,7 @@ import { CloseReasonAttribution } from '@/components/trades/CloseReasonAttributi
 import { TradesTable } from '@/components/trades/TradesTable';
 import { reasonLabel } from '@/components/trades/reasonLabel';
 import { cn } from '@/lib/utils';
+import { SelectField, DateField, FilterChip } from '@/components/ui/Field';
 import type { Trade } from '@/types/trading';
 import { PageHeader } from '@/components/ui/PageHeader';
 
@@ -37,60 +38,6 @@ function inDateRange(t: Trade, from: string, to: string): boolean {
     if (!Number.isNaN(e) && ts > e) return false;
   }
   return true;
-}
-
-function DateField({
-  label,
-  value,
-  onChange,
-  max,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  max?: string;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="uppercase tracking-wide">{label}</span>
-      <input
-        type="date"
-        value={value}
-        max={max}
-        onChange={e => onChange(e.target.value)}
-        className="rounded-md border border-border bg-card px-2 py-1 text-foreground outline-none transition-colors [color-scheme:dark] focus:border-primary/50"
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="uppercase tracking-wide">{label}</span>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="rounded-md border border-border bg-card px-2 py-1 text-foreground outline-none transition-colors focus:border-primary/50"
-      >
-        {options.map(o => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 export default function TradesPage() {
@@ -182,7 +129,7 @@ export default function TradesPage() {
 
       {/* filters */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <Select
+        <SelectField
           label={t('fSymbol')}
           value={symbol}
           onChange={setSymbol}
@@ -191,7 +138,7 @@ export default function TradesPage() {
             ...symbols.map(s => ({ value: s, label: s })),
           ]}
         />
-        <Select
+        <SelectField
           label={t('fSide')}
           value={side}
           onChange={v => setSide(v as SideFilter)}
@@ -201,7 +148,7 @@ export default function TradesPage() {
             { value: 'short', label: t('short') },
           ]}
         />
-        <Select
+        <SelectField
           label={t('fStatus')}
           value={status}
           onChange={v => setStatus(v as StatusFilter)}
@@ -229,36 +176,26 @@ export default function TradesPage() {
             { label: t('range7d'), days: 7 },
             { label: t('range30d'), days: 30 },
           ].map(p => (
-            <button
-              key={p.days}
-              type="button"
-              onClick={() => setRange(p.days)}
-              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-            >
+            <FilterChip key={p.days} onClick={() => setRange(p.days)}>
               {p.label}
-            </button>
+            </FilterChip>
           ))}
           {(dateFrom || dateTo) && (
-            <button
-              type="button"
+            <FilterChip
+              active
               onClick={() => {
                 setDateFrom('');
                 setDateTo('');
               }}
-              className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
             >
               {t('clearDates')}
-            </button>
+            </FilterChip>
           )}
         </div>
         {reason && (
-          <button
-            type="button"
-            onClick={() => setReason(null)}
-            className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/15"
-          >
+          <FilterChip active onClick={() => setReason(null)}>
             {t('reasonChip', { reason: reasonLabel(t, reason) })}
-          </button>
+          </FilterChip>
         )}
       </div>
 

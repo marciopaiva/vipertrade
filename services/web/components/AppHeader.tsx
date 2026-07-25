@@ -4,9 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ViperTradeLogo } from './ViperTradeLogo';
 import { HealthPill } from './HealthPill';
-import LogoutButton from './auth/LogoutButton';
-import { DensityToggle } from './console/DensityToggle';
-import { LanguageToggle } from './console/LanguageToggle';
+import { OperatorMenu } from './console/OperatorMenu';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 
@@ -31,25 +29,33 @@ export function AppHeader() {
           <Link href="/console" className="flex items-center gap-3">
             <ViperTradeLogo size="md" showText={true} />
           </Link>
-          <nav className="flex items-center gap-4">
-            {NAV.map(item => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'text-sm transition-colors',
-                    active
-                      ? 'text-primary'
-                      : 'text-muted-foreground hover:text-primary'
-                  )}
-                >
-                  {t(item.key)}
-                </Link>
-              );
-            })}
+          {/* Navegação e ferramentas ficam em grupos separados: o que se
+              consulta em operação (rotas, busca, saúde) de um lado; o que se
+              ajusta uma vez (idioma, densidade, sair) atrás do menu. */}
+          <div className="flex items-center gap-4">
+            <nav className="flex items-center gap-4" aria-label={t('primary')}>
+              {NAV.map(item => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'text-sm transition-colors',
+                      active
+                        ? 'text-primary'
+                        : 'text-muted-foreground hover:text-primary'
+                    )}
+                  >
+                    {t(item.key)}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            <span aria-hidden className="h-4 w-px bg-border" />
+
             <button
               type="button"
               onClick={() =>
@@ -60,11 +66,9 @@ export function AppHeader() {
             >
               ⌘K
             </button>
-            <LanguageToggle />
-            <DensityToggle />
-            <HealthPill className="ml-1" />
-            <LogoutButton />
-          </nav>
+            <HealthPill />
+            <OperatorMenu />
+          </div>
         </div>
       </div>
     </header>

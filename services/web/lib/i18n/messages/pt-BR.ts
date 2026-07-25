@@ -3,6 +3,7 @@ import type { Messages } from './en';
 // Portuguese (Brazil) catalog. Must match the shape of en.ts (the type source).
 const ptBR: Messages = {
   nav: {
+    primary: 'Principal',
     console: 'Command Deck',
     strategy: 'Estratégia',
     trades: 'Trades',
@@ -26,6 +27,7 @@ const ptBR: Messages = {
   common: {
     language: 'Idioma',
     density: 'Densidade',
+    accountMenu: 'Conta e preferências',
     logout: 'Sair',
     loading: 'Carregando…',
     error: 'Erro',
