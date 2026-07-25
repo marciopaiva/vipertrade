@@ -36,12 +36,15 @@ export function ViperTradeLogo({
       </div>
       {showText && (
         <div>
-          <h1
-            className="text-xl font-bold text-primary"
+          {/* span, não h1: a marca vive no cabeçalho de navegação, e o h1 de
+              cada rota é o título da própria página (<PageHeader>). Dois h1 na
+              mesma página quebram a árvore de headings para leitor de tela. */}
+          <span
+            className="block text-xl font-bold text-primary"
             style={{ letterSpacing: '0.5px' }}
           >
             ViperTrade
-          </h1>
+          </span>
           <p className="text-xs text-muted-foreground">
             Lead Trader Bot - Bybit Copy Trading
           </p>
