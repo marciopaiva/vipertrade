@@ -262,6 +262,15 @@ pub(crate) fn parse_candles_binance(rows: Vec<Vec<Value>>) -> Vec<Candle> {
         .collect()
 }
 
+/// Volume 24h do OKX em USDT. `volCcy24h` vem na moeda base do contrato, então
+/// precisa do preço para virar quote — as outras exchanges já entregam em quote.
+pub(crate) fn okx_quote_volume(vol_ccy_24h: f64, price: f64) -> i64 {
+    if vol_ccy_24h <= 0.0 || price <= 0.0 {
+        return 0;
+    }
+    (vol_ccy_24h * price).round() as i64
+}
+
 pub(crate) fn parse_candles_okx(rows: Vec<Vec<String>>) -> Vec<Candle> {
     rows.into_iter()
         .filter_map(|row| {
@@ -622,9 +631,14 @@ async fn fetch_market_signal_okx(
         0.0
     };
 
-    let volume_24h = viper_domain::config::parse_f64(&ticker.vol_ccy_24h)
-        .unwrap_or(0.0)
-        .round() as i64;
+    // OKX devolve `volCcy24h` na MOEDA BASE (ex.: 40947 BCH), não em USDT como
+    // bybit (`turnover24h`) e binance (`quoteVolume`). Converter pelo preço, senão
+    // o volume fica dividido pelo preço do token — e como o consenso usa `.min()`
+    // entre exchanges, esse valor errado passa a dominar (BCH aparecia com $40k).
+    let volume_24h = okx_quote_volume(
+        viper_domain::config::parse_f64(&ticker.vol_ccy_24h).unwrap_or(0.0),
+        current_price,
+    );
 
     Ok(RawExchangeSnapshot {
         source: "okx",

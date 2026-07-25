@@ -1135,6 +1135,34 @@ mod tests {
         );
     }
 
+    // ── okx_quote_volume ─────────────────────────────────────────
+    /// `volCcy24h` do OKX vem na moeda base; sem multiplicar pelo preço, o volume
+    /// fica dividido pelo preço do token. Como o consenso usa `.min()` entre
+    /// exchanges, o valor errado dominava (BCH aparecia com $40k em vez de $8,6M).
+    /// Números reais de 2026-07-25, conferidos contra o `turnover24h` do bybit.
+    #[test]
+    fn okx_quote_volume_converts_base_to_usdt() {
+        // BCH: 40.947,81 BCH a $210,90 ≈ $8,64M (bybit reportava $8,04M)
+        let bch = okx_quote_volume(40_947.81, 210.90);
+        assert!(
+            (8_000_000..9_500_000).contains(&bch),
+            "BCH deveria ficar na casa dos milhões, veio {bch}"
+        );
+        // AAVE: 185.310,25 AAVE a $90,91 ≈ $16,8M (bybit reportava $17,1M)
+        let aave = okx_quote_volume(185_310.25, 90.91);
+        assert!(
+            (15_000_000..19_000_000).contains(&aave),
+            "AAVE deveria ficar na casa dos milhões, veio {aave}"
+        );
+    }
+
+    #[test]
+    fn okx_quote_volume_guards_zero_and_negative() {
+        assert_eq!(okx_quote_volume(0.0, 210.90), 0);
+        assert_eq!(okx_quote_volume(40_947.81, 0.0), 0, "preço 0 não extrapola");
+        assert_eq!(okx_quote_volume(-1.0, 210.90), 0);
+    }
+
     // ── parse_candles_okx ────────────────────────────────────────
     #[test]
     fn parse_candles_okx_valid_rows() {
