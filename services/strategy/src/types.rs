@@ -35,6 +35,11 @@ pub(crate) struct OpenTradeSnapshot {
     pub(crate) trailing_stop_activated: bool,
     pub(crate) trailing_stop_peak_price: f64,
     pub(crate) trailing_stop_final_distance_pct: f64,
+    /// Maior avanço favorável já visto, em %. Rastreado a cada tick — ao
+    /// contrário do peak do trailing, que só existe depois de armar.
+    pub(crate) mfe_pct: f64,
+    /// Maior recuo adverso já visto, em %. Positivo.
+    pub(crate) mae_pct: f64,
 }
 
 #[derive(Debug, Clone)]

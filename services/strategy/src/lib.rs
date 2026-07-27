@@ -1697,6 +1697,31 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             match fetch_open_trade_for_symbol(pool, &symbol).await {
                                 Ok(Some(open)) => {
                                     let current_price = signal_event.signal.current_price;
+
+                                    // Excursão primeiro e sempre: o trailing só
+                                    // rastreia depois de armar, então sem isto os
+                                    // trades que morrem sem armar não deixam
+                                    // registro do caminho que o preço fez.
+                                    let (mfe_pct, mae_pct) = update_excursion(
+                                        &open.side,
+                                        open.entry_price,
+                                        current_price,
+                                        open.mfe_pct,
+                                        open.mae_pct,
+                                    );
+                                    if mfe_pct > open.mfe_pct || mae_pct > open.mae_pct {
+                                        if let Err(err) = update_trade_excursion(
+                                            pool,
+                                            &open.trade_id,
+                                            mfe_pct,
+                                            mae_pct,
+                                        )
+                                        .await
+                                        {
+                                            warn!(trade_id = %open.trade_id, err = %err, "Failed to persist trade excursion");
+                                        }
+                                    }
+
                                     let exit_evaluation =
                                         evaluate_open_trade_exit(
                                             &symbol,
@@ -2227,7 +2252,62 @@ mod tests {
             trailing_stop_activated: false,
             trailing_stop_peak_price: 0.0,
             trailing_stop_final_distance_pct: 0.0,
+            mfe_pct: 0.0,
+            mae_pct: 0.0,
         }
+    }
+
+    // ── update_excursion (MAE / MFE) ──────────────────────────────
+    /// O caso que motivou o campo: um trade que sobe um pouco, cai, e fecha no
+    /// prejuízo. O peak do trailing não registra nada disso — ele só liga depois
+    /// de armar em +0,2% —, então sem MFE/MAE o trade parecia nunca ter subido.
+    #[test]
+    fn excursion_tracks_both_sides_before_trailing_arms() {
+        let (mut mfe, mut mae) = (0.0, 0.0);
+        // sobe 0,1% (abaixo do limiar de armar o trailing)
+        let r = update_excursion("Long", 100.0, 100.1, mfe, mae);
+        mfe = r.0;
+        mae = r.1;
+        assert!(
+            (mfe - 0.1).abs() < 1e-9,
+            "MFE deve registrar a subida, veio {mfe}"
+        );
+        assert_eq!(mae, 0.0);
+        // cai para -0,6%
+        let r = update_excursion("Long", 100.0, 99.4, mfe, mae);
+        mfe = r.0;
+        mae = r.1;
+        assert!((mfe - 0.1).abs() < 1e-9, "MFE nao pode regredir");
+        assert!(
+            (mae - 0.6).abs() < 1e-9,
+            "MAE deve registrar o recuo, veio {mae}"
+        );
+    }
+
+    #[test]
+    fn excursion_is_direction_aware_for_shorts() {
+        // short lucra quando o preço cai
+        let (mfe, mae) = update_excursion("Short", 100.0, 99.5, 0.0, 0.0);
+        assert!((mfe - 0.5).abs() < 1e-9, "queda e favoravel ao short");
+        assert_eq!(mae, 0.0);
+
+        let (mfe2, mae2) = update_excursion("Short", 100.0, 100.8, 0.0, 0.0);
+        assert_eq!(mfe2, 0.0);
+        assert!((mae2 - 0.8).abs() < 1e-9, "alta e adversa ao short");
+    }
+
+    #[test]
+    fn excursion_keeps_running_maximums() {
+        // um movimento menor não pode reduzir um máximo já registrado
+        let (mfe, mae) = update_excursion("Long", 100.0, 100.2, 1.5, 0.9);
+        assert!((mfe - 1.5).abs() < 1e-9);
+        assert!((mae - 0.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn excursion_guards_bad_prices() {
+        assert_eq!(update_excursion("Long", 0.0, 100.0, 0.3, 0.2), (0.3, 0.2));
+        assert_eq!(update_excursion("Long", 100.0, 0.0, 0.3, 0.2), (0.3, 0.2));
     }
 
     fn sample_market_signal() -> MarketSignal {
@@ -2316,6 +2396,8 @@ mod tests {
             trailing_stop_activated: true,
             trailing_stop_peak_price: 100.0,
             trailing_stop_final_distance_pct: 0.0006,
+            mfe_pct: 0.0,
+            mae_pct: 0.0,
         };
         let eval = TrailingEval {
             activated: true,
@@ -2341,6 +2423,8 @@ mod tests {
             trailing_stop_activated: true,
             trailing_stop_peak_price: 99.95,
             trailing_stop_final_distance_pct: 0.0006,
+            mfe_pct: 0.0,
+            mae_pct: 0.0,
         };
         let eval = TrailingEval {
             activated: true,
@@ -2458,6 +2542,8 @@ mod tests {
             trailing_stop_activated: true,
             trailing_stop_peak_price: 100.5,
             trailing_stop_final_distance_pct: 0.001,
+            mfe_pct: 0.0,
+            mae_pct: 0.0,
         };
         let eval = evaluate_open_trade_exit("SOLUSDT", 100.20, &open, &cfg, None);
         // Inside min_hold, but the trailing stop still triggers the close.

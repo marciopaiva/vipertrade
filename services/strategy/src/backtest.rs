@@ -167,6 +167,11 @@ pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
                             trailing_stop_activated: false,
                             trailing_stop_peak_price: price,
                             trailing_stop_final_distance_pct: 0.0,
+                            // O backtest não acumula excursão: ele não persiste
+                            // estado entre ticks como o loop ao vivo, e MAE/MFE
+                            // existem para medir o comportamento REAL.
+                            mfe_pct: 0.0,
+                            mae_pct: 0.0,
                         },
                     );
                     rep.opened += 1;
