@@ -37,7 +37,13 @@ export class WebSocketClient {
   static INITIAL_RETRY_MS = 1000;
   static MAX_RETRY_MS = 30000;
   static MAX_RETRIES = 20;
-  static STALE_AFTER_MS = 20000;
+  // 20s marcava "desatualizado" dentro da variação NORMAL do sistema e a pílula
+  // ficava piscando entre ao vivo e desatualizado sem nada de errado: o intervalo
+  // entre decisões tem média ~3s, mas p95 de 34s e picos acima disso (o
+  // market-data varre o universo inteiro antes de reemitir). 90s fica ~2,6x acima
+  // do pior gap observado — ainda detecta queda real em pouco mais de um minuto,
+  // sem acusar falha quando o ciclo apenas demorou.
+  static STALE_AFTER_MS = 90000;
   static STALE_CHECK_MS = 5000;
 
   constructor(baseUrl: string) {
@@ -67,7 +73,11 @@ export class WebSocketClient {
   connect() {
     if (!this.active) return;
     if (!this.baseUrl) return;
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
+    if (
+      this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING
+    )
+      return;
 
     this.setStatus('connecting');
     try {
@@ -78,7 +88,7 @@ export class WebSocketClient {
         this.setStatus('live');
         this.startStaleCheck();
       };
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = event => {
         this.lastMessageAt = Date.now();
         if (this._status === 'stale') {
           this.setStatus('live');
@@ -90,7 +100,7 @@ export class WebSocketClient {
           // ignore malformed messages
         }
       };
-      this.ws.onclose = (event) => {
+      this.ws.onclose = event => {
         this.stopStaleCheck();
         // If unauthorized, fetch a fresh token before reconnecting
         if (event.code === 4001 || event.code === 4401) {
@@ -125,7 +135,10 @@ export class WebSocketClient {
   private startStaleCheck() {
     this.stopStaleCheck();
     this.staleTimer = setInterval(() => {
-      if (this._status === 'live' && Date.now() - this.lastMessageAt > WebSocketClient.STALE_AFTER_MS) {
+      if (
+        this._status === 'live' &&
+        Date.now() - this.lastMessageAt > WebSocketClient.STALE_AFTER_MS
+      ) {
         this.setStatus('stale');
       }
     }, WebSocketClient.STALE_CHECK_MS);
@@ -165,12 +178,12 @@ export class WebSocketClient {
   }
 
   private emit(event: string, data: any) {
-    this.listeners.get(event)?.forEach((cb) => cb(data));
+    this.listeners.get(event)?.forEach(cb => cb(data));
   }
 
   private setStatus(status: ConnectionStatus) {
     this._status = status;
-    this.statusListeners.forEach((cb) => cb(status));
+    this.statusListeners.forEach(cb => cb(status));
   }
 
   disconnect() {

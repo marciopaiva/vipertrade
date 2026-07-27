@@ -358,7 +358,9 @@ const ptBR: Messages = {
     goDashboard: 'Ir para o Dashboard',
     healthLive: 'AO VIVO',
     healthConnecting: 'CONECTANDO',
-    healthStale: 'DESATUALIZADO',
+    // "ATRASADO", não "DESATUALIZADO": cabe na pílula sem alargá-la, e descreve
+    // melhor o estado — segue conectado, os dados é que pararam de chegar.
+    healthStale: 'ATRASADO',
     healthOffline: 'OFFLINE',
     healthFeed: 'Feed em tempo real: {status}',
   },
