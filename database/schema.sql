@@ -62,7 +62,13 @@ CREATE TABLE trades (
     trailing_stop_activated BOOLEAN DEFAULT false,
     trailing_stop_peak_price NUMERIC,
     trailing_stop_final_distance_pct NUMERIC,
-    
+
+    -- Excursão de preço dentro do trade, em % e sempre positivas, medidas a
+    -- favor da direção da posição. Rastreadas a cada tick, independente de o
+    -- trailing ter armado — é o que permite dimensionar o stop com dado.
+    mfe_pct DOUBLE PRECISION NOT NULL DEFAULT 0,  -- maior avanço favorável
+    mae_pct DOUBLE PRECISION NOT NULL DEFAULT 0,  -- maior recuo adverso
+
     -- Perfil de risco usado
     trading_profile TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (trading_profile IN ('CONSERVATIVE', 'MEDIUM', 'AGGRESSIVE')),
     

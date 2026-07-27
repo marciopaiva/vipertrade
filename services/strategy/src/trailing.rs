@@ -7,6 +7,38 @@ use crate::{
     TrailingPolicyBreakdown, TrailingPolicyComponent, TrailingRuntimeConfig,
 };
 
+/// Excursão de preço acumulada de um trade: o maior avanço favorável (MFE) e o
+/// maior recuo adverso (MAE) já vistos, em pontos percentuais e ambos positivos.
+///
+/// Separado de `evaluate_trailing` de propósito: aquela função retorna cedo
+/// quando o trailing não armou (`if !activated { return None }`), então tudo que
+/// dependesse dela ficaria cego justamente nos trades que morrem sem armar — que
+/// são os que precisamos entender. Esta roda a cada tick, sempre.
+///
+/// Retorna os novos máximos, já comparados com os anteriores.
+pub(crate) fn update_excursion(
+    side: &str,
+    entry_price: f64,
+    current_price: f64,
+    prior_mfe_pct: f64,
+    prior_mae_pct: f64,
+) -> (f64, f64) {
+    if entry_price <= 0.0 || current_price <= 0.0 {
+        return (prior_mfe_pct, prior_mae_pct);
+    }
+
+    // Move a favor da posição: positivo é lucro, negativo é prejuízo, dos dois lados.
+    let move_pct = if side.eq_ignore_ascii_case("Long") || side.eq_ignore_ascii_case("Buy") {
+        (current_price - entry_price) / entry_price * 100.0
+    } else {
+        (entry_price - current_price) / entry_price * 100.0
+    };
+
+    let mfe = prior_mfe_pct.max(move_pct.max(0.0));
+    let mae = prior_mae_pct.max((-move_pct).max(0.0));
+    (mfe, mae)
+}
+
 pub(crate) fn apply_active_position_advice_to_trailing(
     mut trailing: TrailingRuntimeConfig,
     advice: Option<&ActivePositionAdviceSnapshot>,

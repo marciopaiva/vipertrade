@@ -10,7 +10,21 @@ pub(crate) async fn fetch_open_trade_for_symbol(
     pool: &PgPool,
     symbol: &str,
 ) -> Result<Option<OpenTradeSnapshot>, sqlx::Error> {
-    let row = sqlx::query_as::<_, (String, String, f64, f64, DateTime<Utc>, bool, f64, f64)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            f64,
+            f64,
+            DateTime<Utc>,
+            bool,
+            f64,
+            f64,
+            f64,
+            f64,
+        ),
+    >(
         "SELECT
             trade_id::text,
             side,
@@ -19,7 +33,9 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             opened_at,
             COALESCE(trailing_stop_activated, false),
             COALESCE(trailing_stop_peak_price::double precision, entry_price::double precision),
-            COALESCE(trailing_stop_final_distance_pct::double precision, 0)
+            COALESCE(trailing_stop_final_distance_pct::double precision, 0),
+            COALESCE(mfe_pct, 0),
+            COALESCE(mae_pct, 0)
         FROM trades
         WHERE status = 'open' AND symbol = $1
         ORDER BY opened_at ASC
@@ -39,6 +55,8 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             trailing_stop_activated,
             trailing_stop_peak_price,
             trailing_stop_final_distance_pct,
+            mfe_pct,
+            mae_pct,
         )| OpenTradeSnapshot {
             trade_id,
             side,
@@ -48,8 +66,34 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             trailing_stop_activated,
             trailing_stop_peak_price,
             trailing_stop_final_distance_pct,
+            mfe_pct,
+            mae_pct,
         },
     ))
+}
+
+/// Grava a excursão acumulada do trade. Chamada a cada tick em que um dos
+/// máximos avança — é independente do estado do trailing, senão os trades que
+/// nunca armam (justamente os que precisamos entender) ficariam sem registro.
+pub(crate) async fn update_trade_excursion(
+    pool: &PgPool,
+    trade_id: &str,
+    mfe_pct: f64,
+    mae_pct: f64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE trades
+         SET mfe_pct = $2,
+             mae_pct = $3
+         WHERE trade_id::text = $1",
+    )
+    .bind(trade_id)
+    .bind(mfe_pct)
+    .bind(mae_pct)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 pub(crate) async fn update_trade_trailing_state(
