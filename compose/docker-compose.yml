@@ -63,7 +63,6 @@ services:
     environment:
       VIPER_ROLE: market-data
       TRADING_MODE: ${TRADING_MODE:-paper}
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       REDIS_URL: redis://redis:6379
       ANALYTICS_SCORES_URL: ${ANALYTICS_SCORES_URL:-http://analytics:8086/scores}
@@ -115,7 +114,6 @@ services:
     environment:
       VIPER_ROLE: analytics
       TRADING_MODE: ${TRADING_MODE:-paper}
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       DB_HOST: postgres
       DB_PORT: 5432
@@ -162,7 +160,6 @@ services:
     environment:
       VIPER_ROLE: strategy
       TRADING_MODE: ${TRADING_MODE:-paper}
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
       # Real decision logic (ENTER_LONG/SHORT) vs the always-HOLD stub. Safe in
       # paper: live orders are off, fills are DB-simulated.
@@ -230,9 +227,6 @@ services:
     environment:
       VIPER_ROLE: executor
       TRADING_MODE: ${TRADING_MODE:-paper}
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
-      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
-      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
       BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
       BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
       BYBIT_API_KEY: ${BYBIT_API_KEY}
@@ -298,9 +292,6 @@ services:
     environment:
       VIPER_ROLE: monitor
       TRADING_MODE: ${TRADING_MODE:-paper}
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
-      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
-      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
       BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
       BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
       BYBIT_API_KEY: ${BYBIT_API_KEY}
@@ -414,9 +405,6 @@ services:
       REDIS_URL: redis://redis:6379
       TRADING_MODE: ${TRADING_MODE:-paper}
       STRATEGY_CONFIG: /app/config/trading/pairs.yaml
-      BYBIT_ENV: ${BYBIT_ENV:-testnet}
-      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
-      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
       BYBIT_MAINNET_API_KEY: ${BYBIT_MAINNET_API_KEY:-}
       BYBIT_MAINNET_API_SECRET: ${BYBIT_MAINNET_API_SECRET:-}
       BYBIT_API_KEY: ${BYBIT_API_KEY}

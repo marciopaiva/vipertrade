@@ -13,10 +13,13 @@ use std::fs;
 
 // --- Re-exported type ---
 
+/// Só existem dois modos: simular localmente (Paper) ou operar valendo
+/// (Mainnet). O testnet da Bybit foi removido — o book de lá não reproduz
+/// liquidez nem spread reais, então validar estratégia contra ele dava
+/// confiança falsa; o Paper já cobre a simulação, com custo e slippage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TradingMode {
     Paper,
-    Testnet,
     Mainnet,
 }
 
@@ -25,7 +28,6 @@ pub enum TradingMode {
 impl TradingMode {
     /// Parse TRADING_MODE env var. Default: "paper".
     /// Accepted values (case-insensitive):
-    /// - "testnet" → Testnet
     /// - "mainnet", "live" → Mainnet
     /// - anything else → Paper
     pub fn from_env() -> Self {
@@ -35,26 +37,15 @@ impl TradingMode {
             .to_ascii_lowercase()
             .as_str()
         {
-            "testnet" => Self::Testnet,
             "mainnet" | "live" => Self::Mainnet,
             _ => Self::Paper,
         }
     }
 
-    /// Get the Bybit environment label ("testnet" or "mainnet").
-    pub fn bybit_env(self) -> &'static str {
-        match self {
-            Self::Testnet => "testnet",
-            Self::Paper | Self::Mainnet => "mainnet",
-        }
-    }
-
-    /// Get the Bybit REST base URL for this mode.
+    /// Get the Bybit REST base URL. Paper reads real market and account data,
+    /// so both modes point at production.
     pub fn bybit_base_url(self) -> &'static str {
-        match self {
-            Self::Testnet => "https://api-testnet.bybit.com",
-            Self::Paper | Self::Mainnet => "https://api.bybit.com",
-        }
+        "https://api.bybit.com"
     }
 
     /// Whether this mode uses simulated (database-backed) positions instead of live exchange.
@@ -67,11 +58,10 @@ impl TradingMode {
         !matches!(self, Self::Paper)
     }
 
-    /// Uppercase label for UI/status (PAPER, TESTNET, MAINNET).
+    /// Uppercase label for UI/status (PAPER, MAINNET).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Paper => "PAPER",
-            Self::Testnet => "TESTNET",
             Self::Mainnet => "MAINNET",
         }
     }
@@ -81,19 +71,15 @@ impl TradingMode {
         self.as_str()
     }
 
-    /// Trade profile label: SMOKE for testnet, STANDARD otherwise.
+    /// Trade profile label. Only STANDARD remains — SMOKE existed for testnet.
     pub fn trade_profile_label(self) -> &'static str {
-        match self {
-            Self::Testnet => "SMOKE",
-            Self::Paper | Self::Mainnet => "STANDARD",
-        }
+        "STANDARD"
     }
 
     /// Environment label as used by exchange configuration (lowercase).
     pub fn exchange_env_label(self) -> &'static str {
         match self {
             Self::Paper => "paper",
-            Self::Testnet => "testnet",
             Self::Mainnet => "mainnet",
         }
     }
@@ -104,36 +90,13 @@ impl TradingMode {
     }
 }
 
-/// Resolve Bybit REST base URL with full override support.
+/// Resolve Bybit REST base URL.
 ///
-/// Priority:
-/// 1. BYBIT_HTTP_PUBLIC (direct override)
-/// 2. TRADING_MODE-based (testnet → testnet, mainnet/paper/live → mainnet)
-/// 3. BYBIT_ENV fallback (default: testnet)
+/// `BYBIT_HTTP_PUBLIC` ainda sobrepõe — é o gancho usado para apontar os
+/// serviços a um mock em teste. Fora isso é sempre produção: mesmo em Paper os
+/// dados de mercado lidos precisam ser os reais.
 pub fn resolve_bybit_base_url() -> String {
-    if let Some(override_url) = read_non_empty_env("BYBIT_HTTP_PUBLIC") {
-        return override_url;
-    }
-
-    let bybit_env = resolve_bybit_env();
-    match bybit_env.as_str() {
-        "mainnet" => "https://api.bybit.com".to_string(),
-        _ => "https://api-testnet.bybit.com".to_string(),
-    }
-}
-
-/// Resolve Bybit environment name ("mainnet" or "testnet") from TRADING_MODE/BYBIT_ENV.
-fn resolve_bybit_env() -> String {
-    match env::var("TRADING_MODE")
-        .unwrap_or_else(|_| "paper".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "testnet" => "testnet".to_string(),
-        "mainnet" | "paper" | "live" => "mainnet".to_string(),
-        _ => env::var("BYBIT_ENV").unwrap_or_else(|_| "testnet".to_string()),
-    }
+    read_non_empty_env("BYBIT_HTTP_PUBLIC").unwrap_or_else(|| "https://api.bybit.com".to_string())
 }
 
 // --- Environment reading helpers ---
@@ -210,25 +173,20 @@ pub fn resolve_database_url() -> Option<String> {
 
 // --- Bybit configuration ---
 
-/// Resolve Bybit API credentials, respecting scoped TESTNET/MAINNET variants.
+/// Resolve Bybit API credentials.
 ///
 /// Search order for each credential:
-/// 1. Mode-scoped: BYBIT_TESTNET_API_KEY or BYBIT_MAINNET_API_KEY
+/// 1. BYBIT_MAINNET_API_KEY
 /// 2. Unscoped: BYBIT_API_KEY (fallback)
 ///
 /// Returns empty strings if nothing is set (services may allow no-credential modes).
 pub fn resolve_bybit_credentials() -> (String, String) {
-    let mode = TradingMode::from_env();
-    let scoped = match mode {
-        TradingMode::Testnet => (
-            read_non_empty_env("BYBIT_TESTNET_API_KEY"),
-            read_non_empty_env("BYBIT_TESTNET_API_SECRET"),
-        ),
-        TradingMode::Paper | TradingMode::Mainnet => (
-            read_non_empty_env("BYBIT_MAINNET_API_KEY"),
-            read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
-        ),
-    };
+    // Paper também usa as chaves de mainnet: não envia ordem, mas lê dados
+    // reais da conta (taxa efetiva, constraints de símbolo) para simular fielmente.
+    let scoped = (
+        read_non_empty_env("BYBIT_MAINNET_API_KEY"),
+        read_non_empty_env("BYBIT_MAINNET_API_SECRET"),
+    );
 
     (
         scoped

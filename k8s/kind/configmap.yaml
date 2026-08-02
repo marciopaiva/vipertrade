@@ -5,7 +5,6 @@ metadata:
 data:
   # Trading configuration
   TRADING_MODE: paper
-  BYBIT_ENV: testnet
   BYBIT_RECV_WINDOW: "5000"
   BYBIT_ACCOUNT_TYPE: UNIFIED
 

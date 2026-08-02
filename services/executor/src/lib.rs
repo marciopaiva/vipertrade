@@ -35,7 +35,6 @@ struct ExecutorConfig {
     redis_url: String,
     db_url: String,
     trading_mode: TradingMode,
-    bybit_env: String,
     bybit_api_key: String,
     bybit_api_secret: String,
     recv_window: String,
@@ -55,10 +54,13 @@ struct ExecutorConfig {
     fee_taker_pct: f64,
 }
 
+/// Só existem dois modos: simular localmente (Paper) ou operar valendo
+/// (Mainnet). O testnet da Bybit foi removido — o book de lá não reproduz
+/// liquidez nem spread reais, então validar estratégia contra ele dava
+/// confiança falsa; o Paper já cobre a simulação, com custo e slippage.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum TradingMode {
     Paper,
-    Testnet,
     Mainnet,
 }
 
@@ -70,7 +72,6 @@ impl TradingMode {
             .to_ascii_lowercase()
             .as_str()
         {
-            "testnet" => Self::Testnet,
             "mainnet" | "live" => Self::Mainnet,
             _ => Self::Paper,
         }
@@ -79,15 +80,7 @@ impl TradingMode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Paper => "PAPER",
-            Self::Testnet => "TESTNET",
             Self::Mainnet => "MAINNET",
-        }
-    }
-
-    fn bybit_env(self) -> &'static str {
-        match self {
-            Self::Testnet => "testnet",
-            Self::Paper | Self::Mainnet => "mainnet",
         }
     }
 
@@ -127,7 +120,6 @@ impl ExecutorConfig {
         });
 
         let trading_mode = TradingMode::from_env();
-        let bybit_env = trading_mode.bybit_env().to_string();
         let (bybit_api_key, bybit_api_secret) = resolve_bybit_credentials();
         let recv_window = std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
         let bybit_account_type =
@@ -178,7 +170,6 @@ impl ExecutorConfig {
             redis_url,
             db_url,
             trading_mode,
-            bybit_env,
             bybit_api_key,
             bybit_api_secret,
             recv_window,
@@ -198,11 +189,7 @@ impl ExecutorConfig {
     }
 
     fn bybit_base_url(&self) -> &'static str {
-        if self.bybit_env.eq_ignore_ascii_case("mainnet") {
-            "https://api.bybit.com"
-        } else {
-            "https://api-testnet.bybit.com"
-        }
+        "https://api.bybit.com"
     }
 
     fn is_symbol_allowed_live(&self, symbol: &str) -> bool {
@@ -269,16 +256,12 @@ fn parse_allowlist(raw: &str) -> HashSet<String> {
 
 fn resolve_bybit_credentials() -> (String, String) {
     let from = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
-    let scoped = match TradingMode::from_env() {
-        TradingMode::Testnet => (
-            from("BYBIT_TESTNET_API_KEY"),
-            from("BYBIT_TESTNET_API_SECRET"),
-        ),
-        TradingMode::Paper | TradingMode::Mainnet => (
-            from("BYBIT_MAINNET_API_KEY"),
-            from("BYBIT_MAINNET_API_SECRET"),
-        ),
-    };
+    // Paper também usa as chaves de mainnet: não envia ordem, mas lê dados reais
+    // da conta (taxa efetiva, constraints de símbolo) para simular fielmente.
+    let scoped = (
+        from("BYBIT_MAINNET_API_KEY"),
+        from("BYBIT_MAINNET_API_SECRET"),
+    );
 
     (
         scoped
@@ -1032,14 +1015,13 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     if live_override && !cfg.trading_mode.executes_exchange_orders() {
         tracing::error!(
             mode = %cfg.trading_mode.as_str(),
-            "REFUSING TO START: EXECUTOR_ENABLE_LIVE_ORDERS=true requires testnet/mainnet, got paper"
+            "REFUSING TO START: EXECUTOR_ENABLE_LIVE_ORDERS=true requires mainnet, got paper"
         );
         std::process::exit(1);
     }
 
     tracing::info!(
         mode = %cfg.trading_mode.as_str(),
-        bybit_env = %cfg.bybit_env,
         executor_default_enabled = cfg.executor_default_enabled,
         live_orders_enabled = cfg.live_orders_enabled,
         reconcile_fix = cfg.reconcile_fix,
@@ -2050,7 +2032,6 @@ mod tests {
             redis_url: "redis://localhost:6379".to_string(),
             db_url: db_url.clone(),
             trading_mode: TradingMode::Paper,
-            bybit_env: "mainnet".to_string(),
             bybit_api_key: String::new(),
             bybit_api_secret: String::new(),
             recv_window: "5000".to_string(),
@@ -2151,7 +2132,6 @@ mod tests {
             redis_url: "redis://localhost:6379".to_string(),
             db_url: db_url.clone(),
             trading_mode: TradingMode::Paper,
-            bybit_env: "mainnet".to_string(),
             bybit_api_key: String::new(),
             bybit_api_secret: String::new(),
             recv_window: "5000".to_string(),

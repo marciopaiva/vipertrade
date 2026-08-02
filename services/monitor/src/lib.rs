@@ -25,7 +25,6 @@ struct MonitorConfig {
     discord_webhook_warning: Option<String>,
     discord_webhook_info: Option<String>,
     trading_mode: TradingMode,
-    bybit_env: String,
     bybit_api_key: String,
     bybit_api_secret: String,
     bybit_recv_window: String,
@@ -60,7 +59,6 @@ impl MonitorConfig {
         let discord_webhook_info = read_non_empty_env("DISCORD_WEBHOOK_INFO");
 
         let trading_mode = TradingMode::from_env();
-        let bybit_env = trading_mode.bybit_env().to_string();
         let (bybit_api_key, bybit_api_secret) = resolve_bybit_credentials();
         let bybit_recv_window =
             std::env::var("BYBIT_RECV_WINDOW").unwrap_or_else(|_| "5000".to_string());
@@ -76,7 +74,6 @@ impl MonitorConfig {
             discord_webhook_warning,
             discord_webhook_info,
             trading_mode,
-            bybit_env,
             bybit_api_key,
             bybit_api_secret,
             bybit_recv_window,
@@ -89,11 +86,7 @@ impl MonitorConfig {
     }
 
     fn bybit_base_url(&self) -> &'static str {
-        if self.bybit_env.eq_ignore_ascii_case("mainnet") {
-            "https://api.bybit.com"
-        } else {
-            "https://api-testnet.bybit.com"
-        }
+        "https://api.bybit.com"
     }
 }
 
@@ -565,7 +558,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         reconciliation_interval_sec = cfg.reconciliation_interval_sec,
         max_drift_usdt = cfg.max_position_drift_notional_usdt,
         cooldown_sec = cfg.alert_cooldown_sec,
-        bybit_env = %cfg.bybit_env,
         symbols = %cfg.recon_symbols.join(","),
         "Monitor config"
     );

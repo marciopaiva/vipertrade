@@ -137,8 +137,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let client = redis::Client::open(redis_url.clone())?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
-    let bybit_env = TradingMode::from_env().bybit_env();
-
     let universe: Vec<String> = parse_trading_pairs();
 
     let base_url = resolve_bybit_base_url();
@@ -156,7 +154,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .clamp(1, 3);
     let mut consensus_latch = HashMap::<String, ConsensusLatchState>::new();
     tracing::info!(
-        bybit_env = %bybit_env,
         base_url = %base_url,
         analytics_scores_url = %analytics_scores_url,
         min_exchanges = min_exchanges,
