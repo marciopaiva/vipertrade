@@ -265,6 +265,43 @@ pub(crate) async fn persist_trade(
     Ok(())
 }
 
+/// Margem livre da carteira simulada, em USDT.
+///
+/// Espelha a conta que a API mostra ao operador: capital inicial, mais o
+/// resultado já realizado, menos taxas e funding, menos a margem presa nas
+/// posições abertas. Uma conta real recusa a ordem quando isso não cobre a
+/// margem exigida — sem a checagem, o paper abria posição com saldo que não
+/// existe e media uma estratégia impossível de executar.
+pub(crate) async fn available_margin_usdt(
+    state: &ExecutorState,
+    initial_capital_usd: f64,
+) -> Result<f64, sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(initial_capital_usd);
+    };
+
+    let (realized_pnl, fees, funding_paid) = sqlx::query_as::<_, (f64, f64, f64)>(
+        "SELECT
+            COALESCE(SUM(pnl), 0)::double precision,
+            COALESCE(SUM(fees), 0)::double precision,
+            COALESCE(SUM(funding_paid), 0)::double precision
+         FROM trades
+         WHERE status <> 'open'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let used_margin = sqlx::query_scalar::<_, f64>(
+        "SELECT COALESCE(SUM((quantity * entry_price) / NULLIF(leverage, 0)), 0)::double precision
+         FROM trades
+         WHERE status = 'open'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(initial_capital_usd + realized_pnl - fees - funding_paid - used_margin)
+}
+
 pub(crate) async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(0);

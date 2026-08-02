@@ -51,6 +51,9 @@ struct ExecutorConfig {
     /// Fallback taker fee rate (fraction) used when the Bybit fee-rate API is
     /// unavailable — e.g. paper mode without credentials.
     fee_taker_pct: f64,
+    /// Simulated starting balance. Same env var the API reads, so the executor's
+    /// margin check and the wallet shown to the operator agree.
+    initial_capital_usd: f64,
 }
 
 /// Só existem dois modos: simular localmente (Paper) ou operar valendo
@@ -159,6 +162,11 @@ impl ExecutorConfig {
             std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
         // Bybit USDT-perp non-VIP defaults; only used when the fee-rate API
         // cannot be reached (see resolve_taker_fee_rate).
+        let initial_capital_usd = std::env::var("INITIAL_CAPITAL_USD")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(100.0);
         let fee_taker_pct = std::env::var("EXECUTOR_FEE_TAKER_PCT")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
@@ -184,6 +192,7 @@ impl ExecutorConfig {
             strategy_config_path,
             trading_profile,
             fee_taker_pct,
+            initial_capital_usd,
         }
     }
 
@@ -892,7 +901,119 @@ async fn handle_decision_event(
                 }
             }
 
-            let entry_qty = event.decision.quantity;
+            // Constraints do símbolo valem no paper também: a Bybit só aceita
+            // múltiplos de qtyStep, acima de minOrderQty e de minNotionalValue.
+            // Sem isto o paper operava quantidades impossíveis — o arredondamento
+            // chega a 20% do notional em símbolos de step grosso (BCH, SUI), o que
+            // dava a alguns símbolos mais peso no resultado do que teriam de fato.
+            let entry_qty = match get_symbol_constraints(state, http, cfg, &event.decision.symbol)
+                .await
+            {
+                Ok(constraints) => {
+                    match normalize_order_quantity(event.decision.quantity, constraints).and_then(
+                        |qty| {
+                            ensure_min_notional(
+                                &event.decision.action,
+                                qty,
+                                event.decision.entry_price,
+                                constraints,
+                            )
+                            .map(|_| qty)
+                        },
+                    ) {
+                        Ok(qty) => {
+                            if (qty - event.decision.quantity).abs() > f64::EPSILON {
+                                tracing::info!(
+                                    event_id = %event.event_id, symbol = %event.decision.symbol,
+                                    requested_qty = event.decision.quantity, normalized_qty = qty,
+                                    "Paper entry quantity normalized to exchange constraints"
+                                );
+                            }
+                            qty
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                event_id = %event.event_id, symbol = %event.decision.symbol,
+                                requested_qty = event.decision.quantity, error = %e,
+                                "Paper entry rejected by exchange constraints"
+                            );
+                            mark_processed(
+                                state,
+                                &idem_key,
+                                &event,
+                                "paper_open_blocked_constraints",
+                                Some(&paper_order_id),
+                                Some(&e),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Sem constraints não há como saber se a ordem seria aceita.
+                    // Bloquear mantém o paper honesto; deixar passar reintroduz
+                    // exatamente o viés que esta checagem existe para remover.
+                    tracing::warn!(
+                        event_id = %event.event_id, symbol = %event.decision.symbol, error = %e,
+                        "Symbol constraints unavailable; blocking paper entry"
+                    );
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        "paper_open_blocked_constraints_unavailable",
+                        Some(&paper_order_id),
+                        Some("symbol constraints unavailable"),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            // Margem: a corretora recusa a ordem se a conta não cobrir a margem
+            // exigida. `leverage` divide porque é o quanto do notional sai do
+            // saldo — 2x significa metade.
+            let required_margin = if event.decision.leverage > 0.0 {
+                entry_qty * event.decision.entry_price / event.decision.leverage
+            } else {
+                entry_qty * event.decision.entry_price
+            };
+            match available_margin_usdt(state, cfg.initial_capital_usd).await {
+                Ok(available) if available + 1e-9 < required_margin => {
+                    tracing::warn!(
+                        event_id = %event.event_id, symbol = %event.decision.symbol,
+                        required_margin, available,
+                        "Paper entry rejected: insufficient margin"
+                    );
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        "paper_open_blocked_insufficient_margin",
+                        Some(&paper_order_id),
+                        Some(&format!(
+                            "required {required_margin:.4} > available {available:.4}"
+                        )),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(event_id = %event.event_id, error = %e, "Failed checking available margin");
+                    mark_processed(
+                        state,
+                        &idem_key,
+                        &event,
+                        "paper_open_guard_error",
+                        Some(&paper_order_id),
+                        Some("margin query failed"),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
             let (entry_price, _) = paper_fill_price(
                 http,
                 cfg,
@@ -1387,6 +1508,69 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn db_available_margin_discounts_open_positions_and_costs() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        // Mede a variação, não o absoluto: o banco de teste pode já ter trades.
+        let before = available_margin_usdt(&state, 100.0).await.expect("margin");
+
+        let key = format!("it-margin-{}", now_ms());
+        // Posição aberta: $20 de notional com 2x prende $10 de margem.
+        sqlx::query(
+            "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity,
+                                 entry_price, leverage, status, decision_hash, paper_trade)
+             VALUES ($1, $1, 'BTCUSDT', 'Long', 2, 10, 2, 'open', 'h', TRUE)",
+        )
+        .bind(format!("{key}-open"))
+        .execute(&pool)
+        .await
+        .expect("insert open");
+
+        // Fechado: perdeu $5 e pagou $0,75 de taxa e $0,25 de funding.
+        sqlx::query(
+            "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity,
+                                 entry_price, leverage, status, decision_hash, paper_trade,
+                                 pnl, fees, funding_paid)
+             VALUES ($1, $1, 'BTCUSDT', 'Long', 1, 10, 2, 'closed', 'h', TRUE, -5, 0.75, 0.25)",
+        )
+        .bind(format!("{key}-closed"))
+        .execute(&pool)
+        .await
+        .expect("insert closed");
+
+        let after = available_margin_usdt(&state, 100.0).await.expect("margin");
+
+        // Consumiu 10 (margem presa) + 5 (perda) + 0,75 + 0,25 = 16.
+        assert!(
+            (before - after - 16.0).abs() < 1e-6,
+            "esperado consumo de 16, veio {}",
+            before - after
+        );
+
+        sqlx::query("DELETE FROM trades WHERE order_link_id LIKE $1")
+            .bind(format!("{key}%"))
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+    }
 
     // ── funding ───────────────────────────────────────────────────
     /// 2026-08-02 16:00 UTC em epoch, uma das três fronteiras de funding.
@@ -2248,6 +2432,7 @@ mod tests {
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
             fee_taker_pct: 0.00055,
+            initial_capital_usd: 100.0,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -2348,6 +2533,7 @@ mod tests {
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
             fee_taker_pct: 0.00055,
+            initial_capital_usd: 100.0,
             trading_profile: "MEDIUM".to_string(),
         };
 

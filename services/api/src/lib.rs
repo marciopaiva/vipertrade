@@ -1738,7 +1738,21 @@ async fn build_paper_wallet_response(state: &AppState) -> BybitWalletResponse {
     .await
     .unwrap_or(0.0);
 
-    let maintenance_margin = initial_margin * 0.5;
+    // Margem de manutenção da Bybit é uma fração do NOTIONAL (0,5% no tier de
+    // risco mais baixo, que é onde posições deste tamanho caem), não uma fração
+    // da margem inicial. O antigo `initial_margin * 0.5` errava por ordem de
+    // grandeza: numa posição de $8 com 2x, dava $2 em vez de $0,04.
+    const MAINTENANCE_MARGIN_RATE: f64 = 0.005;
+    let open_notional = sqlx::query_scalar::<_, f64>(
+        "SELECT COALESCE(SUM(quantity * entry_price), 0)::double precision
+         FROM trades
+         WHERE paper_trade = TRUE
+           AND status = 'open'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0.0);
+    let maintenance_margin = open_notional * MAINTENANCE_MARGIN_RATE;
 
     // PnL não realizado das posições abertas, marcado ao último preço conhecido
     // de cada símbolo (o snapshot mais recente, qualquer exchange). Sem isto o
