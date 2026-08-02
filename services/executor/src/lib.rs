@@ -1,4 +1,3 @@
-use rand::Rng;
 use serde_json::Value;
 use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
@@ -517,7 +516,9 @@ fn load_configured_taker_fee(cfg: &ExecutorConfig) -> Option<f64> {
     .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
 }
 
-fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64, f64) {
+/// Faixa de slippage usada apenas como fallback, quando o book real não pode
+/// ser lido (ver `paper_fill_price`).
+fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64) {
     let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok();
     let root: Option<YamlValue> = raw.as_deref().and_then(|r| serde_yaml::from_str(r).ok());
     let mode_key = cfg.trading_mode.as_str();
@@ -530,10 +531,7 @@ fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64, f64) {
     let slip_max = mode_cfg
         .and_then(|v| yaml_f64(v, &["paper_slippage_max"]))
         .unwrap_or(0.0008);
-    let fill_prob = mode_cfg
-        .and_then(|v| yaml_f64(v, &["paper_fill_probability"]))
-        .unwrap_or(0.97);
-    (slip_min, slip_max, fill_prob)
+    (slip_min, slip_max)
 }
 
 fn paper_adverse_slippage(action: &str, price: f64, slip_min: f64, slip_max: f64) -> f64 {
@@ -544,10 +542,6 @@ fn paper_adverse_slippage(action: &str, price: f64, slip_min: f64, slip_max: f64
         "ENTER_SHORT" | "CLOSE_LONG" => price * (1.0 - slip_pct),
         _ => price,
     }
-}
-
-fn paper_fill_check(fill_prob: f64) -> bool {
-    rand::thread_rng().gen_bool(fill_prob)
 }
 
 const FEE_RATE_CACHE_TTL: Duration = Duration::from_secs(3600);
@@ -594,6 +588,97 @@ async fn resolve_taker_fee_rate(
             );
             fallback
         }
+    }
+}
+
+/// Whether an action buys (lifts the ask) or sells (hits the bid).
+fn action_is_buy(action: &str) -> bool {
+    matches!(action, "ENTER_LONG" | "CLOSE_SHORT")
+}
+
+/// Price at which a paper order fills.
+///
+/// Prefers the real top of book: a market order crosses the spread, so a buy
+/// pays the ask and a sell receives the bid. That reproduces the true cost of
+/// immediacy — and widens on its own when the book thins out, which a fixed
+/// random draw never did.
+///
+/// Falls back to the configured random slippage if the book is unavailable, so
+/// a hiccup in the public API degrades the simulation instead of stopping it.
+/// Devolve `(preço de execução, funding rate vigente)`. O funding vem do mesmo
+/// ticker do book, então não custa uma segunda chamada.
+async fn paper_fill_price(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    action: &str,
+    reference_price: f64,
+    slip_min: f64,
+    slip_max: f64,
+) -> (f64, f64) {
+    match fetch_book_quote(http, cfg, symbol).await {
+        Ok(quote) => {
+            let price = quote.fill_price(action_is_buy(action));
+            // Em INFO de propósito: são poucos fills por dia, e o spread pago é
+            // justamente o custo que a simulação antes inventava. Querer auditar
+            // isso depois sem ter registrado seria o mesmo buraco das fees.
+            let mid = (quote.bid + quote.ask) / 2.0;
+            let spread_pct = if mid > 0.0 {
+                (quote.ask - quote.bid) / mid * 100.0
+            } else {
+                0.0
+            };
+            tracing::info!(
+                symbol = %symbol, action = %action,
+                bid = quote.bid, ask = quote.ask,
+                fill_price = price, spread_pct,
+                "Paper fill priced from live book"
+            );
+            (price, quote.funding_rate)
+        }
+        Err(e) => {
+            tracing::warn!(
+                symbol = %symbol, action = %action, error = %e,
+                "Book unavailable; pricing paper fill with simulated slippage"
+            );
+            // Sem ticker não há funding confiável; não cobrar é melhor que inventar.
+            (
+                paper_adverse_slippage(action, reference_price, slip_min, slip_max),
+                0.0,
+            )
+        }
+    }
+}
+
+/// Quantos instantes de funding (00:00, 08:00 e 16:00 UTC) o intervalo cobre.
+///
+/// Perpétuo não vence: o custo de carregar a posição é cobrado nesses horários.
+/// Uma posição que abre 15:50 e fecha 16:10 paga um ciclo inteiro; uma que vive
+/// 40 minutos sem cruzar nenhum deles não paga nada.
+fn funding_events_between(opened_at: i64, closed_at: i64) -> i64 {
+    const FUNDING_INTERVAL_SECS: i64 = 8 * 3600;
+    if closed_at <= opened_at {
+        return 0;
+    }
+    // Número de fronteiras de 8h estritamente após a abertura e até o fechamento.
+    let after_open = opened_at.div_euclid(FUNDING_INTERVAL_SECS);
+    let until_close = closed_at.div_euclid(FUNDING_INTERVAL_SECS);
+    (until_close - after_open).max(0)
+}
+
+/// Funding pago (positivo) ou recebido (negativo) ao carregar a posição.
+///
+/// Taxa positiva significa que os comprados pagam aos vendidos — por isso o
+/// sinal se inverte no Short.
+fn funding_cost(notional: f64, funding_rate: f64, side: &str, events: i64) -> f64 {
+    if events <= 0 || !notional.is_finite() || notional <= 0.0 || !funding_rate.is_finite() {
+        return 0.0;
+    }
+    let magnitude = notional * funding_rate * events as f64;
+    if side.eq_ignore_ascii_case("Long") {
+        magnitude
+    } else {
+        -magnitude
     }
 }
 
@@ -685,36 +770,38 @@ async fn handle_decision_event(
             "Live orders disabled; paper-trade dry-run"
         );
 
-        let (slip_min, slip_max, fill_prob) = load_paper_slippage_config(cfg);
-
-        if !paper_fill_check(fill_prob) {
-            mark_processed(
-                state,
-                &idem_key,
-                &event,
-                "paper_not_filled",
-                Some(&format!("paper-{}", event.event_id)),
-                None,
-            )
-            .await?;
-            tracing::info!(event_id = %event.event_id, action = %event.decision.action, symbol = %event.decision.symbol, "Paper order not filled (fill probability check)");
-            return Ok(());
-        }
+        // Sem sorteio de preenchimento: ordem a mercado deste tamanho sempre
+        // encontra contraparte no topo do book. O antigo descarte de 3% jogava
+        // fora entradas boas e ruins por igual, sem contrapartida no mundo real.
+        let (slip_min, slip_max) = load_paper_slippage_config(cfg);
 
         let status = if is_close_action(&event.decision.action) {
             let close_qty = event.decision.quantity;
-            let close_price = paper_adverse_slippage(
+            let (close_price, funding_rate) = paper_fill_price(
+                http,
+                cfg,
+                &event.decision.symbol,
                 &event.decision.action,
                 event.decision.entry_price,
                 slip_min,
                 slip_max,
-            );
+            )
+            .await;
             let close_fee = fee_for_fill(
                 close_price,
                 close_qty,
                 resolve_taker_fee_rate(state, http, cfg, &event.decision.symbol).await,
             );
-            match close_open_trade(state, &event, close_qty, close_price, close_fee).await {
+            match close_open_trade(
+                state,
+                &event,
+                close_qty,
+                close_price,
+                close_fee,
+                funding_rate,
+            )
+            .await
+            {
                 Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
                 Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
                 Ok(CloseReconcileResult::CloseQtyExceedsOpen { .. }) => {
@@ -806,12 +893,16 @@ async fn handle_decision_event(
             }
 
             let entry_qty = event.decision.quantity;
-            let entry_price = paper_adverse_slippage(
+            let (entry_price, _) = paper_fill_price(
+                http,
+                cfg,
+                &event.decision.symbol,
                 &event.decision.action,
                 event.decision.entry_price,
                 slip_min,
                 slip_max,
-            );
+            )
+            .await;
             let entry_fee = fee_for_fill(
                 entry_price,
                 entry_qty,
@@ -900,7 +991,11 @@ async fn handle_decision_event(
                     .executed_qty
                     .unwrap_or(event.decision.quantity);
 
-                match close_open_trade(state, &event, close_qty, execution_price, close_fee).await {
+                // Em mainnet a Bybit debita o funding direto na carteira; simular
+                // aqui contaria o mesmo custo duas vezes.
+                match close_open_trade(state, &event, close_qty, execution_price, close_fee, 0.0)
+                    .await
+                {
                     Ok(CloseReconcileResult::Closed {
                         trade_id,
                         realized_pnl,
@@ -1293,6 +1388,113 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 mod tests {
     use super::*;
 
+    // ── funding ───────────────────────────────────────────────────
+    /// 2026-08-02 16:00 UTC em epoch, uma das três fronteiras de funding.
+    const FUNDING_BOUNDARY: i64 = 1785686400;
+
+    #[test]
+    fn funding_counts_only_boundaries_actually_crossed() {
+        // Abre 10min antes e fecha 10min depois da fronteira: cruzou uma.
+        assert_eq!(
+            funding_events_between(FUNDING_BOUNDARY - 600, FUNDING_BOUNDARY + 600),
+            1
+        );
+        // Vive 40min inteiramente dentro de uma janela: não cruzou nenhuma.
+        assert_eq!(
+            funding_events_between(FUNDING_BOUNDARY + 600, FUNDING_BOUNDARY + 3000),
+            0
+        );
+        // Um dia inteiro cruza as três (00, 08, 16).
+        assert_eq!(
+            funding_events_between(FUNDING_BOUNDARY, FUNDING_BOUNDARY + 86_400),
+            3
+        );
+    }
+
+    #[test]
+    fn funding_ignores_degenerate_intervals() {
+        assert_eq!(
+            funding_events_between(FUNDING_BOUNDARY, FUNDING_BOUNDARY),
+            0
+        );
+        // Fechamento antes da abertura não pode gerar cobrança.
+        assert_eq!(
+            funding_events_between(FUNDING_BOUNDARY, FUNDING_BOUNDARY - 86_400),
+            0
+        );
+    }
+
+    /// Taxa positiva: comprado paga, vendido recebe. Trocar esse sinal
+    /// transformaria um custo em receita.
+    #[test]
+    fn funding_sign_follows_position_side() {
+        let notional = 1000.0;
+        let rate = 0.0001; // 0,01%
+
+        assert!((funding_cost(notional, rate, "Long", 1) - 0.1).abs() < 1e-9);
+        assert!((funding_cost(notional, rate, "Short", 1) + 0.1).abs() < 1e-9);
+
+        // Taxa negativa inverte quem paga.
+        assert!(funding_cost(notional, -rate, "Long", 1) < 0.0);
+        assert!(funding_cost(notional, -rate, "Short", 1) > 0.0);
+    }
+
+    #[test]
+    fn funding_scales_with_events_and_is_zero_without_them() {
+        let notional = 1000.0;
+        let rate = 0.0001;
+
+        assert!((funding_cost(notional, rate, "Long", 3) - 0.3).abs() < 1e-9);
+        assert_eq!(funding_cost(notional, rate, "Long", 0), 0.0);
+        assert_eq!(funding_cost(0.0, rate, "Long", 1), 0.0);
+        assert_eq!(funding_cost(notional, f64::NAN, "Long", 1), 0.0);
+    }
+
+    #[test]
+    fn book_quote_fills_buys_at_ask_and_sells_at_bid() {
+        let quote = BookQuote {
+            bid: 99.0,
+            ask: 101.0,
+            funding_rate: 0.0,
+        };
+
+        // Comprar paga o lado caro, vender recebe o lado barato — atravessar o
+        // spread é o custo de exigir execução imediata.
+        assert_eq!(quote.fill_price(true), 101.0);
+        assert_eq!(quote.fill_price(false), 99.0);
+    }
+
+    /// O mapeamento de lado é o ponto onde um erro inverteria o sinal do
+    /// slippage — encareceria as vendas e barateria as compras.
+    #[test]
+    fn maps_actions_to_book_side() {
+        assert!(action_is_buy("ENTER_LONG"));
+        assert!(action_is_buy("CLOSE_SHORT"));
+        assert!(!action_is_buy("ENTER_SHORT"));
+        assert!(!action_is_buy("CLOSE_LONG"));
+    }
+
+    /// O preenchimento pelo book tem de ser sempre pior que o preço de
+    /// referência, nos dois lados — igual ao que o slippage sorteado garantia.
+    #[test]
+    fn book_fill_is_never_better_than_mid() {
+        let quote = BookQuote {
+            bid: 99.0,
+            ask: 101.0,
+            funding_rate: 0.0,
+        };
+        let mid = (quote.bid + quote.ask) / 2.0;
+
+        assert!(
+            quote.fill_price(true) >= mid,
+            "compra não pode sair abaixo do mid"
+        );
+        assert!(
+            quote.fill_price(false) <= mid,
+            "venda não pode sair acima do mid"
+        );
+    }
+
     #[test]
     fn fee_for_fill_charges_notional_times_rate() {
         // 10 units at $2,000 = $20,000 notional; 0.055% taker = $11.
@@ -1489,7 +1691,7 @@ mod tests {
         }))
         .expect("partial event");
 
-        let res = close_open_trade(&state, &partial, 4.0, 1.1, 0.0)
+        let res = close_open_trade(&state, &partial, 4.0, 1.1, 0.0, 0.0)
             .await
             .expect("partial close should work");
         assert!(matches!(res, CloseReconcileResult::Partial { .. }));
@@ -1523,7 +1725,7 @@ mod tests {
         }))
         .expect("full event");
 
-        let res = close_open_trade(&state, &full, 6.0, 1.2, 0.0)
+        let res = close_open_trade(&state, &full, 6.0, 1.2, 0.0, 0.0)
             .await
             .expect("full close should work");
         assert!(matches!(res, CloseReconcileResult::Closed { .. }));
@@ -1846,7 +2048,7 @@ mod tests {
         }))
         .expect("close event");
 
-        let res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0)
+        let res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0, 0.0)
             .await
             .expect("close should work");
         assert!(
@@ -1869,7 +2071,7 @@ mod tests {
             pnl
         );
 
-        let duplicate_res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0)
+        let duplicate_res = close_open_trade(&state, &close_event, 15.0, 1.6, 0.0, 0.0)
             .await
             .expect("duplicate close should not error");
         assert!(

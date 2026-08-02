@@ -1739,7 +1739,32 @@ async fn build_paper_wallet_response(state: &AppState) -> BybitWalletResponse {
     .unwrap_or(0.0);
 
     let maintenance_margin = initial_margin * 0.5;
-    let unrealized_pnl = 0.0;
+
+    // PnL não realizado das posições abertas, marcado ao último preço conhecido
+    // de cada símbolo (o snapshot mais recente, qualquer exchange). Sem isto o
+    // equity ignorava as posições em aberto e só mudava quando um trade fechava.
+    // Símbolo sem snapshot é omitido pelo JOIN — melhor faltar uma posição no
+    // total do que marcá-la a um preço inventado.
+    let unrealized_pnl = sqlx::query_scalar::<_, f64>(
+        "WITH latest_price AS (
+            SELECT DISTINCT ON (symbol) symbol, price::double precision AS price
+            FROM exchange_signal_snapshots
+            ORDER BY symbol, observed_at DESC
+         )
+         SELECT COALESCE(SUM(
+            CASE WHEN t.side = 'Long'
+                 THEN (p.price - t.entry_price::double precision) * t.quantity::double precision
+                 ELSE (t.entry_price::double precision - p.price) * t.quantity::double precision
+            END
+         ), 0)::double precision
+         FROM trades t
+         JOIN latest_price p ON p.symbol = t.symbol
+         WHERE t.paper_trade = TRUE
+           AND t.status = 'open'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0.0);
     let wallet_balance = state.initial_capital_usd + realized_pnl - fees - funding_paid;
     let margin_balance = wallet_balance;
     let available_balance = (margin_balance - initial_margin).max(0.0);

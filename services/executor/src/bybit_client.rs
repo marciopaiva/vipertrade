@@ -101,6 +101,87 @@ pub(crate) async fn bybit_private_get(
     parse_bybit_json_response(res, "bybit private").await
 }
 
+/// Top of book: best bid and best ask, in quote currency.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BookQuote {
+    pub(crate) bid: f64,
+    pub(crate) ask: f64,
+    /// Funding rate currently in force for the perpetual, as a fraction.
+    /// Positive means longs pay shorts.
+    pub(crate) funding_rate: f64,
+}
+
+impl BookQuote {
+    /// Price a market order actually fills at.
+    ///
+    /// A buy lifts the ask and a sell hits the bid — crossing the spread is the
+    /// unavoidable cost of demanding immediacy, and it is what the paper fill
+    /// was previously approximating with a random draw.
+    pub(crate) fn fill_price(&self, is_buy: bool) -> f64 {
+        if is_buy {
+            self.ask
+        } else {
+            self.bid
+        }
+    }
+}
+
+/// Fetch the current top of book for `symbol` from Bybit.
+///
+/// Public endpoint — works regardless of credentials, so paper fills stay
+/// realistic even if the API key lapses.
+pub(crate) async fn fetch_book_quote(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> Result<BookQuote, Box<dyn Error>> {
+    let path = format!(
+        "/v5/market/tickers?category=linear&symbol={}",
+        symbol.to_uppercase()
+    );
+    let value = bybit_public_get(http, cfg, &path).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        return Err(format!("tickers retCode={} body={}", ret_code, value).into());
+    }
+
+    let entry = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .ok_or("tickers response missing result.list[0]")?;
+
+    let parse = |field: &str| -> Option<f64> {
+        entry
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok())
+    };
+
+    let bid = parse("bid1Price").ok_or("tickers missing bid1Price")?;
+    let ask = parse("ask1Price").ok_or("tickers missing ask1Price")?;
+
+    // A crossed or non-positive book means the quote is unusable; better to fall
+    // back to the simulated slippage than to fill at a nonsense price.
+    if !(bid.is_finite() && ask.is_finite() && bid > 0.0 && ask >= bid) {
+        return Err(format!("implausible book bid={bid} ask={ask}").into());
+    }
+
+    // Funding ausente é tratado como zero: não cobrar é preferível a cobrar um
+    // valor inventado, e o campo pode faltar em símbolos recém-listados.
+    let funding_rate = parse("fundingRate")
+        .filter(|v| v.is_finite())
+        .unwrap_or(0.0);
+
+    Ok(BookQuote {
+        bid,
+        ask,
+        funding_rate,
+    })
+}
+
 /// Fee rates for a symbol, as fractions (0.00055 == 0.055%).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BybitFeeRate {

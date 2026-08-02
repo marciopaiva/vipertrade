@@ -193,6 +193,7 @@ pub(crate) async fn close_open_trade(
     close_qty: f64,
     close_price: f64,
     close_fee: f64,
+    funding_rate: f64,
 ) -> Result<CloseReconcileResult, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(CloseReconcileResult::NoLocalOpen);
@@ -202,11 +203,12 @@ pub(crate) async fn close_open_trade(
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
-    let open_trade: Option<(String, f64, f64, f64)> = sqlx::query_as(
+    let open_trade: Option<(String, f64, f64, f64, i64)> = sqlx::query_as(
         "SELECT trade_id::text,
                 quantity::double precision,
                 entry_price::double precision,
-                leverage::double precision
+                leverage::double precision,
+                EXTRACT(epoch FROM opened_at)::bigint
          FROM trades
          WHERE symbol = $1
            AND side = $2
@@ -219,7 +221,7 @@ pub(crate) async fn close_open_trade(
     .fetch_optional(pool)
     .await?;
 
-    let Some((trade_id, open_qty, entry_price, _leverage)) = open_trade else {
+    let Some((trade_id, open_qty, entry_price, _leverage, opened_at_epoch)) = open_trade else {
         return Ok(CloseReconcileResult::NoLocalOpen);
     };
 
@@ -232,12 +234,30 @@ pub(crate) async fn close_open_trade(
     let pnl_delta = realized_pnl(side, entry_price, close_price, effective_close_qty);
     let close_reason = close_reason_from_decision(&event.decision.reason);
 
+    // Funding é cobrado por ciclo de 8h atravessado, sobre o notional da posição.
+    let closed_at_epoch = chrono::Utc::now().timestamp();
+    let funding_events = funding_events_between(opened_at_epoch, closed_at_epoch);
+    let funding_delta = funding_cost(
+        entry_price * effective_close_qty,
+        funding_rate,
+        side,
+        funding_events,
+    );
+    if funding_events > 0 {
+        tracing::info!(
+            trade_id = %trade_id, symbol = %event.decision.symbol, side = %side,
+            funding_events, funding_rate, funding_delta,
+            "Funding charged for carried position"
+        );
+    }
+
     if close_qty + eps < open_qty {
         sqlx::query(
             "UPDATE trades
              SET quantity = quantity - $2,
                  pnl = COALESCE(pnl, 0) + $3,
                  fees = COALESCE(fees, 0) + $4,
+                 funding_paid = COALESCE(funding_paid, 0) + $6,
                  exit_price = $5,
                  updated_at = NOW()
              WHERE trade_id::text = $1",
@@ -247,6 +267,7 @@ pub(crate) async fn close_open_trade(
         .bind(pnl_delta)
         .bind(close_fee)
         .bind(close_price)
+        .bind(funding_delta)
         .execute(pool)
         .await?;
 
@@ -264,8 +285,9 @@ pub(crate) async fn close_open_trade(
              closed_at = NOW(),
              pnl = COALESCE(pnl, 0) + $2,
              fees = COALESCE(fees, 0) + $3,
+             funding_paid = COALESCE(funding_paid, 0) + $6,
              pnl_pct = CASE
-                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2 - COALESCE(fees, 0) - $3) / (entry_price * quantity)) * 100)
+                 WHEN entry_price > 0 THEN (((COALESCE(pnl, 0) + $2 - COALESCE(fees, 0) - $3 - COALESCE(funding_paid, 0) - $6) / (entry_price * quantity)) * 100)
                  ELSE NULL
              END,
              exit_price = $4,
@@ -277,6 +299,7 @@ pub(crate) async fn close_open_trade(
     .bind(close_fee)
     .bind(close_price)
     .bind(close_reason)
+    .bind(funding_delta)
     .execute(pool)
     .await?;
 
