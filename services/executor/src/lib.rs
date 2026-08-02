@@ -54,6 +54,9 @@ struct ExecutorConfig {
     /// Simulated starting balance. Same env var the API reads, so the executor's
     /// margin check and the wallet shown to the operator agree.
     initial_capital_usd: f64,
+    /// Queda máxima do equity desde o pico antes de o disjuntor parar as
+    /// ENTRADAS, em fração. 0 desliga o disjuntor.
+    max_drawdown_pct: f64,
 }
 
 /// Só existem dois modos: simular localmente (Paper) ou operar valendo
@@ -162,6 +165,14 @@ impl ExecutorConfig {
             std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
         // Bybit USDT-perp non-VIP defaults; only used when the fee-rate API
         // cannot be reached (see resolve_taker_fee_rate).
+        // 0.08 (8%) fica na faixa que a literatura de bots recomenda (5%-10%)
+        // e bem acima do pior drawdown ja observado (2,4% no corpus de julho),
+        // entao so dispara em degradacao real, nao em oscilacao normal.
+        let max_drawdown_pct = std::env::var("EXECUTOR_MAX_DRAWDOWN_PCT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 1.0)
+            .unwrap_or(0.08);
         let initial_capital_usd = std::env::var("INITIAL_CAPITAL_USD")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
@@ -193,6 +204,7 @@ impl ExecutorConfig {
             trading_profile,
             fee_taker_pct,
             initial_capital_usd,
+            max_drawdown_pct,
         }
     }
 
@@ -970,6 +982,68 @@ async fn handle_decision_event(
                     return Ok(());
                 }
             };
+            // Disjuntor de drawdown: para as ENTRADAS quando o equity cai além
+            // do limite desde o pico. Só entradas — posições abertas seguem
+            // sendo geridas e podem fechar normalmente, senão o disjuntor
+            // prenderia justamente o risco que ele quer reduzir.
+            if cfg.max_drawdown_pct > 0.0 {
+                match equity_drawdown(state, cfg.initial_capital_usd).await {
+                    Ok((drawdown, peak, current)) if drawdown >= cfg.max_drawdown_pct => {
+                        tracing::error!(
+                            event_id = %event.event_id, symbol = %event.decision.symbol,
+                            drawdown_pct = drawdown * 100.0,
+                            threshold_pct = cfg.max_drawdown_pct * 100.0,
+                            peak_equity = peak, current_equity = current,
+                            "CIRCUIT BREAKER: drawdown limit hit — blocking new entries"
+                        );
+                        if let Err(e) = record_circuit_breaker(
+                            state,
+                            "equity_drawdown",
+                            drawdown,
+                            cfg.max_drawdown_pct,
+                            "blocked_new_entries",
+                            serde_json::json!({
+                                "symbol": event.decision.symbol,
+                                "peak_equity": peak,
+                                "current_equity": current,
+                            }),
+                        )
+                        .await
+                        {
+                            tracing::warn!(error = %e, "Failed to record circuit breaker event");
+                        }
+                        mark_processed(
+                            state,
+                            &idem_key,
+                            &event,
+                            "paper_open_blocked_drawdown",
+                            Some(&paper_order_id),
+                            Some(&format!(
+                                "drawdown {:.2}% >= {:.2}%",
+                                drawdown * 100.0,
+                                cfg.max_drawdown_pct * 100.0
+                            )),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(event_id = %event.event_id, error = %e, "Failed checking drawdown");
+                        mark_processed(
+                            state,
+                            &idem_key,
+                            &event,
+                            "paper_open_guard_error",
+                            Some(&paper_order_id),
+                            Some("drawdown query failed"),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                }
+            }
+
             // Margem: a corretora recusa a ordem se a conta não cobrir a margem
             // exigida. `leverage` divide porque é o quanto do notional sai do
             // saldo — 2x significa metade.
@@ -1570,6 +1644,112 @@ mod tests {
             .execute(&pool)
             .await
             .expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn db_equity_drawdown_measures_from_high_water_mark() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+
+        // Isola: o drawdown olha a curva inteira, então um banco com trades
+        // pré-existentes tornaria o resultado imprevisível.
+        sqlx::query("DELETE FROM trades").execute(&pool).await.ok();
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        // Conta virgem: sem curva, o pico é o capital inicial e não há queda.
+        let (dd, peak, cur) = equity_drawdown(&state, 100.0).await.expect("drawdown");
+        assert!(
+            (dd - 0.0).abs() < 1e-9 && (peak - 100.0).abs() < 1e-9 && (cur - 100.0).abs() < 1e-9
+        );
+
+        // Curva: +10 (pico 110), depois -20 (equity 90). Drawdown = 20/110.
+        for (i, pnl) in [10.0_f64, -20.0].iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity,
+                                     entry_price, leverage, status, decision_hash, paper_trade,
+                                     pnl, fees, funding_paid, closed_at)
+                 VALUES ($1, $1, 'BTCUSDT', 'Long', 1, 10, 2, 'closed', 'h', TRUE,
+                         $2, 0, 0, NOW() + ($3 || ' seconds')::interval)",
+            )
+            .bind(format!("dd-{i}"))
+            .bind(pnl)
+            .bind(i as i32)
+            .execute(&pool)
+            .await
+            .expect("insert");
+        }
+
+        let (dd, peak, cur) = equity_drawdown(&state, 100.0).await.expect("drawdown");
+        assert!(
+            (peak - 110.0).abs() < 1e-6,
+            "pico deveria ser 110, veio {peak}"
+        );
+        assert!(
+            (cur - 90.0).abs() < 1e-6,
+            "equity deveria ser 90, veio {cur}"
+        );
+        assert!(
+            (dd - 20.0 / 110.0).abs() < 1e-6,
+            "drawdown deveria ser 18,18%, veio {}",
+            dd * 100.0
+        );
+
+        sqlx::query("DELETE FROM trades").execute(&pool).await.ok();
+    }
+
+    /// Uma conta que só perdeu tem drawdown medido a partir do capital inicial —
+    /// sem isso, o pico seria o primeiro fechamento (já negativo) e a queda
+    /// apareceria como zero.
+    #[tokio::test]
+    async fn db_equity_drawdown_uses_initial_capital_as_first_peak() {
+        let Ok(db_url) = std::env::var("EXECUTOR_TEST_DATABASE_URL") else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("db connect");
+        sqlx::query("DELETE FROM trades").execute(&pool).await.ok();
+
+        let state = ExecutorState {
+            db_pool: Some(pool.clone()),
+            processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
+            constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        sqlx::query(
+            "INSERT INTO trades (order_link_id, bybit_order_id, symbol, side, quantity,
+                                 entry_price, leverage, status, decision_hash, paper_trade,
+                                 pnl, fees, funding_paid, closed_at)
+             VALUES ('dd-only-loss','dd-only-loss','BTCUSDT','Long',1,10,2,'closed','h',TRUE,
+                     -5, 0, 0, NOW())",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert");
+
+        let (dd, peak, cur) = equity_drawdown(&state, 100.0).await.expect("drawdown");
+        assert!((peak - 100.0).abs() < 1e-6, "pico é o capital inicial");
+        assert!((cur - 95.0).abs() < 1e-6);
+        assert!((dd - 0.05).abs() < 1e-6, "drawdown 5%, veio {}", dd * 100.0);
+
+        sqlx::query("DELETE FROM trades").execute(&pool).await.ok();
     }
 
     // ── funding ───────────────────────────────────────────────────
@@ -2433,6 +2613,7 @@ mod tests {
             strategy_config_path: "".to_string(),
             fee_taker_pct: 0.00055,
             initial_capital_usd: 100.0,
+            max_drawdown_pct: 0.08,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -2534,6 +2715,7 @@ mod tests {
             strategy_config_path: "".to_string(),
             fee_taker_pct: 0.00055,
             initial_capital_usd: 100.0,
+            max_drawdown_pct: 0.08,
             trading_profile: "MEDIUM".to_string(),
         };
 

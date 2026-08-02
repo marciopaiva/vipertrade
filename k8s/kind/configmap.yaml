@@ -55,6 +55,12 @@ data:
   # /v5/account/fee-rate. This is only the fallback for when that call fails
   # (no credentials): Bybit USDT-perp non-VIP taker = 0.055%.
   EXECUTOR_FEE_TAKER_PCT: "0.00055"
+  # Disjuntor: para as ENTRADAS quando o equity cai 8% desde o pico (curva
+  # realizada). Posições abertas seguem sendo geridas — travar a saída
+  # prenderia justamente o risco que o disjuntor quer reduzir. A faixa 5%-10%
+  # é a recomendada para bots; 8% fica bem acima do pior drawdown já medido
+  # (2,4% no corpus de julho), então só dispara em degradação real. 0 desliga.
+  EXECUTOR_MAX_DRAWDOWN_PCT: "0.08"
 
   # System configuration
   HEALTH_CHECK_INTERVAL_MIN: "15"

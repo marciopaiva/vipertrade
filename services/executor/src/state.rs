@@ -302,6 +302,81 @@ pub(crate) async fn available_margin_usdt(
     Ok(initial_capital_usd + realized_pnl - fees - funding_paid - used_margin)
 }
 
+/// Queda percentual do equity desde o seu ponto mais alto (high-water mark).
+///
+/// Mede sobre resultado REALIZADO — a curva de equity fechada. Posições abertas
+/// ficam de fora de propósito: incluí-las faria o disjuntor oscilar com o preço
+/// e disparar por ruído, quando o que ele precisa detectar é perda consolidada.
+///
+/// Retorna `(drawdown_pct, pico, equity_atual)`, com o drawdown em FRAÇÃO.
+pub(crate) async fn equity_drawdown(
+    state: &ExecutorState,
+    initial_capital_usd: f64,
+) -> Result<(f64, f64, f64), sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok((0.0, initial_capital_usd, initial_capital_usd));
+    };
+
+    // A curva começa no capital inicial (antes do primeiro trade), senão o pico
+    // seria o primeiro fechamento e uma conta que só perdeu teria drawdown zero.
+    let (peak, current) = sqlx::query_as::<_, (f64, f64)>(
+        "WITH curve AS (
+            SELECT closed_at,
+                   trade_id,
+                   $1::double precision + SUM(
+                       COALESCE(pnl, 0) - COALESCE(fees, 0) - COALESCE(funding_paid, 0)
+                   ) OVER (ORDER BY closed_at, trade_id) AS equity
+            FROM trades
+            WHERE status <> 'open' AND closed_at IS NOT NULL
+         )
+         SELECT
+            GREATEST(
+                $1::double precision,
+                COALESCE((SELECT MAX(equity) FROM curve), $1::double precision)
+            ),
+            COALESCE(
+                (SELECT equity FROM curve ORDER BY closed_at DESC, trade_id DESC LIMIT 1),
+                $1::double precision
+            )",
+    )
+    .bind(initial_capital_usd)
+    .fetch_one(pool)
+    .await?;
+
+    if peak <= 0.0 {
+        return Ok((0.0, peak, current));
+    }
+    let drawdown = ((peak - current) / peak).max(0.0);
+    Ok((drawdown, peak, current))
+}
+
+/// Registra o disparo do disjuntor para auditoria.
+pub(crate) async fn record_circuit_breaker(
+    state: &ExecutorState,
+    breaker_type: &str,
+    trigger_value: f64,
+    threshold_value: f64,
+    action_taken: &str,
+    metadata: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO circuit_breaker_events
+             (breaker_type, trigger_value, threshold_value, action_taken, metadata)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(breaker_type)
+    .bind(trigger_value)
+    .bind(threshold_value)
+    .bind(action_taken)
+    .bind(metadata)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn count_open_trades(state: &ExecutorState) -> Result<i64, sqlx::Error> {
     let Some(pool) = &state.db_pool else {
         return Ok(0);
