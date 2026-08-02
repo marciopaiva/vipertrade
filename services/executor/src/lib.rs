@@ -1316,6 +1316,11 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         live_orders_enabled = cfg.live_orders_enabled,
         reconcile_fix = cfg.reconcile_fix,
         paper_max_open_positions = cfg.paper_max_open_positions,
+        // Limites de risco no boot: um limite que só aparece quando dispara é
+        // indistinguível de um limite que não existe — foi assim que a taxa não
+        // cobrada e o gate de perda diária passaram despercebidos.
+        max_drawdown_pct = cfg.max_drawdown_pct * 100.0,
+        initial_capital_usd = cfg.initial_capital_usd,
         base_url = %cfg.bybit_base_url(),
         allowlist = ?cfg.live_symbol_allowlist,
         "Executor config"
