@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::config::StrategyConfig;
 use crate::helpers::*;
 use crate::{
-    apply_hold_block, is_same_direction, EntryGuardEvaluation, EntryGuardState,
+    apply_hold_block, is_same_direction, AccountRiskState, EntryGuardEvaluation, EntryGuardState,
     SignalConfirmationState, ThesisInvalidationState,
 };
 
@@ -275,6 +275,7 @@ pub(crate) fn build_temporal_pipeline_state(
     entry_guards: &HashMap<String, EntryGuardState>,
     signal_confirmations: &HashMap<String, SignalConfirmationState>,
     thesis_invalidations: &HashMap<String, ThesisInvalidationState>,
+    risk: AccountRiskState,
 ) -> serde_json::Value {
     let signal_confirmation = signal_confirmations.get(symbol);
     let thesis_confirmation = thesis_invalidations.get(symbol);
@@ -298,6 +299,11 @@ pub(crate) fn build_temporal_pipeline_state(
     };
 
     json!({
+        // Lidos pelos gates `current_daily_loss` e `consecutive_losses` do
+        // pipeline. Antes não eram emitidos: os steps caíam no default 0.0 e os
+        // dois limites passavam sempre.
+        "current_daily_loss": risk.daily_loss,
+        "consecutive_losses": risk.consecutive_losses,
         "signal_confirmation": {
             "observed": signal_confirmation
                 .map(|state| state.consecutive_valid_ticks > 0)

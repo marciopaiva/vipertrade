@@ -33,6 +33,18 @@ pub(crate) struct TrailingRuntimeConfig {
     pub(crate) break_even_margin_pct: f64,
 }
 
+/// Estado de risco da conta, lido do banco e repassado ao pipeline.
+///
+/// Agrupado porque os dois viajam juntos e alimentam os mesmos gates — e
+/// porque antes nenhum dos dois chegava lá.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct AccountRiskState {
+    /// Perda do dia corrente como fração POSITIVA do equity; 0 se no lucro.
+    pub(crate) daily_loss: f64,
+    /// Derrotas líquidas seguidas desde o último trade lucrativo.
+    pub(crate) consecutive_losses: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct OpenTradeSnapshot {
     pub(crate) trade_id: String,

@@ -180,6 +180,58 @@ pub(crate) async fn count_open_trades(pool: &PgPool) -> Result<i64, sqlx::Error>
     .await
 }
 
+/// Perda acumulada no dia corrente (UTC), como FRAÇÃO POSITIVA do equity.
+///
+/// Zero quando o dia está no lucro — o gate compara contra
+/// `max_daily_loss_pct`, então só a perda importa. Líquida de taxa e funding,
+/// senão o limite de risco mediria um número que não existe na carteira.
+pub(crate) async fn fetch_current_daily_loss(
+    pool: &PgPool,
+    equity_usdt: f64,
+) -> Result<f64, sqlx::Error> {
+    if equity_usdt <= 0.0 {
+        return Ok(0.0);
+    }
+    let net: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(
+             COALESCE(pnl, 0) - COALESCE(fees, 0) - COALESCE(funding_paid, 0)
+         ), 0)::double precision
+         FROM trades
+         WHERE status <> 'open'
+           AND closed_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(if net < 0.0 {
+        (-net / equity_usdt).max(0.0)
+    } else {
+        0.0
+    })
+}
+
+/// Quantas derrotas seguidas desde o último trade lucrativo.
+///
+/// Conta pelo resultado LÍQUIDO: um trade que ganhou no bruto e perdeu para a
+/// taxa é uma derrota, e tratá-lo como vitória zeraria a sequência justamente
+/// no caso que mais precisa ser contado.
+pub(crate) async fn fetch_consecutive_losses(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    let count: i64 = sqlx::query_scalar(
+        "WITH ordered AS (
+            SELECT (COALESCE(pnl, 0) - COALESCE(fees, 0) - COALESCE(funding_paid, 0)) AS net,
+                   ROW_NUMBER() OVER (ORDER BY closed_at DESC, trade_id DESC) AS rn
+            FROM trades
+            WHERE status <> 'open' AND closed_at IS NOT NULL
+         )
+         SELECT COALESCE(MIN(rn) - 1, (SELECT COUNT(*) FROM ordered))::bigint
+         FROM ordered
+         WHERE net > 0",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(count.max(0))
+}
+
 pub(crate) fn sha256_hex_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);

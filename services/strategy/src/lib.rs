@@ -1575,6 +1575,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .unwrap_or(1_000.0);
     let mut cached_account_equity_usdt = fallback_equity_usdt;
     let mut last_wallet_fetch_at = Instant::now() - Duration::from_secs(60);
+    // Estado de risco da conta. Sem isto os gates de perda diária e de derrotas
+    // seguidas liam 0.0 do estado temporal e passavam sempre — existiam na
+    // config e não protegiam nada.
+    let mut cached_risk = AccountRiskState::default();
     let mut cached_execution_advice: Option<AiAnalystAdviceSnapshot> = None;
     let mut last_execution_advice_fetch_at = Instant::now() - Duration::from_secs(60);
     let execution_advice_refresh = Duration::from_secs(
@@ -1889,6 +1893,25 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                             )
                             .await;
                             last_wallet_fetch_at = Instant::now();
+
+                            // Mesma cadência do equity: são todos estado de
+                            // conta, e o gate compara a perda contra ele.
+                            if let Some(pool) = &db_pool {
+                                match fetch_current_daily_loss(pool, cached_account_equity_usdt)
+                                    .await
+                                {
+                                    Ok(v) => cached_risk.daily_loss = v,
+                                    Err(err) => {
+                                        warn!(err = %err, "Failed to query daily loss")
+                                    }
+                                }
+                                match fetch_consecutive_losses(pool).await {
+                                    Ok(v) => cached_risk.consecutive_losses = v,
+                                    Err(err) => {
+                                        warn!(err = %err, "Failed to query consecutive losses")
+                                    }
+                                }
+                            }
                         }
 
                         let input_value = serde_json::to_value(&StrategyInput {
@@ -1900,6 +1923,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                 &entry_guards,
                                 &signal_confirmations,
                                 &thesis_invalidations,
+                                cached_risk,
                             ),
                             account_equity_usdt: cached_account_equity_usdt,
                             config: json!({
@@ -2272,6 +2296,63 @@ mod tests {
             mfe_pct: 0.0,
             mae_pct: 0.0,
         }
+    }
+
+    // ── gates de risco da conta ───────────────────────────────────
+    /// Os dois gates liam do estado temporal, que não emitia as chaves — caíam
+    /// no default 0.0 e passavam sempre. Este teste trava o contrato: emitiu,
+    /// o pipeline enxerga.
+    #[test]
+    fn temporal_state_exposes_account_risk_to_the_gates() {
+        let state = build_temporal_pipeline_state(
+            "BTCUSDT",
+            0.5,
+            &sample_cfg(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            AccountRiskState {
+                daily_loss: 0.021,
+                consecutive_losses: 3,
+            },
+        );
+
+        assert_eq!(
+            state.get("current_daily_loss").and_then(|v| v.as_f64()),
+            Some(0.021)
+        );
+        assert_eq!(
+            state.get("consecutive_losses").and_then(|v| v.as_f64()),
+            Some(3.0)
+        );
+    }
+
+    /// O gate compara `current_daily_loss <= max_daily_loss_pct`, então a perda
+    /// tem de chegar como fração POSITIVA — com o sinal invertido, uma perda de
+    /// 5% viraria −0,05 e passaria por qualquer limite.
+    #[test]
+    fn temporal_daily_loss_is_a_positive_fraction() {
+        let state = build_temporal_pipeline_state(
+            "BTCUSDT",
+            0.0,
+            &sample_cfg(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            AccountRiskState {
+                daily_loss: 0.05,
+                consecutive_losses: 0,
+            },
+        );
+        let v = state
+            .get("current_daily_loss")
+            .and_then(|v| v.as_f64())
+            .expect("chave presente");
+        assert!(v > 0.0, "perda deve ser positiva para o gate morder");
+        assert!(
+            v > sample_cfg().max_daily_loss_pct(),
+            "5% > 3% deve reprovar"
+        );
     }
 
     // ── break-even líquido de custo ───────────────────────────────
