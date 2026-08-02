@@ -1761,13 +1761,13 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                     // consensus/regime blip). Protective stops (SL/TP/
                                     // trailing) already fired in evaluate_open_trade_exit
                                     // regardless of age.
+                                    let age_seconds = Utc::now()
+                                        .signed_duration_since(open.opened_at)
+                                        .num_seconds()
+                                        .max(0);
                                     let min_hold_secs = cfg.min_hold_seconds();
-                                    let min_hold_active = min_hold_secs > 0
-                                        && Utc::now()
-                                            .signed_duration_since(open.opened_at)
-                                            .num_seconds()
-                                            .max(0)
-                                            < min_hold_secs;
+                                    let min_hold_active =
+                                        min_hold_secs > 0 && age_seconds < min_hold_secs;
                                     let thesis_decision = if min_hold_active {
                                         None
                                     } else {
@@ -1779,7 +1779,24 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                             &mut thesis_invalidations,
                                         )
                                     };
+                                    // Like the thesis exit, this is discretionary: it waits
+                                    // out min_hold so a fresh position is not cut before it
+                                    // has had a chance to move.
+                                    let no_progress_decision = if min_hold_active {
+                                        None
+                                    } else {
+                                        evaluate_no_progress_exit(
+                                            &symbol,
+                                            current_price,
+                                            &open,
+                                            age_seconds,
+                                            cfg.as_ref(),
+                                        )
+                                    };
                                     let decision = if let Some(decision) = close_decision {
+                                        thesis_invalidations.remove(&symbol);
+                                        decision
+                                    } else if let Some(decision) = no_progress_decision {
                                         thesis_invalidations.remove(&symbol);
                                         decision
                                     } else if let Some(decision) = thesis_decision {
@@ -2255,6 +2272,73 @@ mod tests {
             mfe_pct: 0.0,
             mae_pct: 0.0,
         }
+    }
+
+    // ── evaluate_no_progress_exit ─────────────────────────────────
+    fn no_progress_cfg(enabled: bool) -> StrategyConfig {
+        let mut cfg = sample_cfg();
+        let profile = cfg
+            .global
+            .get_mut("mode_profiles")
+            .and_then(|v| v.get_mut("PAPER"))
+            .and_then(|v| v.as_object_mut())
+            .expect("PAPER profile");
+        profile.insert("no_progress_exit_enabled".to_string(), json!(enabled));
+        profile.insert("no_progress_exit_after_seconds".to_string(), json!(600));
+        // 0.001 fraction == 0.1%; mfe_pct below is in percentage points.
+        profile.insert("no_progress_exit_min_mfe_pct".to_string(), json!(0.001));
+        cfg
+    }
+
+    #[test]
+    fn no_progress_exit_cuts_position_that_never_advanced() {
+        let cfg = no_progress_cfg(true);
+        let mut open = sample_open_trade();
+        open.mfe_pct = 0.05; // 0.05% — below the 0.1% threshold
+
+        let decision = evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg)
+            .expect("should cut a stalled position");
+        assert_eq!(decision.action, "CLOSE_LONG");
+        assert!(decision.reason.starts_with("time_exit_no_progress"));
+    }
+
+    /// The threshold is a fraction in YAML but percentage points on the trade,
+    /// so an MFE of 0.5% must be read as ABOVE 0.1% — not below it.
+    #[test]
+    fn no_progress_exit_spares_position_that_advanced() {
+        let cfg = no_progress_cfg(true);
+        let mut open = sample_open_trade();
+        open.mfe_pct = 0.5; // 0.5% — comfortably above 0.1%
+
+        assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg).is_none());
+    }
+
+    #[test]
+    fn no_progress_exit_waits_for_the_age_threshold() {
+        let cfg = no_progress_cfg(true);
+        let mut open = sample_open_trade();
+        open.mfe_pct = 0.0;
+
+        assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 599, &cfg).is_none());
+        assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg).is_some());
+    }
+
+    #[test]
+    fn no_progress_exit_is_off_by_default() {
+        let mut open = sample_open_trade();
+        open.mfe_pct = 0.0;
+
+        assert!(
+            evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 99_999, &sample_cfg()).is_none()
+        );
+        assert!(evaluate_no_progress_exit(
+            "BTCUSDT",
+            100.0,
+            &open,
+            99_999,
+            &no_progress_cfg(false)
+        )
+        .is_none());
     }
 
     // ── update_excursion (MAE / MFE) ──────────────────────────────

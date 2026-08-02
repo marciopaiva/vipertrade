@@ -50,6 +50,9 @@ struct ExecutorConfig {
     paper_max_open_positions: i64,
     strategy_config_path: String,
     trading_profile: String,
+    /// Fallback taker fee rate (fraction) used when the Bybit fee-rate API is
+    /// unavailable — e.g. paper mode without credentials.
+    fee_taker_pct: f64,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -99,6 +102,7 @@ struct ExecutorState {
     processed_in_memory: Arc<Mutex<HashSet<String>>>,
     constraints_cache: Arc<Mutex<HashMap<String, (Instant, BybitSymbolConstraints)>>>,
     reconcile_daily_counts: Arc<Mutex<HashMap<String, (String, i64)>>>,
+    fee_rate_cache: Arc<Mutex<HashMap<String, (Instant, BybitFeeRate)>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -162,6 +166,13 @@ impl ExecutorConfig {
             .unwrap_or_else(|_| "config/trading/pairs.yaml".to_string());
         let trading_profile =
             std::env::var("TRADING_PROFILE").unwrap_or_else(|_| "MEDIUM".to_string());
+        // Bybit USDT-perp non-VIP defaults; only used when the fee-rate API
+        // cannot be reached (see resolve_taker_fee_rate).
+        let fee_taker_pct = std::env::var("EXECUTOR_FEE_TAKER_PCT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
+            .unwrap_or(0.00055);
 
         Self {
             redis_url,
@@ -182,6 +193,7 @@ impl ExecutorConfig {
             paper_max_open_positions,
             strategy_config_path,
             trading_profile,
+            fee_taker_pct,
         }
     }
 
@@ -539,6 +551,61 @@ fn paper_fill_check(fill_prob: f64) -> bool {
     rand::thread_rng().gen_bool(fill_prob)
 }
 
+const FEE_RATE_CACHE_TTL: Duration = Duration::from_secs(3600);
+
+/// Resolve the taker fee rate for `symbol`, preferring the account's real rate
+/// from Bybit and falling back to the configured default.
+///
+/// Paper entries and exits are modelled as market orders (see
+/// `paper_adverse_slippage`), so taker is the correct side of the book.
+async fn resolve_taker_fee_rate(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> f64 {
+    {
+        let cache = state.fee_rate_cache.lock().await;
+        if let Some((fetched_at, rate)) = cache.get(symbol) {
+            if fetched_at.elapsed() < FEE_RATE_CACHE_TTL {
+                return rate.taker;
+            }
+        }
+    }
+
+    match fetch_fee_rate(http, cfg, symbol).await {
+        Ok(rate) => {
+            tracing::info!(
+                symbol = %symbol,
+                taker_pct = rate.taker * 100.0,
+                maker_pct = rate.maker * 100.0,
+                "Bybit account fee rate resolved"
+            );
+            let mut cache = state.fee_rate_cache.lock().await;
+            cache.insert(symbol.to_string(), (Instant::now(), rate));
+            rate.taker
+        }
+        Err(e) => {
+            tracing::warn!(
+                symbol = %symbol,
+                error = %e,
+                fallback_taker_pct = cfg.fee_taker_pct * 100.0,
+                "Failed to fetch Bybit fee rate; using configured fallback"
+            );
+            cfg.fee_taker_pct
+        }
+    }
+}
+
+/// Trading fee in quote currency for a fill of `qty` at `price`.
+fn fee_for_fill(price: f64, qty: f64, rate: f64) -> f64 {
+    let notional = price * qty;
+    if !notional.is_finite() || notional <= 0.0 || !rate.is_finite() || rate <= 0.0 {
+        return 0.0;
+    }
+    notional * rate
+}
+
 async fn handle_decision_event(
     state: &ExecutorState,
     http: &reqwest::Client,
@@ -642,7 +709,12 @@ async fn handle_decision_event(
                 slip_min,
                 slip_max,
             );
-            match close_open_trade(state, &event, close_qty, close_price, 0.0).await {
+            let close_fee = fee_for_fill(
+                close_price,
+                close_qty,
+                resolve_taker_fee_rate(state, http, cfg, &event.decision.symbol).await,
+            );
+            match close_open_trade(state, &event, close_qty, close_price, close_fee).await {
                 Ok(CloseReconcileResult::Closed { .. }) => "paper_close",
                 Ok(CloseReconcileResult::Partial { .. }) => "paper_close_partial",
                 Ok(CloseReconcileResult::CloseQtyExceedsOpen { .. }) => {
@@ -740,13 +812,18 @@ async fn handle_decision_event(
                 slip_min,
                 slip_max,
             );
+            let entry_fee = fee_for_fill(
+                entry_price,
+                entry_qty,
+                resolve_taker_fee_rate(state, http, cfg, &event.decision.symbol).await,
+            );
             if let Err(e) = persist_trade(
                 state,
                 &event,
                 &paper_order_id,
                 entry_qty,
                 entry_price,
-                0.0,
+                entry_fee,
                 true,
             )
             .await
@@ -976,6 +1053,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         db_pool,
         processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
         constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+        fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
         reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -1217,6 +1295,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fee_for_fill_charges_notional_times_rate() {
+        // 10 units at $2,000 = $20,000 notional; 0.055% taker = $11.
+        assert!((fee_for_fill(2000.0, 10.0, 0.00055) - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fee_for_fill_rejects_nonsense_inputs() {
+        // A bad rate or notional must not produce a negative/NaN fee that would
+        // silently credit the account.
+        assert_eq!(fee_for_fill(2000.0, 10.0, 0.0), 0.0);
+        assert_eq!(fee_for_fill(2000.0, 10.0, -0.001), 0.0);
+        assert_eq!(fee_for_fill(0.0, 10.0, 0.00055), 0.0);
+        assert_eq!(fee_for_fill(f64::NAN, 10.0, 0.00055), 0.0);
+    }
+
+    #[test]
     fn maps_action_to_side() {
         assert_eq!(action_to_side("ENTER_LONG"), Some("Buy"));
         assert_eq!(action_to_side("ENTER_SHORT"), Some("Sell"));
@@ -1373,6 +1467,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1468,6 +1563,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1590,6 +1686,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1661,6 +1758,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1726,6 +1824,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1819,6 +1918,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1875,6 +1975,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1946,6 +2047,7 @@ mod tests {
             reconcile_max_daily: 5,
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
+            fee_taker_pct: 0.00055,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -1953,6 +2055,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2045,6 +2148,7 @@ mod tests {
             reconcile_max_daily: 5,
             paper_max_open_positions: 2,
             strategy_config_path: "".to_string(),
+            fee_taker_pct: 0.00055,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -2052,6 +2156,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2122,6 +2227,7 @@ mod tests {
             db_pool: Some(pool.clone()),
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
+            fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 

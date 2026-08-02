@@ -101,6 +101,84 @@ pub(crate) async fn bybit_private_get(
     parse_bybit_json_response(res, "bybit private").await
 }
 
+/// Fee rates for a symbol, as fractions (0.00055 == 0.055%).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BybitFeeRate {
+    pub(crate) maker: f64,
+    pub(crate) taker: f64,
+}
+
+/// Fetch the account's real fee rate for `symbol` from Bybit.
+///
+/// This is the rate actually charged to *this* account, so it already accounts
+/// for VIP tier and any promotional discount — which is why we prefer it over
+/// the public non-VIP defaults. Requires API credentials; paper mode still gets
+/// real rates as long as read-only keys are configured.
+pub(crate) async fn fetch_fee_rate(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> Result<BybitFeeRate, Box<dyn Error>> {
+    if cfg.bybit_api_key.is_empty() || cfg.bybit_api_secret.is_empty() {
+        return Err("no API credentials".into());
+    }
+
+    let query = format!("category=linear&symbol={symbol}");
+    let value = bybit_private_get(http, cfg, "/v5/account/fee-rate", &query).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        return Err(format!("fee-rate retCode={} body={}", ret_code, value).into());
+    }
+
+    let entry = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .and_then(|list| list.first())
+        .ok_or("fee-rate response missing result.list[0]")?;
+
+    let parse = |field: &str| -> Option<f64> {
+        entry
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok())
+    };
+
+    let maker = parse("makerFeeRate").ok_or("fee-rate missing makerFeeRate")?;
+    let taker = parse("takerFeeRate").ok_or("fee-rate missing takerFeeRate")?;
+
+    // A zero/negative taker rate would silently disable cost accounting; treat
+    // it as bad data and let the caller fall back to the configured rate.
+    if !(taker.is_finite() && taker > 0.0 && maker.is_finite() && maker >= 0.0) {
+        return Err(format!("implausible fee rates maker={maker} taker={taker}").into());
+    }
+
+    Ok(BybitFeeRate { maker, taker })
+}
+
+/// Log which taker fee rate the executor will charge, so a misconfigured or
+/// missing API key is visible at boot rather than silently costing accuracy.
+pub(crate) async fn log_fee_rate_source(http: &reqwest::Client, cfg: &ExecutorConfig) {
+    const PROBE_SYMBOL: &str = "BTCUSDT";
+    match fetch_fee_rate(http, cfg, PROBE_SYMBOL).await {
+        Ok(rate) => tracing::info!(
+            probe_symbol = PROBE_SYMBOL,
+            taker_pct = rate.taker * 100.0,
+            maker_pct = rate.maker * 100.0,
+            source = "bybit_account",
+            "Fee rate in force (real account rate)"
+        ),
+        Err(e) => tracing::warn!(
+            probe_symbol = PROBE_SYMBOL,
+            error = %e,
+            taker_pct = cfg.fee_taker_pct * 100.0,
+            source = "configured_fallback",
+            "Fee rate in force (could not read account rate)"
+        ),
+    }
+}
+
 pub(crate) async fn bybit_private_post(
     http: &reqwest::Client,
     cfg: &ExecutorConfig,
@@ -151,6 +229,9 @@ pub(crate) async fn run_bybit_sanity_checks(
 
     if matches!(cfg.trading_mode, TradingMode::Paper) {
         tracing::info!("Bybit sanity check: wallet skipped (paper mode uses database simulation)");
+        // Paper fills are still charged real fees, so surface at boot which rate
+        // is in force — the account's own or the configured fallback.
+        log_fee_rate_source(http, cfg).await;
         return Ok(());
     }
 

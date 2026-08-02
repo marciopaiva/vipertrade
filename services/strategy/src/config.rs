@@ -636,6 +636,28 @@ impl StrategyConfig {
         self.mode_i64("min_hold_seconds").unwrap_or(0).max(0)
     }
 
+    pub(crate) fn no_progress_exit_enabled(&self) -> bool {
+        self.mode_flag("no_progress_exit_enabled", false)
+    }
+
+    /// Age after which a position that never moved in our favour is cut.
+    pub(crate) fn no_progress_exit_after_seconds(&self) -> i64 {
+        self.mode_i64("no_progress_exit_after_seconds")
+            .unwrap_or(600)
+            .max(0)
+    }
+
+    /// Minimum favourable excursion, as a FRACTION (0.001 == 0.1%), that a
+    /// position must have reached to be spared by the no-progress exit.
+    ///
+    /// Callers compare against `OpenTradeSnapshot::mfe_pct`, which is stored in
+    /// PERCENT — convert with `* 100.0` before comparing.
+    pub(crate) fn no_progress_exit_min_mfe_pct(&self) -> f64 {
+        self.mode_f64("no_progress_exit_min_mfe_pct")
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(0.001)
+    }
+
     pub(crate) fn stop_loss_pct(&self, symbol: &str) -> f64 {
         if let Some(value) = self.mode_f64("stop_loss_pct") {
             return value;

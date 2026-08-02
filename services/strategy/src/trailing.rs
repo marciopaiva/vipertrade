@@ -70,6 +70,48 @@ pub(crate) fn apply_active_position_advice_to_trailing(
     trailing
 }
 
+/// Corta posições que já tiveram tempo suficiente e nunca andaram a favor.
+///
+/// Medido na bateria de 27–28/07 (105 trades): metade das posições nunca passou
+/// de 0,14% de MFE e NENHUMA delas terminou vencedora — só acumulavam custo e
+/// tempo de exposição até a tese virar. O filtro é o MFE, não o MAE: quem já
+/// mostrou avanço fica, mesmo que esteja no vermelho agora.
+///
+/// `min_mfe_pct` vem do YAML como FRAÇÃO (0.001 == 0,1%); `open.mfe_pct` está em
+/// PONTOS PERCENTUAIS. A conversão acontece aqui, num lugar só.
+pub(crate) fn evaluate_no_progress_exit(
+    symbol: &str,
+    current_price: f64,
+    open: &OpenTradeSnapshot,
+    age_seconds: i64,
+    cfg: &StrategyConfig,
+) -> Option<StrategyDecision> {
+    if !cfg.no_progress_exit_enabled() {
+        return None;
+    }
+
+    let after_seconds = cfg.no_progress_exit_after_seconds();
+    if age_seconds < after_seconds {
+        return None;
+    }
+
+    let min_mfe_pct_points = cfg.no_progress_exit_min_mfe_pct() * 100.0;
+    if open.mfe_pct >= min_mfe_pct_points {
+        return None;
+    }
+
+    create_close_decision(
+        symbol,
+        &open.side,
+        open.quantity,
+        current_price,
+        &format!(
+            "time_exit_no_progress_mfe_{:.3}_below_{:.3}_after_{}s",
+            open.mfe_pct, min_mfe_pct_points, after_seconds
+        ),
+    )
+}
+
 pub(crate) fn create_close_decision(
     symbol: &str,
     side: &str,
