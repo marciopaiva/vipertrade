@@ -2274,6 +2274,77 @@ mod tests {
         }
     }
 
+    // ── break-even líquido de custo ───────────────────────────────
+    /// Trail propositalmente largo (10%) para que o break-even seja o limitante,
+    /// e custo de 1% para que a diferença apareça longe do ruído de arredondamento.
+    fn wide_trail_cfg(cost: f64) -> TrailingRuntimeConfig {
+        TrailingRuntimeConfig {
+            enabled: true,
+            activate_after_profit_pct: 0.001,
+            initial_trail_pct: 0.10,
+            ratchet_levels: vec![],
+            move_to_break_even_at: 0.005,
+            min_move_threshold_pct: 0.0002,
+            round_trip_cost_pct: cost,
+        }
+    }
+
+    #[test]
+    fn break_even_long_locks_above_entry_to_cover_cost() {
+        let open = sample_open_trade(); // Long, entry 100
+        let eval = evaluate_trailing(&open, 102.0, &wide_trail_cfg(0.01))
+            .expect("trailing should be active");
+
+        // Empate real = 100 * (1 + 1%) = 101. Travar em 100 sairia pagando a taxa.
+        assert!(eval.activated);
+        assert!(
+            (eval.trailing_stop_price - 101.0).abs() < 1e-9,
+            "esperado 101.0, veio {}",
+            eval.trailing_stop_price
+        );
+        assert!(eval.trailing_stop_price > open.entry_price);
+    }
+
+    #[test]
+    fn break_even_short_locks_below_entry_to_cover_cost() {
+        let mut open = sample_open_trade();
+        open.side = "Short".to_string();
+
+        let eval = evaluate_trailing(&open, 98.0, &wide_trail_cfg(0.01))
+            .expect("trailing should be active");
+
+        assert!(
+            (eval.trailing_stop_price - 99.0).abs() < 1e-9,
+            "esperado 99.0, veio {}",
+            eval.trailing_stop_price
+        );
+        assert!(eval.trailing_stop_price < open.entry_price);
+    }
+
+    /// Sem custo configurado o comportamento antigo tem de sobreviver, senão a
+    /// mudança viraria um retune silencioso de quem roda com fee zero.
+    #[test]
+    fn break_even_without_cost_still_locks_at_entry() {
+        let open = sample_open_trade();
+        let eval = evaluate_trailing(&open, 102.0, &wide_trail_cfg(0.0))
+            .expect("trailing should be active");
+
+        assert!((eval.trailing_stop_price - 100.0).abs() < 1e-9);
+    }
+
+    /// O piso protege contra um retune que baixe a ativação para dentro da faixa
+    /// que a taxa consome: armar ali é proteger um lucro que não existe.
+    #[test]
+    fn trailing_does_not_arm_below_round_trip_cost() {
+        let open = sample_open_trade();
+        let cfg = wide_trail_cfg(0.01); // custo 1%, activate_after 0.1%
+
+        // +0,5% de lucro: acima do activate_after configurado, abaixo do custo.
+        assert!(evaluate_trailing(&open, 100.5, &cfg).is_none());
+        // +1,5%: cobre o custo, arma.
+        assert!(evaluate_trailing(&open, 101.5, &cfg).is_some());
+    }
+
     // ── evaluate_no_progress_exit ─────────────────────────────────
     fn no_progress_cfg(enabled: bool) -> StrategyConfig {
         let mut cfg = sample_cfg();
@@ -2321,6 +2392,28 @@ mod tests {
 
         assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 599, &cfg).is_none());
         assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg).is_some());
+    }
+
+    /// O limiar configurado (0,05%) fica ABAIXO do custo de ida e volta (0,11%),
+    /// então quem manda é o custo: um MFE de 0,08% nunca pagaria o round-trip.
+    #[test]
+    fn no_progress_exit_floors_threshold_at_round_trip_cost() {
+        let mut cfg = no_progress_cfg(true);
+        let profile = cfg
+            .global
+            .get_mut("mode_profiles")
+            .and_then(|v| v.get_mut("PAPER"))
+            .and_then(|v| v.as_object_mut())
+            .expect("PAPER profile");
+        profile.insert("no_progress_exit_min_mfe_pct".to_string(), json!(0.0005));
+        profile.insert("fee_taker_pct".to_string(), json!(0.00055)); // round-trip 0,11%
+
+        let mut open = sample_open_trade();
+        open.mfe_pct = 0.08; // acima do limiar configurado, abaixo do custo
+        assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg).is_some());
+
+        open.mfe_pct = 0.15; // cobre o custo — fica
+        assert!(evaluate_no_progress_exit("BTCUSDT", 100.0, &open, 600, &cfg).is_none());
     }
 
     #[test]

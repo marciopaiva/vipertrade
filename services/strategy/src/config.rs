@@ -636,6 +636,25 @@ impl StrategyConfig {
         self.mode_i64("min_hold_seconds").unwrap_or(0).max(0)
     }
 
+    /// Taker fee charged per fill, as a FRACTION (0.00055 == 0,055%).
+    ///
+    /// Mirrors what the executor actually charges. Kept in `pairs.yaml` so a
+    /// single file governs both the decision side (here) and the accounting
+    /// side (executor), instead of the two drifting apart.
+    pub(crate) fn fee_taker_pct(&self) -> f64 {
+        self.mode_f64("fee_taker_pct")
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
+            .unwrap_or(0.00055)
+    }
+
+    /// Total cost of a full position round-trip (entry + exit), as a fraction.
+    ///
+    /// Both legs are market orders, so both pay taker. This is the minimum move
+    /// a position must make just to break even.
+    pub(crate) fn round_trip_cost_pct(&self) -> f64 {
+        self.fee_taker_pct() * 2.0
+    }
+
     pub(crate) fn no_progress_exit_enabled(&self) -> bool {
         self.mode_flag("no_progress_exit_enabled", false)
     }
@@ -780,6 +799,7 @@ impl StrategyConfig {
                 .and_then(Value::as_f64)
                 .unwrap_or(0.02),
             min_move_threshold_pct: self.trailing_min_move_threshold_pct(),
+            round_trip_cost_pct: self.round_trip_cost_pct(),
         }
     }
 

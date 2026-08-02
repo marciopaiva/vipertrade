@@ -518,6 +518,22 @@ fn body_preview(body: &str) -> String {
 // Checking only (symbol, side) let an ENTER_LONG open while a Short was still
 // open (and vice versa), leaving simultaneous long+short on the same symbol.
 
+/// Taker fee configured in `pairs.yaml`, if present.
+///
+/// The strategy reads the same key to price its break-even, so keeping this as
+/// the shared source stops the decision side and the accounting side from
+/// drifting apart. Only used when the live Bybit rate is unavailable.
+fn load_configured_taker_fee(cfg: &ExecutorConfig) -> Option<f64> {
+    let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok()?;
+    let root: YamlValue = serde_yaml::from_str(&raw).ok()?;
+    yaml_get(
+        &root,
+        &["global", "mode_profiles", cfg.trading_mode.as_str()],
+    )
+    .and_then(|v| yaml_f64(v, &["fee_taker_pct"]))
+    .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
+}
+
 fn load_paper_slippage_config(cfg: &ExecutorConfig) -> (f64, f64, f64) {
     let raw = std::fs::read_to_string(&cfg.strategy_config_path).ok();
     let root: Option<YamlValue> = raw.as_deref().and_then(|r| serde_yaml::from_str(r).ok());
@@ -586,13 +602,14 @@ async fn resolve_taker_fee_rate(
             rate.taker
         }
         Err(e) => {
+            let fallback = load_configured_taker_fee(cfg).unwrap_or(cfg.fee_taker_pct);
             tracing::warn!(
                 symbol = %symbol,
                 error = %e,
-                fallback_taker_pct = cfg.fee_taker_pct * 100.0,
+                fallback_taker_pct = fallback * 100.0,
                 "Failed to fetch Bybit fee rate; using configured fallback"
             );
-            cfg.fee_taker_pct
+            fallback
         }
     }
 }

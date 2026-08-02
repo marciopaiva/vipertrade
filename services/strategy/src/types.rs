@@ -23,6 +23,10 @@ pub(crate) struct TrailingRuntimeConfig {
     pub(crate) ratchet_levels: Vec<RatchetLevel>,
     pub(crate) move_to_break_even_at: f64,
     pub(crate) min_move_threshold_pct: f64,
+    /// Custo total de ida e volta (entrada + saída), em fração. Sair no preço de
+    /// entrada NÃO é empate: as duas pernas pagam taxa, então o empate real fica
+    /// a esta distância acima (Long) ou abaixo (Short) da entrada.
+    pub(crate) round_trip_cost_pct: f64,
 }
 
 #[derive(Debug, Clone)]

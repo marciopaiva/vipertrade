@@ -95,7 +95,13 @@ pub(crate) fn evaluate_no_progress_exit(
         return None;
     }
 
-    let min_mfe_pct_points = cfg.no_progress_exit_min_mfe_pct() * 100.0;
+    // Piso no custo de ida e volta: uma posição cujo avanço máximo nunca cobriu
+    // a taxa jamais poderia ter sido fechada no lucro, por melhor que fosse a
+    // saída. Abaixo disso não existe "dar mais tempo".
+    let min_mfe_pct_points = cfg
+        .no_progress_exit_min_mfe_pct()
+        .max(cfg.round_trip_cost_pct())
+        * 100.0;
     if open.mfe_pct >= min_mfe_pct_points {
         return None;
     }
@@ -159,8 +165,14 @@ pub(crate) fn evaluate_trailing(
     }
 
     let profit_pct = current_profit_pct(&open.side, open.entry_price, current_price);
-    let mut activated =
-        open.trailing_stop_activated || profit_pct >= trailing.activate_after_profit_pct;
+    // Armar antes de cobrir o custo é armar em prejuízo: o trailing passaria a
+    // proteger um "lucro" que a taxa já consumiu. O piso não altera a config
+    // atual (activate 0,2% > custo 0,11%), mas impede que um retune futuro
+    // derrube a ativação para dentro da faixa que nunca paga o round-trip.
+    let activate_after = trailing
+        .activate_after_profit_pct
+        .max(trailing.round_trip_cost_pct.max(0.0));
+    let mut activated = open.trailing_stop_activated || profit_pct >= activate_after;
     if !activated {
         return None;
     }
@@ -196,12 +208,17 @@ pub(crate) fn evaluate_trailing(
         peak_price * (1.0 + trail_pct)
     };
 
-    let break_even_armed = profit_pct >= trailing.move_to_break_even_at;
+    // Empate de verdade é o preço de entrada MAIS o custo das duas pernas —
+    // travar em `entry_price` garantia sair no prejuízo da taxa. E o piso em
+    // `cost` importa: sem ele, um `move_to_break_even_at` menor que o custo
+    // colocaria o stop acima do preço atual, disparando a saída na hora.
+    let cost = trailing.round_trip_cost_pct.max(0.0);
+    let break_even_armed = profit_pct >= trailing.move_to_break_even_at.max(cost);
     if break_even_armed {
         if open.side == "Long" {
-            trailing_stop_price = trailing_stop_price.max(open.entry_price);
+            trailing_stop_price = trailing_stop_price.max(open.entry_price * (1.0 + cost));
         } else {
-            trailing_stop_price = trailing_stop_price.min(open.entry_price);
+            trailing_stop_price = trailing_stop_price.min(open.entry_price * (1.0 - cost));
         }
     }
 
