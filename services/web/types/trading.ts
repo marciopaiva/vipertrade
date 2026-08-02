@@ -65,7 +65,13 @@ export interface Trade {
   quantity: number;
   entry_price: number;
   exit_price?: number | null;
+  /** PnL BRUTO — não desconta taxa nem funding. Para exibir use `net_pnl`. */
   pnl?: number | null;
+  fees?: number | null;
+  funding_paid?: number | null;
+  /** `pnl - fees - funding_paid`: o que de fato entrou na carteira. */
+  net_pnl?: number | null;
+  /** Retorno percentual já líquido dos custos. */
   pnl_pct?: number | null;
   close_reason?: string | null;
   opened_at: string;

@@ -1,5 +1,6 @@
 'use client';
 
+import { netPnl, isWin } from '@/lib/pnl';
 import { useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useT, useLocale, formatUsd, formatNumber } from '@/lib/i18n';
@@ -95,8 +96,8 @@ export default function TradesPage() {
     () => tableRows.filter(t => t.status === 'closed'),
     [tableRows]
   );
-  const netPnl = closed.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-  const wins = closed.filter(t => (t.pnl ?? 0) >= 0).length;
+  const netPnlTotal = closed.reduce((sum, t) => sum + netPnl(t), 0);
+  const wins = closed.filter(isWin).length;
   const winRate = closed.length ? (wins / closed.length) * 100 : 0;
 
   return (
@@ -109,9 +110,9 @@ export default function TradesPage() {
             <span className="text-muted-foreground">
               {t('net')}{' '}
               <span
-                className={netPnl >= 0 ? 'text-accent' : 'text-destructive'}
+                className={netPnlTotal >= 0 ? 'text-accent' : 'text-destructive'}
               >
-                {formatUsd(locale, netPnl)}
+                {formatUsd(locale, netPnlTotal)}
               </span>
             </span>
             <span className="text-muted-foreground">

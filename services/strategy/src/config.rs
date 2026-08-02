@@ -655,6 +655,14 @@ impl StrategyConfig {
         self.fee_taker_pct() * 2.0
     }
 
+    /// Folga sobre o custo, em FRAÇÃO, aplicada ao break-even e ao piso de
+    /// ativação do trailing. Existe para cobrir o tick de execução.
+    pub(crate) fn break_even_margin_pct(&self) -> f64 {
+        self.mode_f64("break_even_margin_pct")
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
+            .unwrap_or(0.0005)
+    }
+
     pub(crate) fn no_progress_exit_enabled(&self) -> bool {
         self.mode_flag("no_progress_exit_enabled", false)
     }
@@ -800,6 +808,7 @@ impl StrategyConfig {
                 .unwrap_or(0.02),
             min_move_threshold_pct: self.trailing_min_move_threshold_pct(),
             round_trip_cost_pct: self.round_trip_cost_pct(),
+            break_even_margin_pct: self.break_even_margin_pct(),
         }
     }
 

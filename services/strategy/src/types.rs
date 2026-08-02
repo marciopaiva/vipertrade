@@ -27,6 +27,10 @@ pub(crate) struct TrailingRuntimeConfig {
     /// entrada NÃO é empate: as duas pernas pagam taxa, então o empate real fica
     /// a esta distância acima (Long) ou abaixo (Short) da entrada.
     pub(crate) round_trip_cost_pct: f64,
+    /// Folga somada ao custo no break-even e no piso de ativação, em fração.
+    /// Cobre o tick de execução — a saída sai no bid (Long), um tick abaixo do
+    /// gatilho, e num papel de preço baixo um tick chega a 0,03%.
+    pub(crate) break_even_margin_pct: f64,
 }
 
 #[derive(Debug, Clone)]

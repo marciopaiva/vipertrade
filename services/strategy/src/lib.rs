@@ -2277,6 +2277,10 @@ mod tests {
     // ── break-even líquido de custo ───────────────────────────────
     /// Trail propositalmente largo (10%) para que o break-even seja o limitante,
     /// e custo de 1% para que a diferença apareça longe do ruído de arredondamento.
+    ///
+    /// Os testes que a usam marcam a posição como JÁ armada: o piso de ativação
+    /// (custo + trilha) é irrelevante para quem já armou, e é o break-even que
+    /// está sob teste.
     fn wide_trail_cfg(cost: f64) -> TrailingRuntimeConfig {
         TrailingRuntimeConfig {
             enabled: true,
@@ -2286,12 +2290,15 @@ mod tests {
             move_to_break_even_at: 0.005,
             min_move_threshold_pct: 0.0002,
             round_trip_cost_pct: cost,
+            break_even_margin_pct: 0.0,
         }
     }
 
     #[test]
     fn break_even_long_locks_above_entry_to_cover_cost() {
-        let open = sample_open_trade(); // Long, entry 100
+        let mut open = sample_open_trade(); // Long, entry 100
+        open.trailing_stop_activated = true;
+        open.mfe_pct = 2.0;
         let eval = evaluate_trailing(&open, 102.0, &wide_trail_cfg(0.01))
             .expect("trailing should be active");
 
@@ -2309,6 +2316,8 @@ mod tests {
     fn break_even_short_locks_below_entry_to_cover_cost() {
         let mut open = sample_open_trade();
         open.side = "Short".to_string();
+        open.trailing_stop_activated = true;
+        open.mfe_pct = 2.0;
 
         let eval = evaluate_trailing(&open, 98.0, &wide_trail_cfg(0.01))
             .expect("trailing should be active");
@@ -2325,7 +2334,9 @@ mod tests {
     /// mudança viraria um retune silencioso de quem roda com fee zero.
     #[test]
     fn break_even_without_cost_still_locks_at_entry() {
-        let open = sample_open_trade();
+        let mut open = sample_open_trade();
+        open.trailing_stop_activated = true;
+        open.mfe_pct = 2.0;
         let eval = evaluate_trailing(&open, 102.0, &wide_trail_cfg(0.0))
             .expect("trailing should be active");
 
@@ -2337,12 +2348,51 @@ mod tests {
     #[test]
     fn trailing_does_not_arm_below_round_trip_cost() {
         let open = sample_open_trade();
-        let cfg = wide_trail_cfg(0.01); // custo 1%, activate_after 0.1%
+        let mut cfg = wide_trail_cfg(0.01); // custo 1%
+        cfg.initial_trail_pct = 0.002; // trilha 0,2% -> piso = 1,2%
+        cfg.activate_after_profit_pct = 0.001; // 0,1%, bem abaixo do piso
 
-        // +0,5% de lucro: acima do activate_after configurado, abaixo do custo.
+        // +0,5%: acima do activate_after configurado, abaixo do custo.
         assert!(evaluate_trailing(&open, 100.5, &cfg).is_none());
-        // +1,5%: cobre o custo, arma.
-        assert!(evaluate_trailing(&open, 101.5, &cfg).is_some());
+        // +1,3%: cobre custo + trilha, arma.
+        assert!(evaluate_trailing(&open, 101.3, &cfg).is_some());
+    }
+
+    /// O caso do TIAUSDT de 02/08: subiu a +0,212%, armou o break-even, recuou
+    /// para +0,091% e saiu no prejuízo porque a trava usava o lucro CORRENTE.
+    /// Com a trava pelo MFE a proteção não se desfaz no recuo.
+    #[test]
+    fn break_even_stays_armed_after_price_pulls_back() {
+        let cfg = wide_trail_cfg(0.01); // custo 1%, break-even em 0,5%
+        let mut open = sample_open_trade(); // Long, entry 100
+        open.mfe_pct = 2.0; // já chegou a +2%
+        open.trailing_stop_activated = true;
+        open.trailing_stop_peak_price = 102.0;
+
+        // Agora o preço está em +0,2%: abaixo do gatilho de break-even, mas o
+        // pico já mereceu a proteção.
+        let eval = evaluate_trailing(&open, 100.2, &cfg).expect("trailing ativo");
+        assert!(
+            (eval.trailing_stop_price - 101.0).abs() < 1e-9,
+            "break-even devia seguir travado em 101.0, veio {}",
+            eval.trailing_stop_price
+        );
+    }
+
+    /// Armar em X entrega, no melhor caso, `X - trilha`. Se isso não cobre o
+    /// custo, o trailing perde por construção — foi o que ocorreu com
+    /// activate 0,20% e trilha 0,08% contra custo de 0,117%–0,140%.
+    #[test]
+    fn trailing_does_not_arm_when_target_cannot_cover_cost_plus_trail() {
+        let mut cfg = wide_trail_cfg(0.01); // custo 1%
+        cfg.initial_trail_pct = 0.005; // trilha 0,5%
+        cfg.activate_after_profit_pct = 0.011; // 1,1%: acima do custo, mas não de custo+trilha
+
+        let open = sample_open_trade();
+        // +1,2% não basta: piso é custo (1%) + trilha (0,5%) = 1,5%.
+        assert!(evaluate_trailing(&open, 101.2, &cfg).is_none());
+        // +1,6% cobre o piso.
+        assert!(evaluate_trailing(&open, 101.6, &cfg).is_some());
     }
 
     // ── evaluate_no_progress_exit ─────────────────────────────────

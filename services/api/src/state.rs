@@ -317,7 +317,16 @@ pub struct TradeItem {
     pub quantity: f64,
     pub entry_price: f64,
     pub exit_price: Option<f64>,
+    /// PnL BRUTO — não desconta taxa nem funding. Para exibir resultado use
+    /// `net_pnl`, senão um trade que pagou mais taxa do que ganhou aparece
+    /// como vitória.
     pub pnl: Option<f64>,
+    pub fees: Option<f64>,
+    pub funding_paid: Option<f64>,
+    /// `pnl - fees - funding_paid`: o que de fato entrou na carteira.
+    pub net_pnl: Option<f64>,
+    /// Retorno percentual já líquido dos custos (vem de `trades.pnl_pct`).
+    pub pnl_pct: Option<f64>,
     pub close_reason: Option<String>,
     pub duration_seconds: Option<i64>,
     pub opened_at: DateTime<Utc>,

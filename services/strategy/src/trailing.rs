@@ -165,13 +165,16 @@ pub(crate) fn evaluate_trailing(
     }
 
     let profit_pct = current_profit_pct(&open.side, open.entry_price, current_price);
-    // Armar antes de cobrir o custo é armar em prejuízo: o trailing passaria a
-    // proteger um "lucro" que a taxa já consumiu. O piso não altera a config
-    // atual (activate 0,2% > custo 0,11%), mas impede que um retune futuro
-    // derrube a ativação para dentro da faixa que nunca paga o round-trip.
-    let activate_after = trailing
-        .activate_after_profit_pct
-        .max(trailing.round_trip_cost_pct.max(0.0));
+    // O piso é `custo + trilha`, não só o custo: quem arma em X sai, no melhor
+    // caso, em `X - trilha`. Armar em 0,20% com trilha de 0,08% entrega 0,12%
+    // bruto contra um custo de 0,117%–0,140% — ou seja, o MELHOR caso do
+    // trailing já era prejuízo em 5 dos 6 símbolos operados. Com o piso, o
+    // trailing não arma onde a aritmética não fecha.
+    let activate_after = trailing.activate_after_profit_pct.max(
+        trailing.round_trip_cost_pct.max(0.0)
+            + trailing.initial_trail_pct.max(0.0)
+            + trailing.break_even_margin_pct.max(0.0),
+    );
     let mut activated = open.trailing_stop_activated || profit_pct >= activate_after;
     if !activated {
         return None;
@@ -209,16 +212,27 @@ pub(crate) fn evaluate_trailing(
     };
 
     // Empate de verdade é o preço de entrada MAIS o custo das duas pernas —
-    // travar em `entry_price` garantia sair no prejuízo da taxa. E o piso em
-    // `cost` importa: sem ele, um `move_to_break_even_at` menor que o custo
-    // colocaria o stop acima do preço atual, disparando a saída na hora.
+    // travar em `entry_price` garantia sair no prejuízo da taxa.
+    //
+    // A trava é pelo MFE, não pelo lucro atual: usar o lucro corrente fazia o
+    // break-even DESARMAR justamente quando o preço recuava, que é quando ele
+    // deveria proteger. Foi o que aconteceu no TIAUSDT de 02/08 — chegou a
+    // +0,212%, armou, recuou para +0,091%, desarmou, e saiu no prejuízo.
+    // Uma vez que a posição mereceu proteção, ela não a perde por recuar.
+    //
+    // `margin` cobre o tick de execução: a saída ocorre no bid (Long), sempre
+    // um tick abaixo do gatilho. Em papel de preço baixo um tick chega a 0,03%,
+    // o bastante para transformar o "empate" em perda.
     let cost = trailing.round_trip_cost_pct.max(0.0);
-    let break_even_armed = profit_pct >= trailing.move_to_break_even_at.max(cost);
+    let margin = trailing.break_even_margin_pct.max(0.0);
+    let peak_profit_pct = (open.mfe_pct / 100.0).max(profit_pct);
+    let break_even_armed = peak_profit_pct >= trailing.move_to_break_even_at.max(cost + margin);
     if break_even_armed {
+        let floor = cost + margin;
         if open.side == "Long" {
-            trailing_stop_price = trailing_stop_price.max(open.entry_price * (1.0 + cost));
+            trailing_stop_price = trailing_stop_price.max(open.entry_price * (1.0 + floor));
         } else {
-            trailing_stop_price = trailing_stop_price.min(open.entry_price * (1.0 - cost));
+            trailing_stop_price = trailing_stop_price.min(open.entry_price * (1.0 - floor));
         }
     }
 

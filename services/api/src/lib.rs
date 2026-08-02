@@ -728,6 +728,9 @@ async fn build_paper_trades_response(
             f64,
             Option<f64>,
             Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
             Option<String>,
             Option<i64>,
             DateTime<Utc>,
@@ -743,6 +746,9 @@ async fn build_paper_trades_response(
              COALESCE(entry_price::double precision, 0),
              exit_price::double precision,
              pnl::double precision,
+             fees::double precision,
+             funding_paid::double precision,
+             pnl_pct::double precision,
              close_reason,
              CASE
                WHEN closed_at IS NOT NULL THEN GREATEST(0, EXTRACT(EPOCH FROM (closed_at - opened_at))::bigint)
@@ -775,6 +781,9 @@ async fn build_paper_trades_response(
                         entry_price,
                         exit_price,
                         pnl,
+                        fees,
+                        funding_paid,
+                        pnl_pct,
                         close_reason,
                         duration_seconds,
                         opened_at,
@@ -788,6 +797,12 @@ async fn build_paper_trades_response(
                         entry_price,
                         exit_price,
                         pnl,
+                        fees,
+                        funding_paid,
+                        // Só faz sentido para trade fechado; em aberto o custo
+                        // ainda não está completo (falta a perna de saída).
+                        net_pnl: pnl.map(|p| p - fees.unwrap_or(0.0) - funding_paid.unwrap_or(0.0)),
+                        pnl_pct,
                         close_reason,
                         duration_seconds,
                         opened_at,
@@ -2228,6 +2243,28 @@ fn build_trade_item_from_closed_pnl(item: &Value) -> Option<TradeItem> {
         entry_price,
         exit_price,
         pnl,
+        // `closedPnl` da Bybit já vem líquido das taxas de abertura e
+        // fechamento, então aqui bruto e líquido coincidem e não há custo a
+        // reportar em separado.
+        fees: None,
+        funding_paid: None,
+        net_pnl: pnl,
+        pnl_pct: match (pnl, entry_price, exit_price) {
+            (Some(p), e, _) if e > 0.0 => {
+                let qty = item
+                    .get("closedSize")
+                    .and_then(json_number)
+                    .or_else(|| item.get("qty").and_then(json_number))
+                    .unwrap_or(0.0);
+                let notional = e * qty;
+                if notional > 0.0 {
+                    Some(p / notional * 100.0)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
         close_reason: None,
         duration_seconds: Some((closed_at - opened_at).num_seconds().max(0)),
         opened_at,

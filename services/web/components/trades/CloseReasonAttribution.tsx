@@ -1,5 +1,6 @@
 'use client';
 
+import { netPnl, isWin } from '@/lib/pnl';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useT, useLocale, formatUsd } from '@/lib/i18n';
@@ -37,8 +38,8 @@ export function CloseReasonAttribution({
       const reason = t.close_reason || 'unknown';
       const s = byReason.get(reason) ?? { reason, count: 0, net: 0, wins: 0 };
       s.count += 1;
-      s.net += t.pnl ?? 0;
-      if ((t.pnl ?? 0) >= 0) s.wins += 1;
+      s.net += netPnl(t);
+      if (isWin(t)) s.wins += 1;
       byReason.set(reason, s);
     }
     return [...byReason.values()].sort((a, b) => b.net - a.net);

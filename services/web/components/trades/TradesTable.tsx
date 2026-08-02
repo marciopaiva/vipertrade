@@ -12,6 +12,7 @@ import {
 } from '@/lib/i18n';
 import { reasonLabel } from './reasonLabel';
 import type { Trade } from '@/types/trading';
+import { netPnl } from '@/lib/pnl';
 
 type T = ReturnType<typeof useT<'trades'>>;
 type TKey = Parameters<T>[0];
@@ -43,10 +44,17 @@ function fmtDuration(s?: number) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/**
+ * Retorno percentual, sempre líquido.
+ *
+ * `pnl_pct` já vem líquido do backend. O fallback usa o PnL líquido, e não o
+ * bruto: com posição de ~$8 a taxa chega a superar o ganho, então dividir o
+ * bruto pelo notional mostrava lucro em trade que perdeu dinheiro.
+ */
 function pnlPct(t: Trade) {
-  if (typeof t.pnl_pct === 'number') return t.pnl_pct;
+  if (typeof t.pnl_pct === 'number') return t.pnl_pct / 100;
   const notional = (t.entry_price || 0) * (t.quantity || 0);
-  if (typeof t.pnl === 'number' && notional > 0) return t.pnl / notional;
+  if (notional > 0) return netPnl(t) / notional;
   return null;
 }
 
@@ -80,7 +88,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         case 'symbol':
           return a.symbol.localeCompare(b.symbol) * dir;
         case 'pnl':
-          return ((a.pnl ?? 0) - (b.pnl ?? 0)) * dir;
+          return (netPnl(a) - netPnl(b)) * dir;
         case 'duration_seconds':
           return ((a.duration_seconds ?? 0) - (b.duration_seconds ?? 0)) * dir;
         case 'closed_at':
@@ -171,7 +179,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         {/* rows */}
         <div>
           {pageRows.map(row => {
-            const pnl = row.pnl ?? 0;
+            const pnl = netPnl(row);
             const win = pnl >= 0;
             const isLong = row.side.toLowerCase() === 'long';
             const pct = pnlPct(row);
