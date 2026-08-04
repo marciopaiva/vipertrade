@@ -895,6 +895,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
             Option<f64>,
             Option<f64>,
             Option<f64>,
+            Option<String>,
             DateTime<Utc>,
         ),
     >(
@@ -913,6 +914,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                  (input_data->'signal'->>'consensus_macd_histogram')::float8 AS macd_hist,
                  (input_data->'signal'->>'current_price')::float8 AS current_price,
                  (input_data->'signal'->>'consensus_adx_14')::float8 AS consensus_adx_14,
+                 output_data->'decision'->>'reason' AS gate_reason,
                  executed_at
              FROM tupa_audit_logs
              WHERE input_data ? 'signal'
@@ -946,6 +948,7 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                         consensus_macd_histogram,
                         current_price,
                         consensus_adx_14,
+                        gate_reason,
                         executed_at,
                     )| DecisionItem {
                         symbol,
@@ -961,6 +964,11 @@ async fn decisions_handler(query: DecisionsQuery, state: Arc<AppState>) -> impl 
                         consensus_macd_histogram,
                         current_price,
                         consensus_adx_14,
+                        // Só o prefixo até `_entry_raw`: o resto é o breakdown
+                        // numérico de score, ruído para quem lê a matriz.
+                        gate_reason: gate_reason.map(|r: String| {
+                            r.split("_entry_raw").next().unwrap_or(&r).to_string()
+                        }),
                         executed_at,
                     },
                 )

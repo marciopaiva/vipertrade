@@ -36,6 +36,8 @@ export interface DecisionItem {
   consensus_macd_histogram?: number | null;
   consensus_adx_14?: number | null;
   current_price?: number | null;
+  /** Motivo cru do pipeline (ex.: `long_block_macd_cross`). */
+  gate_reason?: string | null;
   executed_at: string;
 }
 

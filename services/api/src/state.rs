@@ -189,6 +189,10 @@ pub struct DecisionItem {
     pub consensus_macd_histogram: Option<f64>,
     pub consensus_adx_14: Option<f64>,
     pub current_price: Option<f64>,
+    /// Motivo cru do pipeline (ex.: `long_block_macd_cross`). A tela remontava
+    /// o motivo a partir de %B/ADX/consenso e caía num texto genérico sempre
+    /// que o gate real era outro — MACD, volume ou regime não apareciam.
+    pub gate_reason: Option<String>,
     pub executed_at: DateTime<Utc>,
 }
 

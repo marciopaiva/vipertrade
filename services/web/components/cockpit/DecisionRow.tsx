@@ -12,6 +12,25 @@ const SHORT_PB_FLOOR = 0.15;
 const ADX_WEAK = 20;
 const ADX_STRONG = 25;
 
+/**
+ * Traduz o motivo cru do pipeline para linguagem de operador.
+ *
+ * Só os bloqueios de entrada interessam aqui: `exit_*` descreve o
+ * acompanhamento de posição aberta, não uma recusa de entrada.
+ */
+function gateLabel(t: T, raw?: string | null): string | null {
+  if (!raw) return null;
+  if (raw.includes('macd_cross')) return t('rMacd');
+  if (raw.includes('volume_24h')) return t('rVolume');
+  if (raw.includes('consensus_regime_neutral')) return t('rRegime');
+  if (raw.includes('directional_checks')) return t('rDirectional');
+  if (raw.includes('rsi')) return t('rRsi');
+  if (raw.includes('risk_constraints_not_met')) return t('rRiskGate');
+  if (raw.includes('max_open') || raw.includes('open_positions'))
+    return t('rMaxOpen');
+  return null;
+}
+
 /** Translate a consensus side label; falls back to n/a for missing values. */
 function sideLabel(t: T, side?: string | null): string {
   if (side === 'bullish') return t('sideBullish');
@@ -58,6 +77,14 @@ function explain(
     reasons.push(t('rPbShort', { pb: pb.toFixed(2), floor: SHORT_PB_FLOOR }));
   if (typeof adx === 'number' && adx < ADX_WEAK)
     reasons.push(t('rWeakTrend', { adx: adx.toFixed(0) }));
+
+  // O gate que barrou vem do backend. Reconstruir o motivo só a partir de
+  // %B/ADX/consenso escondia os demais — MACD, volume e regime respondiam pela
+  // maioria dos bloqueios e caíam num "condições não alinhadas" que não
+  // explicava nada.
+  const gate = gateLabel(t, d.gate_reason);
+  if (gate) reasons.push(gate);
+
   return {
     kind: 'hold',
     text: reasons.length
