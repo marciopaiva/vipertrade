@@ -120,6 +120,19 @@ impl StrategyConfig {
         cfg_f64(&self.global, &["risk", "max_daily_loss_pct"], 0.03)
     }
 
+    /// Janela, em horas, do contador de derrotas seguidas.
+    ///
+    /// Sem janela o gate trava para sempre: bloqueia entradas, e sem entradas
+    /// não surge a vitória que zeraria o contador.
+    pub(crate) fn consecutive_losses_window_hours(&self) -> i64 {
+        cfg_i64(
+            &self.global,
+            &["risk", "consecutive_losses_window_hours"],
+            6,
+        )
+        .clamp(1, 168)
+    }
+
     pub(crate) fn max_consecutive_losses(&self) -> i64 {
         cfg_i64(&self.global, &["risk", "max_consecutive_losses"], 3)
     }

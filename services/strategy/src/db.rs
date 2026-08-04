@@ -210,23 +210,35 @@ pub(crate) async fn fetch_current_daily_loss(
     })
 }
 
-/// Quantas derrotas seguidas desde o último trade lucrativo.
+/// Derrotas seguidas dentro de uma JANELA recente.
 ///
 /// Conta pelo resultado LÍQUIDO: um trade que ganhou no bruto e perdeu para a
 /// taxa é uma derrota, e tratá-lo como vitória zeraria a sequência justamente
 /// no caso que mais precisa ser contado.
-pub(crate) async fn fetch_consecutive_losses(pool: &PgPool) -> Result<i64, sqlx::Error> {
+///
+/// A janela existe para o bloqueio poder expirar. Contando "desde a última
+/// vitória", o gate vira uma trava permanente: ele impede entradas, e sem
+/// entradas não há como surgir a vitória que zeraria o contador — foi
+/// exatamente o que travou a operação por 14h em 2026-08-03. Com a janela, os
+/// trades antigos saem da conta e a operação retoma sozinha.
+pub(crate) async fn fetch_consecutive_losses(
+    pool: &PgPool,
+    window_hours: i64,
+) -> Result<i64, sqlx::Error> {
     let count: i64 = sqlx::query_scalar(
         "WITH ordered AS (
             SELECT (COALESCE(pnl, 0) - COALESCE(fees, 0) - COALESCE(funding_paid, 0)) AS net,
                    ROW_NUMBER() OVER (ORDER BY closed_at DESC, trade_id DESC) AS rn
             FROM trades
-            WHERE status <> 'open' AND closed_at IS NOT NULL
+            WHERE status <> 'open'
+              AND closed_at IS NOT NULL
+              AND closed_at >= NOW() - make_interval(hours => $1::int)
          )
          SELECT COALESCE(MIN(rn) - 1, (SELECT COUNT(*) FROM ordered))::bigint
          FROM ordered
          WHERE net > 0",
     )
+    .bind(window_hours as i32)
     .fetch_one(pool)
     .await?;
     Ok(count.max(0))

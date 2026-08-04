@@ -1900,13 +1900,40 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                 match fetch_current_daily_loss(pool, cached_account_equity_usdt)
                                     .await
                                 {
-                                    Ok(v) => cached_risk.daily_loss = v,
+                                    Ok(v) => {
+                                        if v >= cfg.max_daily_loss_pct() {
+                                            warn!(
+                                                daily_loss_pct = v * 100.0,
+                                                limit_pct = cfg.max_daily_loss_pct() * 100.0,
+                                                "RISK GATE: daily-loss limit reached — entries blocked until UTC midnight"
+                                            );
+                                        }
+                                        cached_risk.daily_loss = v;
+                                    }
                                     Err(err) => {
                                         warn!(err = %err, "Failed to query daily loss")
                                     }
                                 }
-                                match fetch_consecutive_losses(pool).await {
-                                    Ok(v) => cached_risk.consecutive_losses = v,
+                                match fetch_consecutive_losses(
+                                    pool,
+                                    cfg.consecutive_losses_window_hours(),
+                                )
+                                .await
+                                {
+                                    Ok(v) => {
+                                        // Em WARN: o gate barra em silêncio, e foi
+                                        // assim que 14h de operação parada passaram
+                                        // despercebidas.
+                                        if v >= cfg.max_consecutive_losses() {
+                                            warn!(
+                                                consecutive_losses = v,
+                                                limit = cfg.max_consecutive_losses(),
+                                                window_hours = cfg.consecutive_losses_window_hours(),
+                                                "RISK GATE: consecutive-loss limit reached — entries blocked until the window clears"
+                                            );
+                                        }
+                                        cached_risk.consecutive_losses = v;
+                                    }
                                     Err(err) => {
                                         warn!(err = %err, "Failed to query consecutive losses")
                                     }
@@ -2352,6 +2379,30 @@ mod tests {
         assert!(
             v > sample_cfg().max_daily_loss_pct(),
             "5% > 3% deve reprovar"
+        );
+    }
+
+    /// O gate de derrotas seguidas precisa de um caminho de VOLTA. Sem janela
+    /// ele bloqueia entradas, e sem entradas não surge a vitória que zeraria o
+    /// contador — travou a operação por 14h em 2026-08-03. Este teste garante
+    /// que a janela existe e é finita, que é o que faz o bloqueio expirar.
+    #[test]
+    fn consecutive_loss_gate_has_a_finite_recovery_window() {
+        let cfg = sample_cfg();
+        let w = cfg.consecutive_losses_window_hours();
+        assert!(w >= 1, "janela precisa existir, veio {w}");
+        assert!(w <= 168, "janela precisa ser finita, veio {w}");
+    }
+
+    /// Um limite sem janela é indistinguível de uma parada definitiva: o teste
+    /// documenta a relação entre os dois valores.
+    #[test]
+    fn consecutive_loss_limit_is_paired_with_a_window() {
+        let cfg = sample_cfg();
+        assert!(cfg.max_consecutive_losses() > 0);
+        assert!(
+            cfg.consecutive_losses_window_hours() > 0,
+            "limite sem janela trava a operação para sempre"
         );
     }
 
