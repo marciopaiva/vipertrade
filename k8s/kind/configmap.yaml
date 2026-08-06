@@ -61,6 +61,15 @@ data:
   # é a recomendada para bots; 8% fica bem acima do pior drawdown já medido
   # (2,4% no corpus de julho), então só dispara em degradação real. 0 desliga.
   EXECUTOR_MAX_DRAWDOWN_PCT: "0.08"
+  # Entrada como MAKER: posta ordem limite no lado passivo do book em vez de
+  # atravessar o spread. Economiza duas coisas — taxa (0,020% contra 0,055%) e
+  # o spread —, levando o custo de ida e volta de 0,130% para 0,040%.
+  # Medido em 7,6 dias e 11 símbolos: 84% preenchem em 5 min, e quem preenche
+  # tem MFE seguinte igual a quem entrou a mercado (0,290% vs 0,294%) — não há
+  # seleção adversa neste horizonte. A SAÍDA segue a mercado de propósito:
+  # stop e trailing existem para sair agora, não para esperar preço.
+  # 0 desliga e volta a entrar a mercado.
+  EXECUTOR_LIMIT_ENTRY_WAIT_SECS: "300"
 
   # System configuration
   HEALTH_CHECK_INTERVAL_MIN: "15"

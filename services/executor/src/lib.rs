@@ -57,6 +57,9 @@ struct ExecutorConfig {
     /// Queda máxima do equity desde o pico antes de o disjuntor parar as
     /// ENTRADAS, em fração. 0 desliga o disjuntor.
     max_drawdown_pct: f64,
+    /// Entrada como maker: posta ordem limite no book em vez de atravessar o
+    /// spread. 0 desliga e volta a entrar a mercado.
+    limit_entry_wait_secs: u64,
 }
 
 /// Só existem dois modos: simular localmente (Paper) ou operar valendo
@@ -101,6 +104,28 @@ struct ExecutorState {
     constraints_cache: Arc<Mutex<HashMap<String, (Instant, BybitSymbolConstraints)>>>,
     reconcile_daily_counts: Arc<Mutex<HashMap<String, (String, i64)>>>,
     fee_rate_cache: Arc<Mutex<HashMap<String, (Instant, BybitFeeRate)>>>,
+    /// Ordens limite aguardando preenchimento, por símbolo. Só existem em
+    /// memória de propósito: vivem no máximo alguns minutos, e uma pendente
+    /// perdida num restart é uma oportunidade perdida — não uma inconsistência
+    /// de posição.
+    pending_limit_orders: Arc<Mutex<HashMap<String, PendingLimitOrder>>>,
+}
+
+/// Ordem limite postada no book, esperando o preço vir até ela.
+///
+/// Entrar como maker economiza duas coisas: a taxa (0,020% contra 0,055%) e o
+/// spread, que a ordem a mercado atravessa. Medido em 7,6 dias e 11 símbolos:
+/// 84% preenchem em 5 minutos e o movimento seguinte é estatisticamente igual
+/// ao de quem entrou a mercado (MFE 0,290% contra 0,294%) — não há seleção
+/// adversa neste horizonte.
+#[derive(Debug, Clone)]
+struct PendingLimitOrder {
+    event: StrategyDecisionEvent,
+    idem_key: String,
+    order_id: String,
+    limit_price: f64,
+    quantity: f64,
+    posted_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,6 +193,13 @@ impl ExecutorConfig {
         // 0.08 (8%) fica na faixa que a literatura de bots recomenda (5%-10%)
         // e bem acima do pior drawdown ja observado (2,4% no corpus de julho),
         // entao so dispara em degradacao real, nao em oscilacao normal.
+        // 300s (5min): medido em 7,6 dias, 84% das ordens preenchem nessa
+        // janela. Esperar mais aumenta pouco o preenchimento e atrasa a entrada.
+        let limit_entry_wait_secs = std::env::var("EXECUTOR_LIMIT_ENTRY_WAIT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v <= 1800)
+            .unwrap_or(300);
         let max_drawdown_pct = std::env::var("EXECUTOR_MAX_DRAWDOWN_PCT")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
@@ -205,6 +237,7 @@ impl ExecutorConfig {
             fee_taker_pct,
             initial_capital_usd,
             max_drawdown_pct,
+            limit_entry_wait_secs,
         }
     }
 
@@ -703,6 +736,214 @@ fn funding_cost(notional: f64, funding_rate: f64, side: &str, events: i64) -> f6
     }
 }
 
+/// Posta uma ordem limite de entrada no lado passivo do book.
+///
+/// Compra entra no BID e venda no ASK — o oposto de atravessar. Devolve `true`
+/// quando a ordem ficou pendente; o preenchimento acontece (ou não) no tick de
+/// `resolve_pending_limit_orders`.
+async fn post_limit_entry(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    event: &StrategyDecisionEvent,
+    idem_key: &str,
+    order_id: &str,
+    quantity: f64,
+) -> Result<bool, String> {
+    let quote = match fetch_book_quote(http, cfg, &event.decision.symbol)
+        .await
+        .map_err(|e| e.to_string())
+    {
+        Ok(q) => q,
+        Err(e) => {
+            tracing::warn!(symbol = %event.decision.symbol, error = %e, "Book unavailable; cannot post limit entry");
+            return Ok(false);
+        }
+    };
+
+    // Lado passivo: comprar no bid, vender no ask.
+    let is_buy = action_is_buy(&event.decision.action);
+    let limit_price = if is_buy { quote.bid } else { quote.ask };
+    if !(limit_price.is_finite() && limit_price > 0.0) {
+        return Ok(false);
+    }
+
+    let mut pending = state.pending_limit_orders.lock().await;
+    // Uma ordem por símbolo: o strategy já garante uma posição por símbolo, e
+    // duas pendentes competindo abririam posição dupla ao preencher.
+    if pending.contains_key(&event.decision.symbol) {
+        return Ok(false);
+    }
+    pending.insert(
+        event.decision.symbol.clone(),
+        PendingLimitOrder {
+            event: event.clone(),
+            idem_key: idem_key.to_string(),
+            order_id: order_id.to_string(),
+            limit_price,
+            quantity,
+            posted_at: Instant::now(),
+        },
+    );
+
+    tracing::info!(
+        event_id = %event.event_id, symbol = %event.decision.symbol,
+        action = %event.decision.action, limit_price,
+        bid = quote.bid, ask = quote.ask,
+        wait_secs = cfg.limit_entry_wait_secs,
+        "Limit entry posted (maker) — waiting for fill"
+    );
+    Ok(true)
+}
+
+/// Preenche ou expira as ordens limite pendentes.
+///
+/// Preenche quando o book cruza o preço postado — para uma compra, quando o ASK
+/// desce até o bid onde estamos; para uma venda, quando o BID sobe até o ask.
+/// Ao preencher, cobra a taxa MAKER, que é o ponto de tudo isto.
+async fn resolve_pending_limit_orders(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+) {
+    let snapshot: Vec<PendingLimitOrder> = {
+        let pending = state.pending_limit_orders.lock().await;
+        pending.values().cloned().collect()
+    };
+    if snapshot.is_empty() {
+        return;
+    }
+
+    let wait = Duration::from_secs(cfg.limit_entry_wait_secs);
+    for order in snapshot {
+        let symbol = order.event.decision.symbol.clone();
+        let expired = order.posted_at.elapsed() >= wait;
+
+        // O erro vira String na origem: `Box<dyn Error>` não é `Send` e este
+        // trecho roda dentro de uma task spawned.
+        let quote = fetch_book_quote(http, cfg, &symbol)
+            .await
+            .map_err(|e| e.to_string());
+        let filled = match quote {
+            Ok(q) => {
+                if action_is_buy(&order.event.decision.action) {
+                    q.ask <= order.limit_price
+                } else {
+                    q.bid >= order.limit_price
+                }
+            }
+            Err(e) => {
+                tracing::warn!(symbol = %symbol, error = %e, "Book unavailable while resolving limit order");
+                false
+            }
+        };
+
+        if !filled && !expired {
+            continue;
+        }
+
+        {
+            let mut pending = state.pending_limit_orders.lock().await;
+            pending.remove(&symbol);
+        }
+
+        if !filled {
+            tracing::info!(
+                event_id = %order.event.event_id, symbol = %symbol,
+                limit_price = order.limit_price, waited_secs = order.posted_at.elapsed().as_secs(),
+                "Limit entry expired unfilled — opportunity skipped"
+            );
+            let _ = mark_processed(
+                state,
+                &order.idem_key,
+                &order.event,
+                "paper_open_limit_expired",
+                Some(&order.order_id),
+                None,
+            )
+            .await;
+            continue;
+        }
+
+        let fee = fee_for_fill(
+            order.limit_price,
+            order.quantity,
+            resolve_maker_fee_rate(state, http, cfg, &symbol).await,
+        );
+        let status = match persist_trade(
+            state,
+            &order.event,
+            &order.order_id,
+            order.quantity,
+            order.limit_price,
+            fee,
+            true,
+        )
+        .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    event_id = %order.event.event_id, symbol = %symbol,
+                    fill_price = order.limit_price, fee,
+                    waited_secs = order.posted_at.elapsed().as_secs(),
+                    "Limit entry filled (maker)"
+                );
+                "paper_open"
+            }
+            Err(e) => {
+                tracing::warn!(event_id = %order.event.event_id, error = %e, "Failed to persist limit fill");
+                "paper_open_no_persist"
+            }
+        };
+        let _ = mark_processed(
+            state,
+            &order.idem_key,
+            &order.event,
+            status,
+            Some(&order.order_id),
+            None,
+        )
+        .await;
+    }
+}
+
+/// Taxa MAKER da conta para `symbol` — cobrada quando a ordem limite preenche.
+///
+/// Mesmo cache da taker: a Bybit devolve as duas no mesmo endpoint.
+async fn resolve_maker_fee_rate(
+    state: &ExecutorState,
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+) -> f64 {
+    {
+        let cache = state.fee_rate_cache.lock().await;
+        if let Some((fetched_at, rate)) = cache.get(symbol) {
+            if fetched_at.elapsed() < FEE_RATE_CACHE_TTL {
+                return rate.maker;
+            }
+        }
+    }
+    // Erro vira String na origem: `Box<dyn Error>` não é `Send` e esta função
+    // roda dentro da task que resolve as ordens pendentes.
+    match fetch_fee_rate(http, cfg, symbol)
+        .await
+        .map_err(|e| e.to_string())
+    {
+        Ok(rate) => {
+            let mut cache = state.fee_rate_cache.lock().await;
+            cache.insert(symbol.to_string(), (Instant::now(), rate));
+            rate.maker
+        }
+        Err(e) => {
+            // Maker padrão não-VIP da Bybit é 0,02%; derivar do taker
+            // configurado manteria a proporção errada.
+            tracing::warn!(symbol = %symbol, error = %e, "Failed to fetch maker fee; using non-VIP default");
+            0.0002
+        }
+    }
+}
+
 /// Trading fee in quote currency for a fill of `qty` at `price`.
 fn fee_for_fill(price: f64, qty: f64, rate: f64) -> f64 {
     let notional = price * qty;
@@ -1088,36 +1329,64 @@ async fn handle_decision_event(
                 }
             }
 
-            let (entry_price, _) = paper_fill_price(
-                http,
-                cfg,
-                &event.decision.symbol,
-                &event.decision.action,
-                event.decision.entry_price,
-                slip_min,
-                slip_max,
-            )
-            .await;
-            let entry_fee = fee_for_fill(
-                entry_price,
-                entry_qty,
-                resolve_taker_fee_rate(state, http, cfg, &event.decision.symbol).await,
-            );
-            if let Err(e) = persist_trade(
-                state,
-                &event,
-                &paper_order_id,
-                entry_qty,
-                entry_price,
-                entry_fee,
-                true,
-            )
-            .await
-            {
-                tracing::warn!(event_id = %event.event_id, order_id = %paper_order_id, error = %e, "Failed to persist paper trade");
-                "paper_open_no_persist"
+            // Entrada como maker: posta no book em vez de atravessar o spread.
+            // A posição só nasce quando (e se) o preço vier até o limite — o
+            // tick de `resolve_pending_limit_orders` cuida disso.
+            if cfg.limit_entry_wait_secs > 0 {
+                match post_limit_entry(
+                    state,
+                    http,
+                    cfg,
+                    &event,
+                    &idem_key,
+                    &paper_order_id,
+                    entry_qty,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        // Fica pendente: NÃO marca como processado aqui, senão o
+                        // preenchimento posterior seria descartado como duplicado.
+                        return Ok(());
+                    }
+                    Ok(false) => "paper_open_limit_not_posted",
+                    Err(e) => {
+                        tracing::warn!(event_id = %event.event_id, error = %e, "Failed to post limit entry");
+                        "paper_open_limit_error"
+                    }
+                }
             } else {
-                "paper_open"
+                let (entry_price, _) = paper_fill_price(
+                    http,
+                    cfg,
+                    &event.decision.symbol,
+                    &event.decision.action,
+                    event.decision.entry_price,
+                    slip_min,
+                    slip_max,
+                )
+                .await;
+                let entry_fee = fee_for_fill(
+                    entry_price,
+                    entry_qty,
+                    resolve_taker_fee_rate(state, http, cfg, &event.decision.symbol).await,
+                );
+                if let Err(e) = persist_trade(
+                    state,
+                    &event,
+                    &paper_order_id,
+                    entry_qty,
+                    entry_price,
+                    entry_fee,
+                    true,
+                )
+                .await
+                {
+                    tracing::warn!(event_id = %event.event_id, order_id = %paper_order_id, error = %e, "Failed to persist paper trade");
+                    "paper_open_no_persist"
+                } else {
+                    "paper_open"
+                }
             }
         };
 
@@ -1348,6 +1617,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
         constraints_cache: Arc::new(Mutex::new(HashMap::new())),
         fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+        pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
         reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -1356,6 +1626,25 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_signal_tx = shutdown_tx.clone();
+
+    if cfg.limit_entry_wait_secs > 0 {
+        let state_for_limits = state.clone();
+        let cfg_for_limits = cfg.clone();
+        let http_for_limits = http.clone();
+        let mut limits_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = limits_shutdown_rx.changed() => break,
+                    // 5s: o book se move rápido e uma pendente perdida é uma
+                    // entrada perdida; consultar mais que isso não agrega.
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        resolve_pending_limit_orders(&state_for_limits, &http_for_limits, &cfg_for_limits).await;
+                    }
+                }
+            }
+        });
+    }
 
     let state_for_reconcile = state.clone();
     let cfg_for_reconcile = cfg.clone();
@@ -1605,6 +1894,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1671,6 +1961,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1735,6 +2026,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -1817,6 +2109,74 @@ mod tests {
         assert_eq!(funding_cost(notional, rate, "Long", 0), 0.0);
         assert_eq!(funding_cost(0.0, rate, "Long", 1), 0.0);
         assert_eq!(funding_cost(notional, f64::NAN, "Long", 1), 0.0);
+    }
+
+    // ── entrada maker (ordem limite) ──────────────────────────────
+    /// O lado do book é o inverso do da ordem a mercado. Trocar isto faria a
+    /// ordem atravessar o spread — pagando taker e perdendo todo o ganho.
+    #[test]
+    fn limit_entry_posts_on_the_passive_side() {
+        let quote = BookQuote {
+            bid: 99.0,
+            ask: 101.0,
+            funding_rate: 0.0,
+        };
+
+        // Compra posta no BID (passivo); a mercado pagaria o ASK.
+        let buy_limit = if action_is_buy("ENTER_LONG") {
+            quote.bid
+        } else {
+            quote.ask
+        };
+        assert_eq!(buy_limit, 99.0);
+        assert!(
+            buy_limit < quote.fill_price(true),
+            "limite tem de ser melhor que o mercado"
+        );
+
+        // Venda posta no ASK; a mercado receberia o BID.
+        let sell_limit = if action_is_buy("ENTER_SHORT") {
+            quote.bid
+        } else {
+            quote.ask
+        };
+        assert_eq!(sell_limit, 101.0);
+        assert!(sell_limit > quote.fill_price(false));
+    }
+
+    /// A ordem só preenche quando o book cruza o preço postado. Inverter a
+    /// comparação preencheria sempre — inclusive quando o preço fugiu.
+    #[test]
+    fn limit_fill_requires_the_book_to_cross_the_posted_price() {
+        let limit_buy = 99.0;
+        // Compra postada em 99: preenche quando o ASK desce até lá.
+        assert!(!(100.0 <= limit_buy), "ask acima do limite não preenche");
+        assert!(99.0 <= limit_buy, "ask no limite preenche");
+        assert!(98.5 <= limit_buy, "ask abaixo do limite preenche");
+
+        let limit_sell = 101.0;
+        // Venda postada em 101: preenche quando o BID sobe até lá.
+        assert!(!(100.0 >= limit_sell), "bid abaixo do limite não preenche");
+        assert!(101.0 >= limit_sell, "bid no limite preenche");
+        assert!(101.5 >= limit_sell, "bid acima do limite preenche");
+    }
+
+    /// A taxa maker tem de ser menor que a taker — é a razão de existir da
+    /// entrada limite. Se as duas viessem iguais, a mudança seria só risco.
+    #[test]
+    fn maker_fee_is_cheaper_than_taker() {
+        let rate = BybitFeeRate {
+            maker: 0.0002,
+            taker: 0.00055,
+        };
+        assert!(rate.maker < rate.taker);
+        let qty = 10.0;
+        let price = 100.0;
+        let saved = fee_for_fill(price, qty, rate.taker) - fee_for_fill(price, qty, rate.maker);
+        assert!(
+            (saved - 0.35).abs() < 1e-9,
+            "economia por perna, veio {saved}"
+        );
     }
 
     #[test]
@@ -2038,6 +2398,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2134,6 +2495,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2257,6 +2619,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2329,6 +2692,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2395,6 +2759,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2489,6 +2854,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2546,6 +2912,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2619,6 +2986,7 @@ mod tests {
             fee_taker_pct: 0.00055,
             initial_capital_usd: 100.0,
             max_drawdown_pct: 0.08,
+            limit_entry_wait_secs: 300,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -2627,6 +2995,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2721,6 +3090,7 @@ mod tests {
             fee_taker_pct: 0.00055,
             initial_capital_usd: 100.0,
             max_drawdown_pct: 0.08,
+            limit_entry_wait_secs: 300,
             trading_profile: "MEDIUM".to_string(),
         };
 
@@ -2729,6 +3099,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -2800,6 +3171,7 @@ mod tests {
             processed_in_memory: Arc::new(Mutex::new(HashSet::new())),
             constraints_cache: Arc::new(Mutex::new(HashMap::new())),
             fee_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_limit_orders: Arc::new(Mutex::new(HashMap::new())),
             reconcile_daily_counts: Arc::new(Mutex::new(HashMap::new())),
         };
 
