@@ -18,6 +18,33 @@ use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, HashMap};
 use viper_domain::MarketSignal;
 
+/// Custo de ida e volta de uma posição, em unidades de cotação.
+///
+/// Espelha o que o executor cobra de verdade: entrada como MAKER (ordem limite
+/// postada no book, sem atravessar o spread) e saída como TAKER (stop e
+/// trailing precisam sair a mercado, e atravessam meio spread).
+///
+/// Até 2026-08-06 o backtest não descontava NADA — nem taxa, nem spread. Era o
+/// mesmo buraco que o paper tinha, e que fez o profit factor do corpus de julho
+/// parecer 0,634 quando era 0,153. Um backtest sem custo seleciona hipóteses
+/// que não sobrevivem ao mundo real, e faz isso rápido.
+fn round_trip_cost(
+    entry_price: f64,
+    exit_price: f64,
+    qty: f64,
+    cfg: &StrategyConfig,
+    spread_pct: f64,
+) -> f64 {
+    if !(entry_price.is_finite() && exit_price.is_finite() && qty > 0.0) {
+        return 0.0;
+    }
+    let entry_fee = entry_price * qty * cfg.fee_maker_pct();
+    let exit_fee = exit_price * qty * cfg.fee_taker_pct();
+    // A saída atravessa meio spread (do mid até o lado passivo oposto).
+    let spread_cost = exit_price * qty * (spread_pct.max(0.0) / 2.0);
+    entry_fee + exit_fee + spread_cost
+}
+
 /// One replay tick: a timestamped market input for a single symbol.
 pub struct Tick {
     pub ts: DateTime<Utc>,
@@ -32,7 +59,12 @@ pub struct BacktestReport {
     pub ticks: usize,
     pub opened: usize,
     pub closed: usize,
+    /// Resultado LÍQUIDO — já descontados taxa e spread.
     pub net_pnl: f64,
+    /// Bruto, antes de custo. A diferença para `net_pnl` é o que o backtest
+    /// ignorava antes.
+    pub gross_pnl: f64,
+    pub total_cost: f64,
     pub wins: usize,
     pub losses: usize,
     /// close_reason -> (count, net pnl)
@@ -58,6 +90,17 @@ fn tick_price(input: &StrategyInput) -> f64 {
         .signal
         .get("current_price")
         .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+}
+
+/// Spread do tick, em fração. Ausente vira 0 — não inventar custo é melhor que
+/// inventar o errado, e o registro antigo do corpus pode não ter o campo.
+fn tick_spread(input: &StrategyInput) -> f64 {
+    input
+        .signal
+        .get("spread_pct")
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.05)
         .unwrap_or(0.0)
 }
 
@@ -112,7 +155,11 @@ pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
             };
 
             if let Some(reason) = close_reason {
-                let pnl = realized_pnl(&p_side, p_entry, price, p_qty);
+                let gross = realized_pnl(&p_side, p_entry, price, p_qty);
+                let cost = round_trip_cost(p_entry, price, p_qty, cfg, tick_spread(&t.input));
+                let pnl = gross - cost;
+                rep.gross_pnl += gross;
+                rep.total_cost += cost;
                 rep.closed += 1;
                 rep.net_pnl += pnl;
                 if pnl > 0.0 {
@@ -380,6 +427,45 @@ mod tests {
         assert!((realized_pnl("Long", 100.0, 110.0, 2.0) - 20.0).abs() < 1e-9);
         assert!((realized_pnl("Short", 100.0, 90.0, 2.0) - 20.0).abs() < 1e-9);
         assert!((realized_pnl("Long", 100.0, 90.0, 2.0) + 20.0).abs() < 1e-9);
+    }
+
+    /// O backtest ignorou custo até 2026-08-06 e por isso selecionava hipóteses
+    /// que não sobrevivem ao mundo real — o mesmo buraco que fez o corpus de
+    /// julho parecer profit factor 0,634 quando era 0,153.
+    #[test]
+    fn round_trip_cost_charges_both_legs_and_the_spread() {
+        let cfg = StrategyConfig::sample_for_tests();
+        // 10 unidades a 100 na entrada e 110 na saída, spread de 0,02%.
+        let c = round_trip_cost(100.0, 110.0, 10.0, &cfg, 0.0002);
+        // maker na entrada: 1000 * 0,0002 = 0,20
+        // taker na saída:   1100 * 0,00055 = 0,605
+        // meio spread:      1100 * 0,0001 = 0,11
+        assert!((c - 0.915).abs() < 1e-9, "custo esperado 0,915, veio {c}");
+        assert!(c > 0.0, "custo nunca pode ser zero com taxa configurada");
+    }
+
+    /// A entrada é maker e a saída é taker — cobrar taker nas duas pernas
+    /// superestimaria o custo e reprovaria hipóteses boas.
+    #[test]
+    fn entry_leg_is_cheaper_than_exit_leg() {
+        let cfg = StrategyConfig::sample_for_tests();
+        assert!(
+            cfg.fee_maker_pct() < cfg.fee_taker_pct(),
+            "maker tem de ser mais barato que taker"
+        );
+        // Sem spread, a diferença entre as pernas é só a taxa.
+        let c = round_trip_cost(100.0, 100.0, 1.0, &cfg, 0.0);
+        let so_taker = 100.0 * 2.0 * cfg.fee_taker_pct();
+        assert!(c < so_taker, "entrada maker tem de baratear o round-trip");
+    }
+
+    #[test]
+    fn round_trip_cost_ignores_nonsense_inputs() {
+        let cfg = StrategyConfig::sample_for_tests();
+        assert_eq!(round_trip_cost(100.0, 110.0, 0.0, &cfg, 0.0002), 0.0);
+        assert_eq!(round_trip_cost(f64::NAN, 110.0, 10.0, &cfg, 0.0002), 0.0);
+        // Spread negativo não pode virar crédito.
+        assert!(round_trip_cost(100.0, 100.0, 1.0, &cfg, -0.5) > 0.0);
     }
 
     #[test]

@@ -660,6 +660,16 @@ impl StrategyConfig {
             .unwrap_or(0.00055)
     }
 
+    /// Taxa MAKER por perna, em FRAÇÃO (0.0002 == 0,020%).
+    ///
+    /// Cobrada na entrada, que é postada no book como ordem limite. Só a saída
+    /// paga taker, porque stop e trailing precisam sair a mercado.
+    pub(crate) fn fee_maker_pct(&self) -> f64 {
+        self.mode_f64("fee_maker_pct")
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 0.01)
+            .unwrap_or(0.0002)
+    }
+
     /// Total cost of a full position round-trip (entry + exit), as a fraction.
     ///
     /// Both legs are market orders, so both pay taker. This is the minimum move

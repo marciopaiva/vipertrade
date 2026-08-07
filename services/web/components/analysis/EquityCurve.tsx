@@ -1,5 +1,6 @@
 'use client';
 
+import { netPnl } from '@/lib/pnl';
 import { useMemo } from 'react';
 import {
   Area,
@@ -22,7 +23,9 @@ type T = ReturnType<typeof useT<'console'>>;
 
 interface Point {
   i: number;
+  /** Patrimônio acumulado, líquido de taxa e funding. */
   cum: number;
+  /** Resultado do trade JÁ LÍQUIDO — preenchido com netPnl(), não com t.pnl. */
   pnl: number;
   symbol: string;
   side: string;
@@ -110,14 +113,14 @@ export function EquityCurve() {
     let lo = 0;
     for (let i = 0; i < closed.length; i++) {
       const t = closed[i];
-      cum += t.pnl ?? 0;
+      cum += netPnl(t);
       hi = Math.max(hi, cum);
       lo = Math.min(lo, cum);
       const d = new Date(t.closed_at || t.opened_at);
       pts.push({
         i,
         cum: Number(cum.toFixed(4)),
-        pnl: t.pnl ?? 0,
+        pnl: netPnl(t),
         symbol: t.symbol,
         side: t.side,
         reason: t.close_reason || 'closed',

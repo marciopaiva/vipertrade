@@ -1,5 +1,6 @@
 'use client';
 
+import { netPnl } from '@/lib/pnl';
 import { useEffect, useMemo, useState } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useDecisions } from '@/hooks/useDecisions';
@@ -98,7 +99,7 @@ export default function CommandDeckPage() {
     let running = 0;
     const points = [0];
     for (const tr of closed) {
-      running += tr.pnl ?? 0;
+      running += netPnl(tr);
       points.push(running);
     }
     return points;

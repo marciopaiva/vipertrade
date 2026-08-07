@@ -1318,9 +1318,13 @@ async fn symbol_pnl_handler(query: SymbolPnlQuery, state: Arc<AppState>) -> impl
     let rows = sqlx::query_as::<_, (String, f64, i64, i64, f64)>(
         "SELECT
              symbol,
-             COALESCE(SUM(pnl), 0)::double precision AS realized_pnl,
+             COALESCE(SUM(
+                 COALESCE(pnl,0) - COALESCE(fees,0) - COALESCE(funding_paid,0)
+             ), 0)::double precision AS realized_pnl,
              COUNT(*)::bigint AS trades,
-             COUNT(*) FILTER (WHERE pnl > 0)::bigint AS wins,
+             COUNT(*) FILTER (
+                 WHERE COALESCE(pnl,0) - COALESCE(fees,0) - COALESCE(funding_paid,0) > 0
+             )::bigint AS wins,
              COALESCE(AVG(pnl_pct), 0)::double precision AS avg_pnl_pct
          FROM trades
          WHERE status = 'closed'
@@ -1379,10 +1383,17 @@ async fn fetch_window_between(
     paper_only: bool,
 ) -> Result<PerformanceWindow, sqlx::Error> {
     let row = sqlx::query_as::<_, (i64, i64, f64)>(
+        // Líquido de taxa e funding: `pnl` é BRUTO, e com posição de ~$8 a taxa
+        // chega a superar o ganho — somar o bruto marca como vitória um trade
+        // que perdeu dinheiro.
         "SELECT
              COUNT(*)::bigint,
-             COUNT(*) FILTER (WHERE COALESCE(pnl, 0) > 0)::bigint,
-             COALESCE(SUM(COALESCE(pnl, 0))::double precision, 0)
+             COUNT(*) FILTER (
+                 WHERE COALESCE(pnl,0) - COALESCE(fees,0) - COALESCE(funding_paid,0) > 0
+             )::bigint,
+             COALESCE(SUM(
+                 COALESCE(pnl,0) - COALESCE(fees,0) - COALESCE(funding_paid,0)
+             )::double precision, 0)
          FROM trades
          WHERE status = 'closed'
            AND (NOT $3 OR paper_trade = TRUE)
@@ -1590,7 +1601,9 @@ async fn risk_kpis_handler(state: Arc<AppState>) -> impl Reply {
     .unwrap_or(0.0);
 
     let realized_pnl_24h = sqlx::query_scalar::<_, Option<f64>>(
-        "SELECT COALESCE(SUM(COALESCE(pnl, 0))::double precision, 0)
+        "SELECT COALESCE(SUM(
+             COALESCE(pnl,0) - COALESCE(fees,0) - COALESCE(funding_paid,0)
+         )::double precision, 0)
          FROM trades
          WHERE status = 'closed'
            AND paper_trade = TRUE

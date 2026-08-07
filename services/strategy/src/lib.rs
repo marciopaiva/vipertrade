@@ -22,6 +22,7 @@ use viper_domain::{
 
 pub mod backtest;
 mod helpers;
+pub mod swing;
 mod thesis;
 mod types;
 

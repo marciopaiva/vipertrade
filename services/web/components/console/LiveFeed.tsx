@@ -1,5 +1,6 @@
 'use client';
 
+import { netPnl } from '@/lib/pnl';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useT, useLocale, formatUsd } from '@/lib/i18n';
 import { reasonLabel } from '@/components/trades/reasonLabel';
@@ -34,7 +35,7 @@ export function LiveFeed() {
   return (
     <ul className="space-y-1.5 font-mono text-xs tabular-nums">
       {fills.map(f => {
-        const win = (f.pnl ?? 0) >= 0;
+        const win = netPnl(f) > 0;
         const d = new Date(f.closed_at || f.opened_at);
         const time = Number.isNaN(d.getTime())
           ? '—'
@@ -58,7 +59,7 @@ export function LiveFeed() {
                   : 'shrink-0 text-destructive hud-glow-danger'
               }
             >
-              {formatUsd(locale, f.pnl ?? 0)}
+              {formatUsd(locale, netPnl(f))}
             </span>
           </li>
         );

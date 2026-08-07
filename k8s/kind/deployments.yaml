@@ -153,6 +153,9 @@ spec:
           initialDelaySeconds: 45
           periodSeconds: 20
         volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         - name: logs
           mountPath: /app/logs
         - name: tupa-cache
@@ -168,6 +171,9 @@ spec:
         - name: VIPER_ROLE
           value: strategy
       volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
       - name: logs
         emptyDir: {}
       - name: tupa-cache
@@ -218,6 +224,10 @@ spec:
             port: 8083
           initialDelaySeconds: 45
           periodSeconds: 20
+        volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         command:
         - wait-for-deps.sh
         - postgres:5432
@@ -228,6 +238,10 @@ spec:
         env:
         - name: VIPER_ROLE
           value: executor
+      volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -329,6 +343,9 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 20
         volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         - name: logs
           mountPath: /app/logs
         command:
@@ -341,6 +358,9 @@ spec:
         - name: VIPER_ROLE
           value: api
       volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
       - name: logs
         emptyDir: {}
 ---
@@ -393,6 +413,10 @@ spec:
             port: 8087
           initialDelaySeconds: 30
           periodSeconds: 20
+        volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         command:
         - wait-for-deps.sh
         - postgres:5432
@@ -401,6 +425,10 @@ spec:
         env:
         - name: VIPER_ROLE
           value: ai-analyst
+      volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
 ---
 apiVersion: apps/v1
 kind: Deployment
