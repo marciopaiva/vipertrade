@@ -1,6 +1,7 @@
 pub(crate) mod consensus;
 pub(crate) mod exchanges;
 pub(crate) mod indicators;
+pub(crate) mod swing_feed;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -165,6 +166,38 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .timeout(Duration::from_secs(8))
         .user_agent("vipertrade-market-data/0.8")
         .build()?;
+
+    // Coleta de 4H para a estratégia de swing, em cadência própria (5min) —
+    // uma vela de 4 horas não muda a cada 5 segundos como o fluxo principal.
+    let swing_http = http.clone();
+    let swing_universe = universe.clone();
+    let swing_base = base_url.clone();
+    let swing_redis = redis_url.clone();
+    let mut swing_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        let client = match redis::Client::open(swing_redis) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "Swing feed: failed to open Redis");
+                return;
+            }
+        };
+        let mut conn = match client.get_multiplexed_async_connection().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "Swing feed: failed to connect to Redis");
+                return;
+            }
+        };
+        loop {
+            swing_feed::collect_and_publish(&swing_http, &mut conn, &swing_base, &swing_universe)
+                .await;
+            tokio::select! {
+                _ = swing_shutdown.changed() => break,
+                _ = tokio::time::sleep(Duration::from_secs(swing_feed::SWING_POLL_SECS)) => {}
+            }
+        }
+    });
 
     loop {
         if *shutdown_rx.borrow() {

@@ -16,6 +16,10 @@ pub const REDIS_STREAM_MARKET_DATA: &str = "viper:market_data";
 pub const REDIS_STREAM_DECISIONS: &str = "viper:decisions";
 pub const REDIS_STREAM_EXECUTOR_EVENTS: &str = "viper:executor_events";
 pub const REDIS_STREAM_CONTROL_EVENTS: &str = "viper:control_events";
+/// Velas de 4H para a estratégia de swing. Stream separado de propósito: a
+/// cadência é outra (minutos contra segundos) e o consumidor é outro, então
+/// misturar com `market_data` faria um lado esperar pelo outro.
+pub const REDIS_STREAM_SWING_CANDLES: &str = "viper:swing_candles";
 
 pub const STREAM_GROUP_STRATEGY: &str = "strategy";
 pub const STREAM_GROUP_EXECUTOR: &str = "executor";
@@ -325,6 +329,66 @@ impl MarketSignal {
             return Err("market signal bearish_exchanges must be >= 0".to_string());
         }
 
+        Ok(())
+    }
+}
+
+/// Vela OHLCV. Diferente do `Candle` interno do market-data, esta carrega
+/// `open` — martelo e engolfo dependem dele.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct OhlcCandle {
+    pub open_time_ms: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: f64,
+}
+
+/// Série de velas de 4H de um símbolo, publicada pelo market-data.
+///
+/// Carrega a série inteira em vez de indicadores calculados porque quem decide
+/// é o strategy: se o market-data publicasse EMA e fundo estrutural, mudar um
+/// parâmetro da estratégia exigiria mexer no serviço de coleta.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwingCandlesEvent {
+    pub schema_version: String,
+    pub event_id: String,
+    pub timestamp: String,
+    pub symbol: String,
+    pub interval: String,
+    pub candles: Vec<OhlcCandle>,
+}
+
+impl SwingCandlesEvent {
+    pub fn new(symbol: String, interval: String, candles: Vec<OhlcCandle>) -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION.to_string(),
+            event_id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            symbol,
+            interval,
+            candles,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.symbol.trim().is_empty() {
+            return Err("swing candles event requires a symbol".to_string());
+        }
+        if self.candles.is_empty() {
+            return Err("swing candles event requires at least one candle".to_string());
+        }
+        if let Some(bad) = self
+            .candles
+            .iter()
+            .find(|c| !(c.close.is_finite() && c.close > 0.0))
+        {
+            return Err(format!(
+                "swing candle has invalid close at {}",
+                bad.open_time_ms
+            ));
+        }
         Ok(())
     }
 }
