@@ -131,6 +131,10 @@ pub struct SymbolPnlResponse {
 
 #[derive(Serialize)]
 pub struct PositionItem {
+    /// Família da estratégia: `scalp` (trailing dinâmico) ou `swing` (stop e
+    /// alvo fixos). A tela precisa saber para não exibir TP-ARM e pico, que só
+    /// existem no scalp.
+    pub strategy_kind: String,
     pub trade_id: String,
     pub symbol: String,
     pub side: String,

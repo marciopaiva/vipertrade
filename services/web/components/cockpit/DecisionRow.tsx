@@ -20,6 +20,11 @@ const ADX_STRONG = 25;
  */
 function gateLabel(t: T, raw?: string | null): string | null {
   if (!raw) return null;
+  // `decision_pending_runtime` não é um bloqueio de mercado: é o pipeline
+  // avisando que o runtime de scalp está desligado. Sem este caso a linha cai no
+  // texto padrão e afirma "condições não alinhadas", descrevendo uma avaliação
+  // que nunca aconteceu.
+  if (raw.includes('decision_pending_runtime')) return t('rRuntimeOff');
   if (raw.includes('macd_cross')) return t('rMacd');
   if (raw.includes('volume_24h')) return t('rVolume');
   if (raw.includes('consensus_regime_neutral')) return t('rRegime');

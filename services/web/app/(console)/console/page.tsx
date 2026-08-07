@@ -18,6 +18,7 @@ import { EquityCurve } from '@/components/analysis/EquityCurve';
 import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
 
 interface PositionItem {
+  strategy_kind?: string;
   trade_id: string;
   symbol: string;
   side: string;

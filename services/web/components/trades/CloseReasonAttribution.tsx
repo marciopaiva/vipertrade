@@ -15,8 +15,9 @@ interface ReasonStat {
 }
 
 /**
- * PnL attribution by close-reason — the lesson the backtest taught us, made
- * visible: trailing tends to be the edge, thesis/stop the bleed. Cards are
+ * PnL attribution by close-reason — which exits pay and which bleed, made
+ * visible. The reasons come from the data, so it adapts to whichever family is
+ * running (scalp trails and invalidates; swing stops or hits target). Cards are
  * clickable to filter the ledger to that reason. Magnitude bars are scaled to
  * the largest |net| so the dominant contributor reads at a glance.
  */

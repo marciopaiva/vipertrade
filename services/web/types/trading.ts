@@ -42,6 +42,8 @@ export interface DecisionItem {
 }
 
 export interface Position {
+  /** `scalp` (trailing dinâmico) ou `swing` (stop e alvo fixos). */
+  strategy_kind?: string;
   trade_id: string;
   symbol: string;
   side: 'Long' | 'Short';

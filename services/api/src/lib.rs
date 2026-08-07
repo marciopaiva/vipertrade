@@ -592,6 +592,9 @@ async fn build_paper_positions_response(state: Arc<AppState>) -> warp::reply::Wi
             bool,
             Option<f64>,
             Option<f64>,
+            String,
+            Option<f64>,
+            Option<f64>,
         ),
     >(
         "SELECT
@@ -603,7 +606,10 @@ async fn build_paper_positions_response(state: Arc<AppState>) -> warp::reply::Wi
              opened_at,
              COALESCE(trailing_stop_activated, false),
              trailing_stop_peak_price::double precision,
-             trailing_stop_final_distance_pct::double precision
+             trailing_stop_final_distance_pct::double precision,
+             COALESCE(strategy_kind, 'scalp'),
+             planned_stop_price::double precision,
+             planned_target_price::double precision
          FROM trades
          WHERE status = 'open'
            AND paper_trade = TRUE
@@ -627,20 +633,34 @@ async fn build_paper_positions_response(state: Arc<AppState>) -> warp::reply::Wi
                         trailing_stop_activated,
                         trailing_stop_peak_price,
                         trailing_stop_final_distance_pct,
+                        strategy_kind,
+                        planned_stop_price,
+                        planned_target_price,
                     )| {
                         let entry_price = if quantity > 0.0 {
                             notional_usdt / quantity
                         } else {
                             0.0
                         };
+                        // Posição de swing tem stop e alvo REAIS, gravados na
+                        // entrada. Derivá-los da config como no scalp mostraria
+                        // um stop de 1% quando o real é estrutural — foi o que
+                        // a tela exibiu para a primeira posição: 8,1378 em vez
+                        // de 8,0207.
+                        let is_swing = strategy_kind == "swing";
                         let (
                             stop_loss_price,
                             trailing_activation_price,
                             fixed_take_profit_price,
                             break_even_price,
-                        ) = resolve_position_triggers(state.as_ref(), &symbol, &side, entry_price);
+                        ) = if is_swing {
+                            (planned_stop_price, None, planned_target_price, None)
+                        } else {
+                            resolve_position_triggers(state.as_ref(), &symbol, &side, entry_price)
+                        };
 
                         PositionItem {
+                            strategy_kind,
                             trade_id,
                             symbol,
                             side,
@@ -1121,7 +1141,10 @@ struct CloseReasonStat {
 
 #[derive(Serialize)]
 struct FollowThroughStat {
-    armed: bool,
+    /// O trade chegou a ficar no lucro LÍQUIDO em algum momento (MFE cobriu o
+    /// custo de ida e volta). Substituiu `armed` (trailing armado), que só
+    /// existia no scalp e ficaria sempre falso no swing.
+    advanced: bool,
     trades: i64,
     net_pnl: f64,
     wins: i64,
@@ -1150,8 +1173,9 @@ struct TradeQualityResponse {
 
 // LIVE trade-quality metrics over realized (closed, paper) trades — NOT a backtest.
 // Surfaces the diagnostics we actually validate by: close-reason attribution, entry
-// follow-through (did the trade reach profit and arm the trail, or die flat?), and
-// how much of the peak the trailing stop captured. Feeds the /analysis "Ao Vivo" tab.
+// follow-through (did the trade ever reach net profit, or die stillborn?), and — only
+// for scalp, which is the family that trails — how much of the peak the trail captured.
+// Every aggregate is NET of fees and funding. Feeds the /analysis "Ao Vivo" tab.
 async fn trade_quality_handler(query: TradeQualityQuery, state: Arc<AppState>) -> impl Reply {
     let Some(pool) = &state.db_pool else {
         return json_err(
@@ -1164,25 +1188,36 @@ async fn trade_quality_handler(query: TradeQualityQuery, state: Arc<AppState>) -
 
     // 1) close-reason attribution (and overall is derived from it).
     let by_reason = sqlx::query_as::<_, (Option<String>, i64, f64, i64, f64)>(
-        "SELECT close_reason, COUNT(*)::bigint, COALESCE(SUM(pnl),0)::double precision,
-                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
-         FROM trades
-         WHERE status='closed' AND paper_trade = TRUE
-           AND closed_at >= NOW() - make_interval(days => $1::int)
-         GROUP BY close_reason ORDER BY SUM(pnl) ASC",
+        "WITH t AS (SELECT close_reason, net_pnl, net_pnl_pct FROM trade_net
+                    WHERE closed_at >= NOW() - make_interval(days => $1::int))
+         SELECT close_reason, COUNT(*)::bigint, COALESCE(SUM(net_pnl),0)::double precision,
+                COUNT(*) FILTER (WHERE net_pnl > 0)::bigint,
+                COALESCE(AVG(net_pnl_pct),0)::double precision
+         FROM t GROUP BY close_reason ORDER BY SUM(net_pnl) ASC",
     )
     .bind(days as i32)
     .fetch_all(pool)
     .await;
 
-    // 2) entry follow-through: armed the trailing vs never (died flat/negative).
+    // 2) entry follow-through: a entrada avançou ou morreu natimorta?
+    //
+    // Antes isto agrupava por `trailing_stop_activated`. Essa coluna só é
+    // escrita pelo scalp — no swing ficaria falsa em 100% dos trades, e o painel
+    // reportaria "nenhuma entrada engatou" para uma família que nem usa trilha.
+    // O critério equivalente e universal é a EXCURSÃO: o MFE chegou a cobrir o
+    // custo de ida e volta do próprio trade? Se não, o trade nunca esteve no
+    // lucro líquido — é natimorto, qualquer que seja a família.
     let follow = sqlx::query_as::<_, (Option<bool>, i64, f64, i64, f64)>(
-        "SELECT trailing_stop_activated, COUNT(*)::bigint, COALESCE(SUM(pnl),0)::double precision,
-                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
-         FROM trades
-         WHERE status='closed' AND paper_trade = TRUE
-           AND closed_at >= NOW() - make_interval(days => $1::int)
-         GROUP BY trailing_stop_activated ORDER BY trailing_stop_activated",
+        "WITH t AS (
+            SELECT net_pnl, net_pnl_pct,
+                   COALESCE(mfe_pct,0) >= CASE WHEN notional > 0
+                       THEN cost / notional * 100 ELSE 0 END AS advanced
+            FROM trade_net
+            WHERE closed_at >= NOW() - make_interval(days => $1::int))
+         SELECT advanced, COUNT(*)::bigint, COALESCE(SUM(net_pnl),0)::double precision,
+                COUNT(*) FILTER (WHERE net_pnl > 0)::bigint,
+                COALESCE(AVG(net_pnl_pct),0)::double precision
+         FROM t GROUP BY advanced ORDER BY advanced",
     )
     .bind(days as i32)
     .fetch_all(pool)
@@ -1207,12 +1242,12 @@ async fn trade_quality_handler(query: TradeQualityQuery, state: Arc<AppState>) -
 
     // 4) worst symbols (reuses the by-symbol ranking, windowed).
     let symbols = sqlx::query_as::<_, (String, f64, i64, i64, f64)>(
-        "SELECT symbol, COALESCE(SUM(pnl),0)::double precision, COUNT(*)::bigint,
-                COUNT(*) FILTER (WHERE pnl > 0)::bigint, COALESCE(AVG(pnl_pct),0)::double precision
-         FROM trades
-         WHERE status='closed' AND paper_trade = TRUE
-           AND closed_at >= NOW() - make_interval(days => $1::int)
-         GROUP BY symbol ORDER BY SUM(pnl) ASC LIMIT 12",
+        "WITH t AS (SELECT symbol, net_pnl, net_pnl_pct FROM trade_net
+                    WHERE closed_at >= NOW() - make_interval(days => $1::int))
+         SELECT symbol, COALESCE(SUM(net_pnl),0)::double precision, COUNT(*)::bigint,
+                COUNT(*) FILTER (WHERE net_pnl > 0)::bigint,
+                COALESCE(AVG(net_pnl_pct),0)::double precision
+         FROM t GROUP BY symbol ORDER BY SUM(net_pnl) ASC LIMIT 12",
     )
     .bind(days as i32)
     .fetch_all(pool)
@@ -1248,8 +1283,8 @@ async fn trade_quality_handler(query: TradeQualityQuery, state: Arc<AppState>) -
 
     let follow_through: Vec<FollowThroughStat> = follow
         .into_iter()
-        .map(|(armed, trades, net, w, avg)| FollowThroughStat {
-            armed: armed.unwrap_or(false),
+        .map(|(advanced, trades, net, w, avg)| FollowThroughStat {
+            advanced: advanced.unwrap_or(false),
             trades,
             net_pnl: round6(net),
             wins: w,
@@ -2167,6 +2202,9 @@ fn build_position_item_from_bybit(state: &AppState, item: &Value) -> Option<Posi
         resolve_position_triggers(state, &symbol, &side, entry_price);
 
     Some(PositionItem {
+        // Posição vinda da corretora (mainnet): a família não é rastreada lá,
+        // e o paper é quem carrega essa distinção.
+        strategy_kind: "scalp".to_string(),
         trade_id: item
             .get("positionIdx")
             .and_then(|value| value.as_i64())

@@ -19,6 +19,8 @@ interface MarketSignal {
 }
 
 interface Position {
+  /** `scalp` (trailing dinâmico) ou `swing` (stop e alvo fixos). */
+  strategy_kind?: string;
   trade_id: string;
   symbol: string;
   side: string;
@@ -26,6 +28,7 @@ interface Position {
   notional_usdt: number;
   entry_price: number;
   stop_loss_price?: number | null;
+  fixed_take_profit_price?: number | null;
   trailing_stop_activated?: boolean;
   trailing_stop_peak_price?: number | null;
   trailing_stop_final_distance_pct?: number | null;
@@ -57,7 +60,12 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
     p.entry_price || (p.quantity > 0 ? p.notional_usdt / p.quantity : 0);
   const mark = signal?.bybit_price ?? signal?.current_price ?? entry;
 
-  const trailing = Boolean(p.trailing_stop_activated);
+  // No swing o stop é fixo e definido na entrada; TP-ARM, pico e trilha são
+  // conceitos de trailing e não existem. Exibi-los mostrava números derivados
+  // da config do scalp — a primeira posição swing apareceu com stop de 8,1378
+  // quando o real era 8,0207.
+  const isSwing = p.strategy_kind === 'swing';
+  const trailing = !isSwing && Boolean(p.trailing_stop_activated);
   const stop =
     trailing &&
     typeof p.trailing_stop_peak_price === 'number' &&
@@ -70,8 +78,12 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
         : isLong
           ? entry * 0.988
           : entry * 1.012;
-  const peak =
-    typeof p.trailing_stop_peak_price === 'number'
+  // A ponta direita da trilha: no swing é o ALVO fixo (para onde a posição vai
+  // se a tese se confirmar); no scalp é o pico já alcançado, porque lá não há
+  // alvo — quem define a saída é a trilha que segue o preço.
+  const peak = isSwing
+    ? (p.fixed_take_profit_price ?? (isLong ? Math.max(mark, entry) : Math.min(mark, entry)))
+    : typeof p.trailing_stop_peak_price === 'number'
       ? p.trailing_stop_peak_price
       : isLong
         ? Math.max(mark, entry)
@@ -281,7 +293,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
           />
         </div>
         <span className="w-10 shrink-0 text-3xs uppercase tracking-wide text-muted-foreground/70">
-          {t('peak')}
+          {isSwing ? t('target') : t('peak')}
         </span>
       </div>
 
@@ -295,7 +307,7 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
         />
         {tpTrigger !== null && (
           <Stat
-            label={t('tpArm')}
+            label={isSwing ? t('target') : t('tpArm')}
             value={formatPrice(locale, tpTrigger)}
             tpFlag
           />

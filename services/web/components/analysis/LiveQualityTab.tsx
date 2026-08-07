@@ -23,7 +23,8 @@ type CloseReasonStat = {
   avg_pnl_pct: number;
 };
 type FollowThroughStat = {
-  armed: boolean;
+  /** O MFE do trade chegou a cobrir o custo de ida e volta. */
+  advanced: boolean;
   trades: number;
   net_pnl: number;
   wins: number;
@@ -72,9 +73,13 @@ export default function LiveQualityTab() {
     { refreshInterval: 30000 }
   );
 
-  const armed = data?.follow_through.find(f => f.armed);
-  const notArmed = data?.follow_through.find(f => !f.armed);
+  const advanced = data?.follow_through.find(f => f.advanced);
+  const stillborn = data?.follow_through.find(f => !f.advanced);
+  // Captura de pico só existe onde há trailing: no swing a saída é alvo fixo e
+  // `trailing_exits` fica em zero. Mostrar "0,0% do pico capturado" leria como
+  // desempenho péssimo em vez de métrica inaplicável.
   const cap = data?.peak_capture;
+  const hasTrailing = (cap?.trailing_exits ?? 0) > 0;
 
   return (
     <div className="space-y-5">
@@ -128,10 +133,12 @@ export default function LiveQualityTab() {
             <Kpi
               label={t('kpiCapture')}
               value={
-                cap ? `${formatNumber(locale, cap.pct_captured, 1)}%` : '—'
+                hasTrailing && cap
+                  ? `${formatNumber(locale, cap.pct_captured, 1)}%`
+                  : '—'
               }
               tone={
-                cap && cap.pct_captured >= 50
+                hasTrailing && cap && cap.pct_captured >= 50
                   ? 'text-accent'
                   : 'text-foreground'
               }
@@ -140,19 +147,19 @@ export default function LiveQualityTab() {
 
           <SectionCard title={t('followTitle')}>
             <div className="grid gap-3 sm:grid-cols-2">
-              {[armed, notArmed].map((f, i) =>
+              {[advanced, stillborn].map((f, i) =>
                 f ? (
                   <div
                     key={i}
                     className={cn(
                       'rounded-lg border p-3',
-                      f.armed
+                      f.advanced
                         ? 'border-accent/30 bg-accent/5'
                         : 'border-destructive/30 bg-destructive/5'
                     )}
                   >
                     <div className="text-sm font-medium text-foreground">
-                      {f.armed ? t('followArmed') : t('followNotArmed')}
+                      {f.advanced ? t('followArmed') : t('followNotArmed')}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted-foreground">
                       <span>
@@ -176,7 +183,7 @@ export default function LiveQualityTab() {
             </div>
           </SectionCard>
 
-          {cap && cap.trailing_exits > 0 && (
+          {hasTrailing && cap && (
             <SectionCard title={t('peakTitle', { n: cap.trailing_exits })}>
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
                 <span className="text-muted-foreground">
