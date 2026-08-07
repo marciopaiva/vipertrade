@@ -28,17 +28,35 @@ pub const STREAM_GROUP_WS_BRIDGE: &str = "ws-bridge";
 /// Redis stream XREAD/XREADGROUP result type.
 pub type StreamEntries = Vec<(String, Vec<(String, Vec<(String, String)>)>)>;
 
+/// Publica no stream com retenção padrão.
+///
+/// 10.000 mensagens serve para payloads pequenos (sinais, decisões). Séries de
+/// velas são ~35 KB cada — para essas use `stream_publish_capped`, senão o
+/// limite padrão reservaria 333 MB para um único stream.
 pub async fn stream_publish(
     conn: &mut redis::aio::MultiplexedConnection,
     stream_key: &str,
     payload: &str,
+) -> Result<(), redis::RedisError> {
+    stream_publish_capped(conn, stream_key, payload, 10000).await
+}
+
+/// Publica com retenção explícita, para streams de payload grande.
+///
+/// O consumidor de velas só precisa da última série de cada símbolo; guardar
+/// horas de histórico não agrega e come a memória do Redis inteira.
+pub async fn stream_publish_capped(
+    conn: &mut redis::aio::MultiplexedConnection,
+    stream_key: &str,
+    payload: &str,
+    maxlen: usize,
 ) -> Result<(), redis::RedisError> {
     use redis::streams::StreamMaxlen;
     use redis::AsyncCommands;
     let _: String = conn
         .xadd_maxlen(
             stream_key,
-            StreamMaxlen::Approx(10000),
+            StreamMaxlen::Approx(maxlen),
             "*",
             &[("payload", payload)],
         )

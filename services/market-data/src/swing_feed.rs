@@ -11,7 +11,9 @@
 //!   estrutural é o strategy; se o market-data publicasse indicadores, mudar um
 //!   parâmetro da estratégia exigiria mexer no serviço de coleta.
 
-use viper_domain::{stream_publish, OhlcCandle, SwingCandlesEvent, REDIS_STREAM_SWING_CANDLES};
+use viper_domain::{
+    stream_publish_capped, OhlcCandle, SwingCandlesEvent, REDIS_STREAM_SWING_CANDLES,
+};
 
 /// Velas necessárias para a EMA de 200 mais folga para o fundo estrutural.
 pub(crate) const SWING_CANDLE_LIMIT: usize = 300;
@@ -69,6 +71,14 @@ pub(crate) const SWING_POLL_SECS: u64 = 300;
 /// justamente porque não se opera BTC com 2x de alavancagem.
 pub(crate) const MACRO_SYMBOL: &str = "BTCUSDT";
 
+/// Retenção do stream de velas.
+///
+/// Cada mensagem carrega 300 velas (~35 KB). O padrão de 10.000 reservaria
+/// 333 MB para este stream sozinho, contra 128 MB de memória total do Redis —
+/// estouraria em menos de um dia. O consumidor só precisa da última série de
+/// cada símbolo, então ~2h de histórico é folga de sobra.
+pub(crate) const SWING_STREAM_MAXLEN: usize = 300;
+
 /// Busca as velas de 4H e publica no stream do swing.
 ///
 /// Falha de um símbolo não interrompe os demais: a coleta é independente por
@@ -109,7 +119,14 @@ pub(crate) async fn collect_and_publish(
         }
         match serde_json::to_string(&event) {
             Ok(json) => {
-                if let Err(e) = stream_publish(conn, REDIS_STREAM_SWING_CANDLES, &json).await {
+                if let Err(e) = stream_publish_capped(
+                    conn,
+                    REDIS_STREAM_SWING_CANDLES,
+                    &json,
+                    SWING_STREAM_MAXLEN,
+                )
+                .await
+                {
                     tracing::warn!(symbol = %symbol, error = %e, "Failed to publish swing candles");
                 } else {
                     tracing::info!(
@@ -238,6 +255,20 @@ mod tests {
     /// estratégia sem tendência macro e sem nenhum erro aparente.
     /// Sem as velas do BTC não há filtro macro, e a regra número um do
     /// checklist deixa de existir sem nenhum erro aparente.
+    /// Cada mensagem carrega 300 velas (~35 KB). Com o padrão de 10.000 este
+    /// stream sozinho pediria 333 MB contra 128 MB de Redis — estourava em
+    /// menos de um dia.
+    #[test]
+    fn stream_retention_fits_in_redis_memory() {
+        const KB_POR_MENSAGEM: usize = 35;
+        const REDIS_MB: usize = 128;
+        let mb = SWING_STREAM_MAXLEN * KB_POR_MENSAGEM / 1024;
+        assert!(
+            mb < REDIS_MB / 4,
+            "stream pediria {mb} MB de {REDIS_MB} MB — retenção alta demais"
+        );
+    }
+
     #[test]
     fn macro_symbol_is_bitcoin() {
         assert_eq!(MACRO_SYMBOL, "BTCUSDT");
