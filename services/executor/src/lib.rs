@@ -2195,6 +2195,25 @@ mod tests {
 
     /// O mapeamento de lado é o ponto onde um erro inverteria o sinal do
     /// slippage — encareceria as vendas e barateria as compras.
+    /// O marcador no `reason` é o único elo entre a decisão de swing e a
+    /// persistência da família. Ele falhou na primeira posição real: o trade
+    /// nasceu como `scalp`, sem stop nem alvo, e teria sido gerido pelo
+    /// trailing — exatamente o que o isolamento existe para impedir.
+    #[test]
+    fn swing_entries_are_recognised_by_their_reason() {
+        let swing = "swing_entry_stop_8.0207_target_8.6156_risk_2.412pct";
+        assert!(swing.starts_with("swing_entry"));
+
+        // Razões de scalp não podem ser confundidas com swing.
+        for scalp in [
+            "entry_confirmed_score_0.9",
+            "trailing_raw_55",
+            "time_exit_no_progress_mfe_0.030",
+        ] {
+            assert!(!scalp.starts_with("swing_entry"), "{scalp} não é swing");
+        }
+    }
+
     #[test]
     fn maps_actions_to_book_side() {
         assert!(action_is_buy("ENTER_LONG"));

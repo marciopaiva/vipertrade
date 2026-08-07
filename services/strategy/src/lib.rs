@@ -1535,6 +1535,9 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     eval_fallback_equity,
                     eval_cfg.risk_per_trade_fraction(),
                     eval_cfg.max_leverage(),
+                    // Mesmo teto do scalp: a fórmula de risco dimensiona a
+                    // posição, mas não a limita.
+                    eval_cfg.max_position_cap_usdt("", eval_fallback_equity),
                     &swing::SwingParams::default(),
                 );
                 for d in decisions {

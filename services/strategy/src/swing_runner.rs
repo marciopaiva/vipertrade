@@ -54,12 +54,19 @@ pub fn build_entry(
     equity_usdt: f64,
     risk_per_trade: f64,
     leverage: f64,
+    max_notional_usdt: f64,
 ) -> Option<StrategyDecision> {
     if setup.risk_pct <= 0.0 || equity_usdt <= 0.0 {
         return None;
     }
     let risk_budget = equity_usdt * risk_per_trade;
-    let notional = risk_budget / setup.risk_pct;
+    // O teto é obrigatório: com risco de 3% e stop de 2,4%, a fórmula sozinha
+    // pede notional de 124% do capital. Arriscar uma fração fixa dimensiona a
+    // posição, mas não a limita — quanto mais apertado o stop, maior a posição.
+    let notional = (risk_budget / setup.risk_pct).min(max_notional_usdt.max(0.0));
+    if notional <= 0.0 {
+        return None;
+    }
     let quantity = notional / setup.entry;
     if !(quantity.is_finite() && quantity > 0.0) {
         return None;
@@ -168,6 +175,7 @@ pub fn evaluate_symbols(
     equity_usdt: f64,
     risk_per_trade: f64,
     leverage: f64,
+    max_notional_usdt: f64,
     params: &SwingParams,
 ) -> Vec<StrategyDecision> {
     // Filtro macro: sem série do BTC não há como saber, e na dúvida não se opera.
@@ -192,7 +200,14 @@ pub fn evaluate_symbols(
             continue;
         }
         if let Some(setup) = swing::evaluate_long(candles, btc_uptrend, params) {
-            if let Some(d) = build_entry(symbol, &setup, equity_usdt, risk_per_trade, leverage) {
+            if let Some(d) = build_entry(
+                symbol,
+                &setup,
+                equity_usdt,
+                risk_per_trade,
+                leverage,
+                max_notional_usdt,
+            ) {
                 out.push(d);
             }
         }
@@ -220,7 +235,7 @@ mod tests {
     fn quantity_comes_from_the_risk_budget() {
         // Risco de 1% sobre 1000 = $10. Stop a 5% => notional de $200.
         let s = setup(100.0, 95.0, 2.0);
-        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0).expect("decisão");
+        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0, 1e9).expect("decisão");
         let notional = d.quantity * d.entry_price;
         assert!((notional - 200.0).abs() < 1e-6, "notional {notional}");
     }
@@ -228,18 +243,32 @@ mod tests {
     /// Stop mais distante tem de gerar posição MENOR — mesmo risco em dólar.
     #[test]
     fn wider_stop_yields_smaller_position() {
-        let apertado = build_entry("A", &setup(100.0, 98.0, 2.0), 1000.0, 0.01, 2.0).unwrap();
-        let largo = build_entry("A", &setup(100.0, 90.0, 2.0), 1000.0, 0.01, 2.0).unwrap();
+        let apertado = build_entry("A", &setup(100.0, 98.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
+        let largo = build_entry("A", &setup(100.0, 90.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
         assert!(
             largo.quantity < apertado.quantity,
             "stop largo deveria reduzir a posição"
         );
     }
 
+    /// Sem teto, um stop apertado pede posição maior que o capital: risco de 3%
+    /// com stop de 2,4% pediu notional de 124% da conta em produção.
+    #[test]
+    fn position_is_capped_regardless_of_how_tight_the_stop_is() {
+        // Stop a 1% => a fórmula pediria notional de 100x o risco.
+        let s = setup(100.0, 99.0, 2.0);
+        let d = build_entry("A", &s, 1000.0, 0.01, 2.0, 30.0).expect("decisão");
+        let notional = d.quantity * d.entry_price;
+        assert!(
+            notional <= 30.0 + 1e-9,
+            "notional {notional} passou do teto"
+        );
+    }
+
     #[test]
     fn entry_carries_stop_and_target() {
         let s = setup(100.0, 95.0, 2.0);
-        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0).unwrap();
+        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0, 1e9).unwrap();
         assert_eq!(d.action, "ENTER_LONG");
         assert!((d.stop_loss - 95.0).abs() < 1e-9);
         assert!((d.take_profit - s.target).abs() < 1e-9);
@@ -253,14 +282,14 @@ mod tests {
     #[test]
     fn rejects_degenerate_inputs() {
         let s = setup(100.0, 95.0, 2.0);
-        assert!(build_entry("A", &s, 0.0, 0.01, 2.0).is_none());
+        assert!(build_entry("A", &s, 0.0, 0.01, 2.0, 1e9).is_none());
         let zero_risk = swing::SwingSetup {
             entry: 100.0,
             stop: 100.0,
             target: 110.0,
             risk_pct: 0.0,
         };
-        assert!(build_entry("A", &zero_risk, 1000.0, 0.01, 2.0).is_none());
+        assert!(build_entry("A", &zero_risk, 1000.0, 0.01, 2.0, 1e9).is_none());
     }
 
     /// Sem série do BTC o filtro macro não existe. Operar assim seria ignorar
@@ -269,7 +298,15 @@ mod tests {
     fn no_entries_without_the_btc_series() {
         let mut store = HashMap::new();
         store.insert("APTUSDT".to_string(), vec![]);
-        let out = evaluate_symbols(&store, &[], 1000.0, 0.01, 2.0, &SwingParams::default());
+        let out = evaluate_symbols(
+            &store,
+            &[],
+            1000.0,
+            0.01,
+            2.0,
+            30.0,
+            &SwingParams::default(),
+        );
         assert!(out.is_empty());
     }
 
@@ -282,6 +319,7 @@ mod tests {
             1000.0,
             0.01,
             2.0,
+            30.0,
             &SwingParams::default(),
         );
         assert!(out.is_empty());

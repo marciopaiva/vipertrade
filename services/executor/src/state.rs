@@ -202,6 +202,13 @@ pub(crate) async fn fetch_runtime_controls(
     })
 }
 
+/// Marcador que o strategy usa no `reason` para identificar a família.
+///
+/// Segue o padrão que o sistema já usa com `close_reason`: a semântica viaja no
+/// texto em vez de exigir um campo novo na `StrategyDecision`, o que quebraria
+/// as fixtures de contrato.
+const SWING_ENTRY_PREFIX: &str = "swing_entry";
+
 pub(crate) async fn persist_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
@@ -223,6 +230,22 @@ pub(crate) async fn persist_trade(
 
     let hash = decision_hash(event);
 
+    // Posição de swing tem stop e alvo FIXOS e é gerida fora do trailing. Sem
+    // marcar a família aqui, o strategy a trataria como scalp: o trailing
+    // moveria um stop que deve ser fixo e a tese a fecharia em ~1 minuto.
+    let is_swing = event.decision.reason.starts_with(SWING_ENTRY_PREFIX);
+    let strategy_kind = if is_swing { "swing" } else { "scalp" };
+    let planned_stop = if is_swing && event.decision.stop_loss > 0.0 {
+        Some(event.decision.stop_loss)
+    } else {
+        None
+    };
+    let planned_target = if is_swing && event.decision.take_profit > 0.0 {
+        Some(event.decision.take_profit)
+    } else {
+        None
+    };
+
     sqlx::query(
         "INSERT INTO trades (
             order_link_id,
@@ -240,8 +263,11 @@ pub(crate) async fn persist_trade(
             paper_trade,
             trailing_stop_activated,
             trailing_stop_peak_price,
-            trailing_stop_final_distance_pct
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13,$14,$15)
+            trailing_stop_final_distance_pct,
+            strategy_kind,
+            planned_stop_price,
+            planned_target_price
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
         ON CONFLICT (order_link_id) DO NOTHING",
     )
     .bind(&event.event_id)
@@ -259,6 +285,9 @@ pub(crate) async fn persist_trade(
     .bind(false)
     .bind(entry_price)
     .bind(0.0_f64)
+    .bind(strategy_kind)
+    .bind(planned_stop)
+    .bind(planned_target)
     .execute(pool)
     .await?;
 

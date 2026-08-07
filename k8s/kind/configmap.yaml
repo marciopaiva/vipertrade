@@ -42,14 +42,32 @@ data:
   # Trading profile
   TRADING_PROFILE: MEDIUM
 
-  # Strategy: use the real decision logic (ENTER_LONG/SHORT) instead of the
-  # always-HOLD stub. Safe to enable here because TRADING_MODE=paper and
-  # EXECUTOR_ENABLE_LIVE_ORDERS=false — fills are DB-simulated, no real orders.
-  STRATEGY_REAL_DECISIONS: "true"
+  # Scalp DESLIGADO em 2026-08-07. A estratégia de minutos foi encerrada depois
+  # de 97 trades e cinco medições independentes sem edge: doze candidatos de
+  # sinal sem poder discriminante, e edge bruto de +0,003% contra custo de
+  # 0,130%. O corpus final está em ~/vipertrade-config/evidencia/.
+  # Esta flag governa apenas o pipeline de scalp — a saída de posições abertas
+  # e o swing seguem funcionando com ela em false.
+  STRATEGY_REAL_DECISIONS: "false"
+
+  # Estratégia de swing em 4H, que substituiu o scalp. Stop estrutural abaixo do
+  # fundo e alvo por risco/retorno 2:1. Validada out-of-sample, em símbolos
+  # inéditos e contra buy-and-hold antes de entrar em paper.
+  STRATEGY_SWING_ENABLED: "true"
 
   # Executor configuration
   EXECUTOR_ENABLE_LIVE_ORDERS: "false"
-  EXECUTOR_PAPER_MAX_OPEN_POSITIONS: "4"
+  # 8, não 4 (2026-08-07). O limite de 4 era herança do scalp, onde posições
+  # duravam minutos. No swing elas duram 1,6 dias em média e aparecem 5,3
+  # setups por dia no universo — pela lei de Little a demanda natural é de 8,5
+  # posições simultâneas, então 4 rejeitaria mais da metade dos setups.
+  # O risco não é o limitante: o cap de 15% do capital por posição deixa o
+  # risco efetivo em 0,36% cada (o risk_per_trade de 3% nunca é atingido), então
+  # 8 posições somam 2,88% — abaixo do disjuntor de drawdown (8%).
+  # Não fui a 11 (um por símbolo) de propósito: a demanda é uma média, e picos
+  # acontecem. A folga faz o sistema recusar o marginal em vez de ficar sem
+  # margem.
+  EXECUTOR_PAPER_MAX_OPEN_POSITIONS: "8"
   EXECUTOR_RECONCILE_FIX: "false"
   # Paper fills are charged the account's real Bybit taker rate, fetched from
   # /v5/account/fee-rate. This is only the fallback for when that call fails
