@@ -69,6 +69,13 @@ CREATE TABLE trades (
     mfe_pct DOUBLE PRECISION NOT NULL DEFAULT 0,  -- maior avanço favorável
     mae_pct DOUBLE PRECISION NOT NULL DEFAULT 0,  -- maior recuo adverso
 
+    -- Família da estratégia e os níveis fixos do swing (4H). O scalp gerencia
+    -- a saída por trailing, que se move a cada tick; o swing define stop e alvo
+    -- NA ENTRADA e não os move. Métricas das duas não devem ser somadas.
+    strategy_kind TEXT NOT NULL DEFAULT 'scalp',
+    planned_stop_price DOUBLE PRECISION,
+    planned_target_price DOUBLE PRECISION,
+
     -- Perfil de risco usado
     trading_profile TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (trading_profile IN ('CONSERVATIVE', 'MEDIUM', 'AGGRESSIVE')),
     
@@ -89,6 +96,9 @@ CREATE INDEX idx_trades_pnl ON trades(pnl);
 CREATE INDEX idx_trades_decision_hash ON trades(decision_hash);
 CREATE INDEX idx_trades_paper_trade ON trades(paper_trade);
 CREATE INDEX idx_trades_profile ON trades(trading_profile);
+-- Parcial: as consultas de swing sempre filtram por este valor, e a esmagadora
+-- maioria das linhas e 'scalp'.
+CREATE INDEX idx_trades_strategy_kind ON trades(strategy_kind) WHERE strategy_kind <> 'scalp';
 
 -- ═══════════════════════════════════════════════════════════
 -- TABLE 2: position_snapshots (Para reconciliação Bybit vs Local)
