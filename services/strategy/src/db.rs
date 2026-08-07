@@ -23,6 +23,9 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             f64,
             f64,
             f64,
+            String,
+            Option<f64>,
+            Option<f64>,
         ),
     >(
         "SELECT
@@ -35,7 +38,10 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             COALESCE(trailing_stop_peak_price::double precision, entry_price::double precision),
             COALESCE(trailing_stop_final_distance_pct::double precision, 0),
             COALESCE(mfe_pct, 0),
-            COALESCE(mae_pct, 0)
+            COALESCE(mae_pct, 0),
+            COALESCE(strategy_kind, 'scalp'),
+            planned_stop_price::double precision,
+            planned_target_price::double precision
         FROM trades
         WHERE status = 'open' AND symbol = $1
         ORDER BY opened_at ASC
@@ -57,6 +63,9 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             trailing_stop_final_distance_pct,
             mfe_pct,
             mae_pct,
+            strategy_kind,
+            planned_stop_price,
+            planned_target_price,
         )| OpenTradeSnapshot {
             trade_id,
             side,
@@ -68,6 +77,9 @@ pub(crate) async fn fetch_open_trade_for_symbol(
             trailing_stop_final_distance_pct,
             mfe_pct,
             mae_pct,
+            strategy_kind,
+            planned_stop_price,
+            planned_target_price,
         },
     ))
 }

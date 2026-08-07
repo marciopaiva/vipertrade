@@ -219,6 +219,11 @@ pub fn simulate(ticks: &[Tick], cfg: &StrategyConfig) -> BacktestReport {
                             // existem para medir o comportamento REAL.
                             mfe_pct: 0.0,
                             mae_pct: 0.0,
+                            // O backtest replica o fluxo scalp; o swing tem
+                            // caminho de saída próprio, fora do trailing.
+                            strategy_kind: "scalp".to_string(),
+                            planned_stop_price: None,
+                            planned_target_price: None,
                         },
                     );
                     rep.opened += 1;

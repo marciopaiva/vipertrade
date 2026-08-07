@@ -1727,6 +1727,53 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                                         }
                                     }
 
+                                    // ── Isolamento entre famílias de estratégia ──
+                                    // Posição swing tem stop e alvo FIXOS,
+                                    // definidos na entrada a partir do fundo
+                                    // estrutural. Deixá-la seguir daqui faria o
+                                    // trailing mover um stop que não deve se
+                                    // mover, e a tese fechá-la em ~1 minuto de
+                                    // reversão — uma posição pensada para dias.
+                                    //
+                                    // A excursão acima roda para as duas: MAE e
+                                    // MFE medem o caminho do preço, o que vale
+                                    // igual em qualquer horizonte.
+                                    if open.is_swing() {
+                                        if let Some(exit) = swing::check_exit(
+                                            &open.side,
+                                            current_price,
+                                            open.planned_stop_price,
+                                            open.planned_target_price,
+                                        ) {
+                                            if let Some(decision) = create_close_decision(
+                                                &symbol,
+                                                &open.side,
+                                                open.quantity,
+                                                current_price,
+                                                exit.close_reason(),
+                                            ) {
+                                                info!(
+                                                    symbol = %symbol,
+                                                    reason = exit.close_reason(),
+                                                    price = current_price,
+                                                    stop = ?open.planned_stop_price,
+                                                    target = ?open.planned_target_price,
+                                                    "Swing exit triggered"
+                                                );
+                                                if let Err(err) = publish_decision_event(
+                                                    &mut publish_conn,
+                                                    &signal_event.event_id,
+                                                    decision,
+                                                )
+                                                .await
+                                                {
+                                                    error!(symbol = %symbol, err = %err, "Failed to publish swing exit");
+                                                }
+                                            }
+                                        }
+                                        continue;
+                                    }
+
                                     let exit_evaluation =
                                         evaluate_open_trade_exit(
                                             &symbol,
@@ -2323,6 +2370,9 @@ mod tests {
             trailing_stop_final_distance_pct: 0.0,
             mfe_pct: 0.0,
             mae_pct: 0.0,
+            strategy_kind: "scalp".to_string(),
+            planned_stop_price: None,
+            planned_target_price: None,
         }
     }
 
@@ -2758,6 +2808,9 @@ mod tests {
             trailing_stop_final_distance_pct: 0.0006,
             mfe_pct: 0.0,
             mae_pct: 0.0,
+            strategy_kind: "scalp".to_string(),
+            planned_stop_price: None,
+            planned_target_price: None,
         };
         let eval = TrailingEval {
             activated: true,
@@ -2785,6 +2838,9 @@ mod tests {
             trailing_stop_final_distance_pct: 0.0006,
             mfe_pct: 0.0,
             mae_pct: 0.0,
+            strategy_kind: "scalp".to_string(),
+            planned_stop_price: None,
+            planned_target_price: None,
         };
         let eval = TrailingEval {
             activated: true,
@@ -2904,6 +2960,9 @@ mod tests {
             trailing_stop_final_distance_pct: 0.001,
             mfe_pct: 0.0,
             mae_pct: 0.0,
+            strategy_kind: "scalp".to_string(),
+            planned_stop_price: None,
+            planned_target_price: None,
         };
         let eval = evaluate_open_trade_exit("SOLUSDT", 100.20, &open, &cfg, None);
         // Inside min_hold, but the trailing stop still triggers the close.

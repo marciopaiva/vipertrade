@@ -60,6 +60,23 @@ pub(crate) struct OpenTradeSnapshot {
     pub(crate) mfe_pct: f64,
     /// Maior recuo adverso já visto, em %. Positivo.
     pub(crate) mae_pct: f64,
+    /// Família da estratégia que abriu a posição.
+    ///
+    /// `scalp` é gerida por trailing e tese; `swing` tem stop e alvo fixos e
+    /// precisa passar POR FORA dessa gestão — senão o trailing move um stop que
+    /// deveria ser fixo e a tese fecha em 15s uma posição pensada para dias.
+    pub(crate) strategy_kind: String,
+    /// Stop fixo definido na entrada. Só existe em posições swing.
+    pub(crate) planned_stop_price: Option<f64>,
+    /// Alvo fixo definido na entrada. Só existe em posições swing.
+    pub(crate) planned_target_price: Option<f64>,
+}
+
+impl OpenTradeSnapshot {
+    /// Posição gerida por stop e alvo fixos, fora do fluxo de trailing/tese.
+    pub(crate) fn is_swing(&self) -> bool {
+        self.strategy_kind == "swing"
+    }
 }
 
 #[derive(Debug, Clone)]

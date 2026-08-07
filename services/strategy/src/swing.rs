@@ -174,6 +174,68 @@ pub fn evaluate_long(candles: &[Candle], btc_uptrend: bool, p: &SwingParams) -> 
     })
 }
 
+/// Motivo de saída de uma posição swing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwingExit {
+    /// Preço tocou o stop fixo: a tese estrutural foi invalidada.
+    StopLoss,
+    /// Preço alcançou o alvo: o risco/retorno planejado se realizou.
+    TakeProfit,
+}
+
+impl SwingExit {
+    /// Texto aceito por `trades_close_reason_check`.
+    pub fn close_reason(self) -> &'static str {
+        match self {
+            SwingExit::StopLoss => "stop_loss",
+            SwingExit::TakeProfit => "take_profit",
+        }
+    }
+}
+
+/// Decide se uma posição swing deve fechar ao preço corrente.
+///
+/// Só stop e alvo — nada de trailing, tese ou corte por tempo. A posição foi
+/// aberta com uma tese estrutural e sai quando essa tese se confirma ou se
+/// invalida, não quando o preço oscila.
+///
+/// `None` quando nenhum nível foi tocado, que é o caso normal.
+pub fn check_exit(
+    side: &str,
+    current_price: f64,
+    stop: Option<f64>,
+    target: Option<f64>,
+) -> Option<SwingExit> {
+    if !(current_price.is_finite() && current_price > 0.0) {
+        return None;
+    }
+    let is_long = side.eq_ignore_ascii_case("Long");
+
+    // Stop antes do alvo: quando ambos são tocados entre dois ticks não há como
+    // saber a ordem, e assumir o pior é o único jeito honesto de medir.
+    if let Some(s) = stop.filter(|v| v.is_finite() && *v > 0.0) {
+        let hit = if is_long {
+            current_price <= s
+        } else {
+            current_price >= s
+        };
+        if hit {
+            return Some(SwingExit::StopLoss);
+        }
+    }
+    if let Some(t) = target.filter(|v| v.is_finite() && *v > 0.0) {
+        let hit = if is_long {
+            current_price >= t
+        } else {
+            current_price <= t
+        };
+        if hit {
+            return Some(SwingExit::TakeProfit);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +267,68 @@ mod tests {
             v.push(c(px + 1.5, px + 2.0, px - 1.5, px));
         }
         v
+    }
+
+    // ── saída por stop/alvo fixos ─────────────────────────────────
+    /// Quando ambos são tocados entre dois ticks não há como saber a ordem.
+    /// Assumir o pior é o único jeito honesto de medir — o contrário
+    /// superestimaria o resultado sistematicamente.
+    #[test]
+    fn stop_wins_when_both_levels_are_hit() {
+        // Long com stop em 90 e alvo em 120; preço em 85 tocou os dois cenários.
+        assert_eq!(
+            check_exit("Long", 85.0, Some(90.0), Some(120.0)),
+            Some(SwingExit::StopLoss)
+        );
+    }
+
+    #[test]
+    fn long_exits_below_stop_and_above_target() {
+        assert_eq!(
+            check_exit("Long", 89.9, Some(90.0), Some(120.0)),
+            Some(SwingExit::StopLoss)
+        );
+        assert_eq!(
+            check_exit("Long", 90.0, Some(90.0), Some(120.0)),
+            Some(SwingExit::StopLoss)
+        );
+        assert_eq!(
+            check_exit("Long", 120.0, Some(90.0), Some(120.0)),
+            Some(SwingExit::TakeProfit)
+        );
+        assert_eq!(check_exit("Long", 100.0, Some(90.0), Some(120.0)), None);
+    }
+
+    /// No Short os lados se invertem — trocar isso fecharia toda posição
+    /// vendida no lugar errado, e no exato oposto do pretendido.
+    #[test]
+    fn short_inverts_both_sides() {
+        assert_eq!(
+            check_exit("Short", 110.0, Some(110.0), Some(80.0)),
+            Some(SwingExit::StopLoss)
+        );
+        assert_eq!(
+            check_exit("Short", 80.0, Some(110.0), Some(80.0)),
+            Some(SwingExit::TakeProfit)
+        );
+        assert_eq!(check_exit("Short", 100.0, Some(110.0), Some(80.0)), None);
+    }
+
+    #[test]
+    fn missing_levels_never_trigger_an_exit() {
+        assert_eq!(check_exit("Long", 50.0, None, None), None);
+        assert_eq!(check_exit("Long", 50.0, None, Some(120.0)), None);
+        // Preço inválido não pode fechar posição.
+        assert_eq!(check_exit("Long", 0.0, Some(90.0), Some(120.0)), None);
+        assert_eq!(check_exit("Long", f64::NAN, Some(90.0), Some(120.0)), None);
+    }
+
+    /// Os textos precisam bater com `trades_close_reason_check` no banco —
+    /// divergir aqui faz o INSERT falhar só em produção.
+    #[test]
+    fn close_reasons_match_the_database_constraint() {
+        assert_eq!(SwingExit::StopLoss.close_reason(), "stop_loss");
+        assert_eq!(SwingExit::TakeProfit.close_reason(), "take_profit");
     }
 
     #[test]
