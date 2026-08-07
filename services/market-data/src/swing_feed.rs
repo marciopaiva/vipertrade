@@ -62,6 +62,13 @@ pub(crate) fn parse_ohlc(rows: Vec<Vec<String>>) -> Vec<OhlcCandle> {
 /// granularidade de sobra para pegar o fechamento sem martelar a API.
 pub(crate) const SWING_POLL_SECS: u64 = 300;
 
+/// O BTC entra na coleta mesmo fora do universo operado.
+///
+/// A primeira regra do checklist é não comprar altcoin contra o Bitcoin caindo.
+/// Sem as velas dele o filtro macro não existe — e ele está `enabled: false`
+/// justamente porque não se opera BTC com 2x de alavancagem.
+pub(crate) const MACRO_SYMBOL: &str = "BTCUSDT";
+
 /// Busca as velas de 4H e publica no stream do swing.
 ///
 /// Falha de um símbolo não interrompe os demais: a coleta é independente por
@@ -72,7 +79,13 @@ pub(crate) async fn collect_and_publish(
     base_url: &str,
     symbols: &[String],
 ) {
-    for symbol in symbols {
+    // O BTC precisa ser coletado mesmo não sendo operado: é o filtro macro.
+    let mut targets: Vec<String> = symbols.to_vec();
+    if !targets.iter().any(|s| s == MACRO_SYMBOL) {
+        targets.push(MACRO_SYMBOL.to_string());
+    }
+
+    for symbol in &targets {
         let url = swing_kline_url(base_url, symbol);
         let rows = match fetch_kline_rows(http, &url).await {
             Ok(r) => r,
@@ -223,6 +236,13 @@ mod tests {
 
     /// A EMA de 200 precisa de pelo menos 200 velas; pedir menos deixaria a
     /// estratégia sem tendência macro e sem nenhum erro aparente.
+    /// Sem as velas do BTC não há filtro macro, e a regra número um do
+    /// checklist deixa de existir sem nenhum erro aparente.
+    #[test]
+    fn macro_symbol_is_bitcoin() {
+        assert_eq!(MACRO_SYMBOL, "BTCUSDT");
+    }
+
     #[test]
     fn candle_limit_covers_the_slow_average() {
         assert!(

@@ -182,6 +182,16 @@ pub(crate) async fn has_recent_close_decision_for_symbol(
     .await
 }
 
+/// Símbolos com posição aberta, de qualquer família.
+///
+/// O swing respeita uma posição por símbolo como o scalp — abrir swing onde já
+/// há scalp aberto criaria duas gestões concorrentes sobre o mesmo ativo.
+pub(crate) async fn fetch_open_symbols(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>("SELECT DISTINCT symbol FROM trades WHERE status = 'open'")
+        .fetch_all(pool)
+        .await
+}
+
 pub(crate) async fn count_open_trades(pool: &PgPool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT COUNT(*)::bigint

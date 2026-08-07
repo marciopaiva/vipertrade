@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tracing::{error, info, warn};
 use tupa_core::pipeline;
 use tupa_engine::Executor;
@@ -23,6 +23,7 @@ use viper_domain::{
 pub mod backtest;
 mod helpers;
 pub mod swing;
+pub mod swing_runner;
 mod thesis;
 mod types;
 
@@ -1469,6 +1470,86 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         STREAM_GROUP_STRATEGY,
     )
     .await;
+
+    // ── Estratégia de swing (4H), em paralelo ao scalp ──
+    // Estado próprio e cadência própria: uma vela de 4H fecha a cada 4 horas,
+    // então avaliar a cada tick de 1min seria repetir a mesma conta milhares de
+    // vezes para o mesmo resultado.
+    // Desligado por padrão: a estratégia de swing entra em paper ao lado do
+    // scalp, e ligar as duas sem querer dobraria a exposição.
+    let swing_enabled = std::env::var("STRATEGY_SWING_ENABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if swing_enabled {
+        let store: swing_runner::CandleStore = Arc::new(Mutex::new(HashMap::new()));
+        tokio::spawn(swing_runner::run_candle_reader(
+            redis_url.clone(),
+            store.clone(),
+            shutdown_rx.clone(),
+        ));
+
+        let eval_store = store.clone();
+        let eval_pool = db_pool.clone();
+        let eval_cfg = cfg.clone();
+        let eval_redis = redis_url.clone();
+        let mut eval_shutdown = shutdown_rx.clone();
+        // Capital de referência para dimensionar a posição pelo risco. O loop
+        // de scalp busca o equity vivo da carteira; aqui o valor inicial basta,
+        // porque o swing avalia a cada minuto e não a cada tick.
+        let eval_fallback_equity = std::env::var("INITIAL_CAPITAL_USD")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(100.0);
+        tokio::spawn(async move {
+            let client = match redis::Client::open(eval_redis.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(error = %e, "Swing evaluator: Redis client failed");
+                    return;
+                }
+            };
+            let mut conn = match client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(error = %e, "Swing evaluator: Redis connection failed");
+                    return;
+                }
+            };
+            loop {
+                tokio::select! {
+                    _ = eval_shutdown.changed() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                }
+
+                let open_symbols: Vec<String> = match &eval_pool {
+                    Some(pool) => crate::db::fetch_open_symbols(pool)
+                        .await
+                        .unwrap_or_default(),
+                    None => Vec::new(),
+                };
+                let snapshot = { eval_store.lock().await.clone() };
+                let decisions = swing_runner::evaluate_symbols(
+                    &snapshot,
+                    &open_symbols,
+                    eval_fallback_equity,
+                    eval_cfg.risk_per_trade_fraction(),
+                    eval_cfg.max_leverage(),
+                    &swing::SwingParams::default(),
+                );
+                for d in decisions {
+                    info!(
+                        symbol = %d.symbol, entry = d.entry_price,
+                        stop = d.stop_loss, target = d.take_profit,
+                        "Swing setup found"
+                    );
+                    if let Err(e) = publish_decision_event(&mut conn, "swing-4h", d).await {
+                        error!(error = %e, "Failed to publish swing entry");
+                    }
+                }
+            }
+        });
+    }
 
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
     let signal_consumer = format!("strategy-{}", std::process::id());
