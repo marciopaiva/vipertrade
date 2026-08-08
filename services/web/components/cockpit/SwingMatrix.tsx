@@ -157,7 +157,12 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
       a.symbol.localeCompare(b.symbol)
   );
 
-  const macroOk = data?.btc_uptrend ?? false;
+  // Sem payload não há veredito: `btc_uptrend` ausente virava "BTC bloqueia
+  // todas as entradas", que é uma afirmação forte sobre o mercado feita a partir
+  // de um erro de rede. Um 404 no proxy ficou horas assim, indistinguível de um
+  // filtro macro realmente fechado.
+  const semDados = data == null || data.btc_uptrend == null;
+  const macroOk = data?.btc_uptrend === true;
 
   return (
     <HudFrame title={t('title')}>
@@ -166,9 +171,11 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
       <div
         className={cn(
           'flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-2xs',
-          macroOk
-            ? 'border-border bg-accent/5'
-            : 'border-destructive/30 bg-destructive/10'
+          semDados
+            ? 'border-border bg-muted/20'
+            : macroOk
+              ? 'border-border bg-accent/5'
+              : 'border-destructive/30 bg-destructive/10'
         )}
       >
         <span className="text-3xs uppercase tracking-[0.15em] text-muted-foreground">
@@ -183,18 +190,24 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
         <span
           className={cn(
             'rounded border px-1.5 py-0.5 font-medium',
-            macroOk
-              ? 'border-accent/30 bg-accent/15 text-accent'
-              : 'border-destructive/30 bg-destructive/15 text-destructive'
+            semDados
+              ? 'border-border bg-muted/40 text-muted-foreground'
+              : macroOk
+                ? 'border-accent/30 bg-accent/15 text-accent'
+                : 'border-destructive/30 bg-destructive/15 text-destructive'
           )}
         >
-          {macroOk ? t('macroOpen') : t('macroBlocked')}
+          {semDados
+            ? t('macroUnknown')
+            : macroOk
+              ? t('macroOpen')
+              : t('macroBlocked')}
         </span>
       </div>
 
-      {stale || ordered.length === 0 ? (
+      {stale || semDados || ordered.length === 0 ? (
         <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-          {stale ? t('staleSnapshot') : t('empty')}
+          {semDados ? t('unavailable') : stale ? t('staleSnapshot') : t('empty')}
         </div>
       ) : (
         <div className="overflow-x-auto">

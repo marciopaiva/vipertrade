@@ -149,24 +149,107 @@ pub struct RateLimited;
 
 impl warp::reject::Reject for RateLimited {}
 
+/// Endereço de dentro do cluster (RFC1918, loopback ou ULA IPv6).
+///
+/// Só destes aceitamos `X-Forwarded-For`: o serviço da API é NodePort, então
+/// confiar no header vindo de qualquer origem deixaria qualquer cliente externo
+/// forjar uma identidade nova a cada requisição e ignorar o limite.
+fn is_trusted_proxy(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+        // fc00::/7 (unique local) — `is_unique_local` ainda não é estável.
+        std::net::IpAddr::V6(v6) => v6.is_loopback() || (v6.octets()[0] & 0xfe) == 0xfc,
+    }
+}
+
+/// Chave do balde: o cliente REAL, não o proxy.
+///
+/// O front do Next reescreve `/api/*` no servidor, então sem isto todas as abas
+/// de todos os operadores chegam com o IP do pod web e dividem um único balde —
+/// um poller a mais na tela derrubava a API inteira com 429.
+pub(crate) fn client_key(addr: Option<std::net::SocketAddr>, forwarded: Option<&str>) -> String {
+    let remote = match addr {
+        Some(a) => a.ip(),
+        None => return "unknown".to_string(),
+    };
+    if is_trusted_proxy(&remote) {
+        // O primeiro da lista é o cliente original; os demais são saltos.
+        if let Some(first) = forwarded
+            .and_then(|h| h.split(',').next())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return first.to_string();
+        }
+    }
+    remote.to_string()
+}
+
 pub fn with_rate_limit(
     limiter: RateLimiter,
 ) -> impl Filter<Extract = (), Error = Rejection> + Clone {
     let limiter_for_filter = limiter.clone();
     warp::any()
         .and(warp::addr::remote())
-        .and_then(move |addr: Option<std::net::SocketAddr>| {
-            let limiter = limiter_for_filter.clone();
-            async move {
-                let key = addr
-                    .map(|a| a.ip().to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                if limiter.check_and_consume(&key).await {
-                    Ok(())
-                } else {
-                    Err(warp::reject::custom(RateLimited))
+        .and(warp::header::optional::<String>("x-forwarded-for"))
+        .and_then(
+            move |addr: Option<std::net::SocketAddr>, fwd: Option<String>| {
+                let limiter = limiter_for_filter.clone();
+                async move {
+                    let key = client_key(addr, fwd.as_deref());
+                    if limiter.check_and_consume(&key).await {
+                        Ok(())
+                    } else {
+                        Err(warp::reject::custom(RateLimited))
+                    }
                 }
-            }
-        })
+            },
+        )
         .untuple_one()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_key;
+    use std::net::SocketAddr;
+
+    fn addr(s: &str) -> Option<SocketAddr> {
+        Some(s.parse().expect("socket addr"))
+    }
+
+    /// O caso que quebrou a tela: o proxy do Next é interno, e sem ler o header
+    /// todas as abas dividiriam o mesmo balde.
+    #[test]
+    fn internal_proxy_is_trusted_for_the_forwarded_header() {
+        assert_eq!(
+            client_key(addr("10.244.0.7:53124"), Some("203.0.113.9")),
+            "203.0.113.9"
+        );
+    }
+
+    /// Cadeia de proxies: o primeiro é o cliente, o resto são saltos.
+    #[test]
+    fn first_hop_in_the_chain_is_the_client() {
+        assert_eq!(
+            client_key(addr("172.18.0.4:1"), Some("203.0.113.9, 10.244.0.7")),
+            "203.0.113.9"
+        );
+    }
+
+    /// A API é NodePort. Se um cliente EXTERNO pudesse forjar o header, trocaria
+    /// de identidade a cada requisição e o limite deixaria de existir.
+    #[test]
+    fn external_client_cannot_forge_its_identity() {
+        assert_eq!(
+            client_key(addr("198.51.100.20:44321"), Some("1.2.3.4")),
+            "198.51.100.20"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_socket_when_there_is_no_header() {
+        assert_eq!(client_key(addr("10.244.0.7:1"), None), "10.244.0.7");
+        assert_eq!(client_key(addr("10.244.0.7:1"), Some("  ")), "10.244.0.7");
+        assert_eq!(client_key(None, Some("1.2.3.4")), "unknown");
+    }
 }

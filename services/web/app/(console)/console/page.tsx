@@ -69,9 +69,11 @@ export default function CommandDeckPage() {
   const { decisions, live } = useDecisions();
   // A matriz vem pronta do strategy: o checklist é avaliado a cada 60s no mesmo
   // ciclo que decide, então recalcular aqui só criaria uma segunda verdade.
+  // 30s, não 15: o strategy só recalcula o checklist a cada 60s, então um
+  // poll mais rápido gasta orçamento de requisição para reler o mesmo snapshot.
   const { data: swingMatrix } = useDashboard<SwingMatrixData>(
     '/api/strategy/swing-matrix',
-    { refreshInterval: 15000, enabled: true }
+    { refreshInterval: 30000, enabled: true }
   );
 
   // Slide a 24h window forward so the equity sparkline stays honest on a
