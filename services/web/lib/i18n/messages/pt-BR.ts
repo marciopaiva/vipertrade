@@ -297,6 +297,7 @@ const ptBR: Messages = {
     macroOpen: 'liberado',
     macroBlocked: 'bloqueia todas as entradas',
     macroUnknown: 'sem leitura',
+    evaluatedAgo: 'avaliado há {age}',
     unavailable: 'Matriz indisponível — não foi possível ler a avaliação do strategy.',
     staleSnapshot: 'Sem avaliação recente — o avaliador de swing não publicou nos últimos 5 minutos.',
     empty: 'Nenhum símbolo avaliado ainda.',

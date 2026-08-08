@@ -294,6 +294,7 @@ const en = {
     macroOpen: 'open',
     macroBlocked: 'blocks every entry',
     macroUnknown: 'no reading',
+    evaluatedAgo: 'evaluated {age} ago',
     unavailable: 'Matrix unavailable — could not read the strategy evaluation.',
     staleSnapshot: 'No recent evaluation — the swing evaluator has not published in the last 5 minutes.',
     empty: 'No symbol evaluated yet.',

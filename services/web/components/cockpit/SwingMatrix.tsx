@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useT, useLocale, formatPrice, formatPct } from '@/lib/i18n';
 import { HudFrame } from '@/components/ui/HudFrame';
@@ -145,6 +146,49 @@ function Rule({
   );
 }
 
+/**
+ * "avaliado há Xs" — a prova de que a matriz está viva.
+ *
+ * As colunas quase não mudam: o preço só é relido a cada 5 min (a vela é de 4H)
+ * e o ESTADO só vira quando o preço cruza uma EMA de 200 períodos de 4H, o que
+ * leva horas ou dias. Uma tela correta e uma tela travada são visualmente
+ * idênticas sem isto, e já tivemos um caso em que a matriz ficou horas exibindo
+ * um 404 como se fosse leitura de mercado.
+ */
+function Frescor({ iso }: { iso?: string }) {
+  const t = useT('swing');
+  // Inicializador lazy (não setState dentro do efeito) — mesmo padrão do
+  // relógio da página do console.
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!iso) return null;
+  const ms = agora - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const seg = Math.floor(ms / 1000);
+  const texto = seg < 90 ? `${seg}s` : `${Math.floor(seg / 60)}min`;
+  // O strategy reavalia a cada 60s; passando de 3 min alguma coisa parou.
+  const velho = seg > 180;
+  return (
+    <span
+      className={cn(
+        'ml-auto flex items-center gap-1.5 font-mono text-3xs',
+        velho ? 'text-destructive' : 'text-muted-foreground'
+      )}
+    >
+      <span
+        className={cn(
+          'inline-block h-1.5 w-1.5 rounded-full',
+          velho ? 'bg-destructive' : 'animate-pulse bg-accent'
+        )}
+      />
+      {t('evaluatedAgo', { age: texto })}
+    </span>
+  );
+}
+
 export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
   const t = useT('swing');
   const locale = useLocale();
@@ -203,6 +247,7 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
               ? t('macroOpen')
               : t('macroBlocked')}
         </span>
+        <Frescor iso={data?.timestamp} />
       </div>
 
       {stale || semDados || ordered.length === 0 ? (
