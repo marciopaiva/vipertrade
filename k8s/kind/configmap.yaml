@@ -2,6 +2,11 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: vipertrade-config
+  # Explícito de propósito. O kustomization injeta o namespace em `apply -k`,
+  # mas este arquivo é o que se aplica isolado quando se mexe em tuning — e sem
+  # a linha o `apply -f` cria um ConfigMap órfão no namespace `default`, que o
+  # cluster ignora enquanto reporta "created" como se tivesse funcionado.
+  namespace: vipertrade
 data:
   # Trading configuration
   TRADING_MODE: paper
@@ -57,17 +62,17 @@ data:
 
   # Executor configuration
   EXECUTOR_ENABLE_LIVE_ORDERS: "false"
-  # 8, não 4 (2026-08-07). O limite de 4 era herança do scalp, onde posições
-  # duravam minutos. No swing elas duram 1,6 dias em média e aparecem 5,3
-  # setups por dia no universo — pela lei de Little a demanda natural é de 8,5
-  # posições simultâneas, então 4 rejeitaria mais da metade dos setups.
-  # O risco não é o limitante: o cap de 15% do capital por posição deixa o
-  # risco efetivo em 0,36% cada (o risk_per_trade de 3% nunca é atingido), então
-  # 8 posições somam 2,88% — abaixo do disjuntor de drawdown (8%).
-  # Não fui a 11 (um por símbolo) de propósito: a demanda é uma média, e picos
-  # acontecem. A folga faz o sistema recusar o marginal em vez de ficar sem
-  # margem.
-  EXECUTOR_PAPER_MAX_OPEN_POSITIONS: "8"
+  # 12, não 8 (2026-08-08), junto com a ampliação do universo para 23 símbolos.
+  # Medido no corpus de 166 dias: 6,97 setups/dia com duração média de 1,39 dias,
+  # o que pela lei de Little dá 9,7 posições simultâneas de demanda natural. Com
+  # 8 o sistema recusaria setups válidos por falta de vaga, e o corpus ficaria
+  # enviesado pelos que chegaram primeiro em vez dos que a regra aprovou.
+  # O risco cabe: o cap por posição desceu para 12% do equity e o stop mediano é
+  # 2,04%, então cada posição arrisca ~0,28% do capital — 12 delas somam 3,4%,
+  # contra o disjuntor de drawdown em 8%. No percentil 90 dos stops seriam 6,2%,
+  # ainda abaixo. Não fui a 16 porque aí o p90 passa do disjuntor: em cripto as
+  # posições estopam juntas, então o cenário correlacionado não é hipótese remota.
+  EXECUTOR_PAPER_MAX_OPEN_POSITIONS: "12"
   EXECUTOR_RECONCILE_FIX: "false"
   # Paper fills are charged the account's real Bybit taker rate, fetched from
   # /v5/account/fee-rate. This is only the fallback for when that call fails

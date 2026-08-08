@@ -43,6 +43,10 @@ spec:
             port: 8081
           initialDelaySeconds: 30
           periodSeconds: 20
+        volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         command:
         - wait-for-deps.sh
         - redis:6379
@@ -51,6 +55,11 @@ spec:
         env:
         - name: VIPER_ROLE
           value: market-data
+      volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -98,6 +107,10 @@ spec:
             port: 8086
           initialDelaySeconds: 30
           periodSeconds: 20
+        volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         command:
         - wait-for-deps.sh
         - postgres:5432
@@ -106,6 +119,11 @@ spec:
         env:
         - name: VIPER_ROLE
           value: analytics
+      volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -288,6 +306,10 @@ spec:
             port: 8084
           initialDelaySeconds: 45
           periodSeconds: 20
+        volumeMounts:
+        - name: pairs-config
+          mountPath: /app/config/trading/pairs.yaml
+          subPath: pairs.yaml
         command:
         - wait-for-deps.sh
         - postgres:5432
@@ -296,6 +318,11 @@ spec:
         env:
         - name: VIPER_ROLE
           value: monitor
+      volumes:
+      - name: pairs-config
+        configMap:
+          name: vipertrade-pairs
+
 ---
 apiVersion: apps/v1
 kind: Deployment
