@@ -21,8 +21,38 @@ const GROUP: &str = "swing";
 /// O BTC é coletado para o filtro macro, nunca operado.
 const MACRO_SYMBOL: &str = "BTCUSDT";
 
+/// Série de 4H de um símbolo, com o instante em que chegou.
+#[derive(Clone)]
+pub(crate) struct Series {
+    pub candles: Vec<Candle>,
+    pub updated_at: std::time::Instant,
+}
+
 /// Série de 4H mais recente por símbolo.
-pub(crate) type CandleStore = Arc<Mutex<HashMap<String, Vec<Candle>>>>;
+pub(crate) type CandleStore = Arc<Mutex<HashMap<String, Series>>>;
+
+/// Idade máxima de uma série antes de ela sair da avaliação.
+///
+/// O market-data publica a cada 5 min. Sem poda, um símbolo REMOVIDO do
+/// universo continua no mapa para sempre, avaliado com velas congeladas — foi o
+/// que aconteceu ao reduzir o universo em 2026-08-08: BCH, SEI e TIA seguiram
+/// aparecendo na matriz e sendo candidatos a entrada depois de desabilitados.
+/// 20 min tolera quatro ciclos perdidos antes de considerar a série morta.
+const SERIES_TTL: Duration = Duration::from_secs(20 * 60);
+
+/// Descarta séries que pararam de ser atualizadas.
+pub(crate) fn prune(store: &mut HashMap<String, Series>) -> Vec<String> {
+    let agora = std::time::Instant::now();
+    let mortos: Vec<String> = store
+        .iter()
+        .filter(|(_, s)| agora.duration_since(s.updated_at) > SERIES_TTL)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in &mortos {
+        store.remove(k);
+    }
+    mortos
+}
 
 fn to_candles(raw: &[OhlcCandle]) -> Vec<Candle> {
     raw.iter()
@@ -165,7 +195,13 @@ pub(crate) async fn run_candle_reader(
                                         match serde_json::from_str::<SwingCandlesEvent>(&v) {
                                             Ok(ev) => {
                                                 let mut g = store.lock().await;
-                                                g.insert(ev.symbol.clone(), to_candles(&ev.candles));
+                                                g.insert(
+                                                    ev.symbol.clone(),
+                                                    Series {
+                                                        candles: to_candles(&ev.candles),
+                                                        updated_at: std::time::Instant::now(),
+                                                    },
+                                                );
                                             }
                                             Err(e) => warn!(error = %e, "Invalid swing candles payload"),
                                         }
@@ -194,12 +230,12 @@ pub(crate) async fn run_candle_reader(
 /// que a tela não possa discordar do motor. O alvo entra aqui já calculado
 /// porque é o que o operador compara com o preço — recalculá-lo no front seria
 /// espalhar a regra do R:R por outra linguagem.
-pub fn diagnose_symbols(
-    store: &HashMap<String, Vec<Candle>>,
+pub(crate) fn diagnose_symbols(
+    store: &HashMap<String, Series>,
     open_symbols: &[String],
     params: &SwingParams,
 ) -> SwingDiagnosticsSnapshot {
-    let btc = store.get(MACRO_SYMBOL);
+    let btc = store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice());
     let btc_diag = btc.map(|c| swing::diagnose(c, params));
     let btc_uptrend = btc
         .and_then(|c| swing::is_uptrend(c, params))
@@ -208,8 +244,8 @@ pub fn diagnose_symbols(
     let mut symbols: Vec<SwingSymbolDiagnostic> = store
         .iter()
         .filter(|(s, _)| s.as_str() != MACRO_SYMBOL)
-        .map(|(symbol, candles)| {
-            let d = swing::diagnose(candles, params);
+        .map(|(symbol, serie)| {
+            let d = swing::diagnose(&serie.candles, params);
             let has_position = open_symbols.iter().any(|s| s == symbol);
             let target = d
                 .risk_pct
@@ -263,8 +299,8 @@ pub fn diagnose_symbols(
 ///
 /// Devolve as decisões em vez de publicá-las: publicar é responsabilidade de
 /// quem tem a conexão, e separar deixa esta função testável sem Redis.
-pub fn evaluate_symbols(
-    store: &HashMap<String, Vec<Candle>>,
+pub(crate) fn evaluate_symbols(
+    store: &HashMap<String, Series>,
     open_symbols: &[String],
     equity_usdt: f64,
     risk_per_trade: f64,
@@ -273,7 +309,7 @@ pub fn evaluate_symbols(
     params: &SwingParams,
 ) -> Vec<StrategyDecision> {
     // Filtro macro: sem série do BTC não há como saber, e na dúvida não se opera.
-    let btc_uptrend = match store.get(MACRO_SYMBOL) {
+    let btc_uptrend = match store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice()) {
         Some(c) => swing::is_uptrend(c, params).unwrap_or(false),
         None => {
             warn!("No BTC 4H series yet — macro filter unavailable, skipping entries");
@@ -285,7 +321,8 @@ pub fn evaluate_symbols(
     }
 
     let mut out = Vec::new();
-    for (symbol, candles) in store {
+    for (symbol, serie) in store {
+        let candles = &serie.candles;
         if symbol == MACRO_SYMBOL {
             continue;
         }
@@ -312,6 +349,11 @@ pub fn evaluate_symbols(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Série "recém-chegada", como o reader a insere.
+    fn serie(candles: Vec<Candle>) -> Series {
+        Series { candles, updated_at: std::time::Instant::now() }
+    }
 
     fn setup(entry: f64, stop: f64, rr: f64) -> swing::SwingSetup {
         let risk_pct = (entry - stop) / entry;
@@ -391,7 +433,7 @@ mod tests {
     #[test]
     fn no_entries_without_the_btc_series() {
         let mut store = HashMap::new();
-        store.insert("APTUSDT".to_string(), vec![]);
+        store.insert("APTUSDT".to_string(), serie(vec![]));
         let out = evaluate_symbols(
             &store,
             &[],
@@ -411,9 +453,9 @@ mod tests {
     #[test]
     fn diagnostic_covers_every_symbol_except_the_macro_one() {
         let mut store = HashMap::new();
-        store.insert("BTCUSDT".to_string(), Vec::new());
-        store.insert("APTUSDT".to_string(), Vec::new());
-        store.insert("LINKUSDT".to_string(), Vec::new());
+        store.insert("BTCUSDT".to_string(), serie(Vec::new()));
+        store.insert("APTUSDT".to_string(), serie(Vec::new()));
+        store.insert("LINKUSDT".to_string(), serie(Vec::new()));
         let snap = diagnose_symbols(&store, &[], &SwingParams::default());
         let nomes: Vec<&str> = snap.symbols.iter().map(|s| s.symbol.as_str()).collect();
         assert_eq!(nomes, vec!["APTUSDT", "LINKUSDT"]);
@@ -441,8 +483,8 @@ mod tests {
             })
             .collect();
         let mut store = HashMap::new();
-        store.insert("BTCUSDT".to_string(), alta);
-        store.insert("XUSDT".to_string(), queda);
+        store.insert("BTCUSDT".to_string(), serie(alta));
+        store.insert("XUSDT".to_string(), serie(queda));
         let snap = diagnose_symbols(&store, &[], &p);
         let x = &snap.symbols[0];
         assert_eq!(x.status, "no_uptrend");
@@ -457,18 +499,54 @@ mod tests {
     #[test]
     fn distance_is_absent_when_price_is_not_the_obstacle() {
         let mut store = HashMap::new();
-        store.insert("BTCUSDT".to_string(), Vec::new());
-        store.insert("APTUSDT".to_string(), Vec::new());
+        store.insert("BTCUSDT".to_string(), serie(Vec::new()));
+        store.insert("APTUSDT".to_string(), serie(Vec::new()));
         let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &SwingParams::default());
         assert!(snap.symbols[0].distance_pct.is_none());
+    }
+
+    /// Símbolo removido do universo tem de SAIR da avaliação. Sem poda ele fica
+    /// no mapa para sempre com velas congeladas — BCH, SEI e TIA continuaram
+    /// aparecendo na matriz e elegíveis a entrada depois de desabilitados.
+    #[test]
+    fn stale_series_are_dropped() {
+        let mut store: HashMap<String, Series> = HashMap::new();
+        store.insert("FRESCOUSDT".to_string(), serie(Vec::new()));
+        store.insert(
+            "VELHOUSDT".to_string(),
+            Series {
+                candles: Vec::new(),
+                updated_at: std::time::Instant::now() - (SERIES_TTL + Duration::from_secs(1)),
+            },
+        );
+        let removidos = prune(&mut store);
+        assert_eq!(removidos, vec!["VELHOUSDT".to_string()]);
+        assert!(store.contains_key("FRESCOUSDT"));
+        assert!(!store.contains_key("VELHOUSDT"));
+    }
+
+    /// Uma série no limite do TTL ainda vale: o market-data publica a cada 5min
+    /// e perder um ciclo não pode apagar o símbolo.
+    #[test]
+    fn series_within_the_ttl_survive() {
+        let mut store: HashMap<String, Series> = HashMap::new();
+        store.insert(
+            "XUSDT".to_string(),
+            Series {
+                candles: Vec::new(),
+                updated_at: std::time::Instant::now() - (SERIES_TTL - Duration::from_secs(60)),
+            },
+        );
+        assert!(prune(&mut store).is_empty());
+        assert!(store.contains_key("XUSDT"));
     }
 
     /// Símbolo com posição aberta é reportado como tal, e não como bloqueio.
     #[test]
     fn diagnostic_flags_open_positions() {
         let mut store = HashMap::new();
-        store.insert("BTCUSDT".to_string(), Vec::new());
-        store.insert("APTUSDT".to_string(), Vec::new());
+        store.insert("BTCUSDT".to_string(), serie(Vec::new()));
+        store.insert("APTUSDT".to_string(), serie(Vec::new()));
         let snap = diagnose_symbols(
             &store,
             &["APTUSDT".to_string()],
@@ -500,7 +578,7 @@ mod tests {
 
     #[test]
     fn skips_symbols_that_already_have_a_position() {
-        let store: HashMap<String, Vec<Candle>> = HashMap::new();
+        let store: HashMap<String, Series> = HashMap::new();
         let out = evaluate_symbols(
             &store,
             &["APTUSDT".to_string()],

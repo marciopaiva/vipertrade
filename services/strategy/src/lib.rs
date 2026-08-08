@@ -1545,7 +1545,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         .unwrap_or_default(),
                     None => Vec::new(),
                 };
-                let snapshot = { eval_store.lock().await.clone() };
+                // Poda antes de avaliar: um símbolo tirado do universo para de
+                // ser publicado, mas continuaria no mapa com velas congeladas.
+                let snapshot = {
+                    let mut g = eval_store.lock().await;
+                    for morto in swing_runner::prune(&mut g) {
+                        info!(symbol = %morto, "Swing: série expirada, símbolo fora da avaliação");
+                    }
+                    g.clone()
+                };
                 let decisions = swing_runner::evaluate_symbols(
                     &snapshot,
                     &open_symbols,
