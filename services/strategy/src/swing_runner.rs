@@ -36,6 +36,29 @@ fn to_candles(raw: &[OhlcCandle]) -> Vec<Candle> {
         .collect()
 }
 
+/// Duração da vela em segundos — a estratégia opera 4H.
+const CANDLE_SECS: u64 = 4 * 3600;
+
+/// A vela de 4H a que um instante pertence.
+pub fn candle_bucket(unix_secs: u64) -> u64 {
+    unix_secs / CANDLE_SECS
+}
+
+/// Chave de idempotência do setup: UM por símbolo por vela de 4H.
+///
+/// O executor deduplica por `source_event_id`. Publicar uma constante
+/// (`"swing-4h"`) fez a primeira entrada reivindicar a chave e todas as
+/// seguintes — de qualquer símbolo, para sempre — serem descartadas como
+/// duplicata: 16h de operação com um único trade aberto enquanto o AVAXUSDT
+/// reapresentava o mesmo setup a cada 60s.
+///
+/// Amarrar a chave à vela também alinha o live ao backtest, que avalia uma vez
+/// por vela. O avaliador roda a cada 60s para reagir rápido quando a vela vira,
+/// não para dar 240 chances ao mesmo setup.
+pub fn swing_event_id(symbol: &str, bucket: u64) -> String {
+    format!("swing-4h:{symbol}:{bucket}")
+}
+
 /// Marcador da família no `reason`.
 ///
 /// O executor identifica a origem por aqui, como já faz com `close_reason`.
@@ -308,6 +331,27 @@ mod tests {
             &SwingParams::default(),
         );
         assert!(out.is_empty());
+    }
+
+    /// A chave precisa separar símbolos E velas. Com uma constante, a primeira
+    /// entrada bloqueava todas as outras no executor.
+    #[test]
+    fn idempotency_key_is_unique_per_symbol_and_candle() {
+        let b = candle_bucket(1_754_568_000);
+        assert_ne!(swing_event_id("AVAXUSDT", b), swing_event_id("LINKUSDT", b));
+        assert_ne!(
+            swing_event_id("AVAXUSDT", b),
+            swing_event_id("AVAXUSDT", b + 1)
+        );
+    }
+
+    /// Dois instantes dentro da MESMA vela têm de gerar a mesma chave — é o que
+    /// impede o avaliador de 60s republicar o setup 240 vezes.
+    #[test]
+    fn same_candle_yields_the_same_key() {
+        let start = 1_754_568_000u64 / CANDLE_SECS * CANDLE_SECS;
+        assert_eq!(candle_bucket(start), candle_bucket(start + CANDLE_SECS - 1));
+        assert_ne!(candle_bucket(start), candle_bucket(start + CANDLE_SECS));
     }
 
     #[test]

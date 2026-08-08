@@ -1516,10 +1516,27 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     return;
                 }
             };
+            // Setups já publicados na vela corrente. O avaliador roda a cada
+            // 60s para reagir logo que a vela vira, não para reapresentar o
+            // mesmo setup 240 vezes — sem isto o stream e o log enchem de
+            // repetições que o executor vai descartar de qualquer forma.
+            let mut published: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut current_bucket = 0u64;
             loop {
                 tokio::select! {
                     _ = eval_shutdown.changed() => break,
                     _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                }
+
+                let bucket = swing_runner::candle_bucket(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                );
+                if bucket != current_bucket {
+                    current_bucket = bucket;
+                    published.clear();
                 }
 
                 let open_symbols: Vec<String> = match &eval_pool {
@@ -1541,12 +1558,17 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     &swing::SwingParams::default(),
                 );
                 for d in decisions {
+                    let event_id = swing_runner::swing_event_id(&d.symbol, bucket);
+                    if !published.insert(event_id.clone()) {
+                        continue;
+                    }
                     info!(
                         symbol = %d.symbol, entry = d.entry_price,
                         stop = d.stop_loss, target = d.take_profit,
+                        candle = bucket,
                         "Swing setup found"
                     );
-                    if let Err(e) = publish_decision_event(&mut conn, "swing-4h", d).await {
+                    if let Err(e) = publish_decision_event(&mut conn, &event_id, d).await {
                         error!(error = %e, "Failed to publish swing entry");
                     }
                 }
