@@ -16,6 +16,8 @@ export interface SwingSymbolDiagnostic {
   /** Fração do preço, não pontos percentuais. */
   risk_pct: number | null;
   risk_in_range: boolean;
+  /** Fração positiva do preço até o próximo obstáculo; null se não for preço. */
+  distance_pct: number | null;
   has_position: boolean;
   candles: number;
   status: string;
@@ -35,7 +37,11 @@ export interface SwingMatrixData {
 // tela mostrava onze linhas de indicadores que não decidiam nada e ainda
 // alertava "tendência fraca (ADX 14)" como se algo estivesse filtrando por ali.
 const GRID =
-  'grid grid-cols-[104px_96px_150px_150px_96px_minmax(190px,1fr)] items-center gap-x-3';
+  'grid grid-cols-[104px_96px_150px_150px_84px_150px_minmax(170px,1fr)] items-center gap-x-3';
+
+// Acima disto o símbolo não é acionável no horizonte de dias — a barra satura e
+// para de disputar atenção com quem está a menos de 1%.
+const DISTANCIA_MAX_PCT = 5;
 
 /** Ordem de leitura: primeiro o que exige ação, por último o que está parado. */
 const PESO: Record<string, number> = {
@@ -55,6 +61,62 @@ function statusTone(status: string) {
   if (status === 'awaiting_pullback')
     return 'bg-amber-500/10 text-amber-400/90 border-amber-500/25';
   return 'bg-muted/40 text-muted-foreground border-border';
+}
+
+/**
+ * Termômetro de proximidade: quanto FALTA de movimento até o próximo obstáculo.
+ *
+ * Cheio = colado no gatilho. A escala satura em 5%, senão um símbolo a 12% da
+ * EMA200 achataria a barra de quem está a 0,4% da EMA50 — e é justamente esse
+ * que o operador precisa enxergar.
+ */
+function Proximity({
+  pct,
+  status,
+}: {
+  pct: number | null;
+  status: string;
+}) {
+  const t = useT('swing');
+  const locale = useLocale();
+  if (pct == null) {
+    return <span className="text-2xs text-muted-foreground/40">—</span>;
+  }
+  const p = pct * 100;
+  const cheio = Math.max(0, Math.min(1, 1 - p / DISTANCIA_MAX_PCT));
+  const perto = p <= 1;
+  const cor =
+    status === 'setup'
+      ? 'bg-accent'
+      : perto
+        ? 'bg-amber-400'
+        : cheio > 0.4
+          ? 'bg-amber-500/50'
+          : 'bg-muted-foreground/30';
+  // Seta = para onde o preço precisa ir. Sem ela "falta 5,2%" é ambíguo.
+  const seta = status === 'no_uptrend' ? '↑' : status === 'awaiting_pullback' ? '↓' : '';
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-muted/50">
+        <div
+          className={cn('h-full rounded-full transition-all', cor)}
+          style={{ width: `${cheio * 100}%` }}
+        />
+      </div>
+      <span
+        className={cn(
+          'font-mono text-3xs tabular-nums',
+          status === 'setup'
+            ? 'text-accent'
+            : perto
+              ? 'text-amber-400'
+              : 'text-muted-foreground'
+        )}
+      >
+        {status === 'setup' ? t('atTrigger') : `${seta}${formatPct(locale, p, p < 1 ? 2 : 1)}`}
+      </span>
+    </div>
+  );
 }
 
 /** Célula de regra: o valor comparado, e se a regra passou. */
@@ -147,6 +209,7 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
             <span>{t('colTrend')}</span>
             <span>{t('colPullback')}</span>
             <span>{t('colRisk')}</span>
+            <span>{t('colDistance')}</span>
             <span>{t('colLevels')}</span>
           </div>
 
@@ -209,6 +272,8 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
                 >
                   {d.risk_pct != null ? formatPct(locale, d.risk_pct * 100, 2) : '—'}
                 </span>
+
+                <Proximity pct={d.distance_pct} status={d.status} />
 
                 {/* Stop e alvo que ESTE símbolo teria se entrasse agora — é o
                     que torna a linha acionável em vez de descritiva. */}

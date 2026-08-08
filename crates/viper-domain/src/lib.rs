@@ -404,6 +404,14 @@ pub struct SwingSymbolDiagnostic {
     /// Fração do preço, não pontos percentuais.
     pub risk_pct: Option<f64>,
     pub risk_in_range: bool,
+    /// Quanto o preço ainda precisa andar para vencer o PRÓXIMO obstáculo do
+    /// checklist, como fração positiva do preço. `None` quando não é distância
+    /// de preço que separa o símbolo do setup (já posicionado, risco fora da
+    /// faixa, histórico curto).
+    ///
+    /// Sem isto a matriz é binária e não distingue um símbolo a 0,3% da EMA50
+    /// de outro a 8% — que é a diferença entre "olhe hoje" e "esqueça".
+    pub distance_pct: Option<f64>,
     pub has_position: bool,
     pub candles: usize,
     /// Rótulo estável: `setup`, `position_open`, `macro_blocked`, `no_uptrend`,

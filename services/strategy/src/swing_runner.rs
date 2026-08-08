@@ -214,6 +214,21 @@ pub fn diagnose_symbols(
             let target = d
                 .risk_pct
                 .map(|r| d.price * (1.0 + r * params.risk_reward));
+            let status = d.status(has_position, btc_uptrend);
+            // O próximo obstáculo, não todos: um símbolo em queda precisa
+            // primeiro recuperar a EMA200 — só depois o recuo passa a importar.
+            let distance_pct = match status {
+                "setup" => Some(0.0),
+                "awaiting_pullback" => d
+                    .ema_fast
+                    .filter(|_| d.price > 0.0)
+                    .map(|f| ((d.price - f) / d.price).max(0.0)),
+                "no_uptrend" => d
+                    .ema_slow
+                    .filter(|_| d.price > 0.0)
+                    .map(|sl| ((sl - d.price) / d.price).max(0.0)),
+                _ => None,
+            };
             SwingSymbolDiagnostic {
                 symbol: symbol.clone(),
                 price: d.price,
@@ -225,9 +240,10 @@ pub fn diagnose_symbols(
                 target,
                 risk_pct: d.risk_pct,
                 risk_in_range: d.risk_in_range,
+                distance_pct,
                 has_position,
                 candles: d.candles,
-                status: d.status(has_position, btc_uptrend).to_string(),
+                status: status.to_string(),
             }
         })
         .collect();
@@ -401,6 +417,50 @@ mod tests {
         let snap = diagnose_symbols(&store, &[], &SwingParams::default());
         let nomes: Vec<&str> = snap.symbols.iter().map(|s| s.symbol.as_str()).collect();
         assert_eq!(nomes, vec!["APTUSDT", "LINKUSDT"]);
+    }
+
+    /// A distância aponta o PRÓXIMO obstáculo, não a soma de todos: um símbolo
+    /// abaixo da EMA200 precisa recuperá-la antes que o recuo signifique algo.
+    #[test]
+    fn distance_tracks_the_next_obstacle_only() {
+        let p = SwingParams::default();
+        // Série em queda: preço fecha abaixo da média longa.
+        let queda: Vec<Candle> = (0..250)
+            .map(|i| {
+                let b = 200.0 - i as f64 * 0.4;
+                Candle { open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
+            })
+            .collect();
+        // O BTC precisa estar em ALTA, senão o filtro macro barra antes e o
+        // status vira `macro_blocked` — que é a precedência correta, mas não é
+        // o que este teste mede.
+        let alta: Vec<Candle> = (0..250)
+            .map(|i| {
+                let b = 100.0 + i as f64 * 0.5;
+                Candle { open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
+            })
+            .collect();
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), alta);
+        store.insert("XUSDT".to_string(), queda);
+        let snap = diagnose_symbols(&store, &[], &p);
+        let x = &snap.symbols[0];
+        assert_eq!(x.status, "no_uptrend");
+        let d = x.distance_pct.expect("distância até a EMA200");
+        assert!(d > 0.0, "preço abaixo da lenta deve exigir alta, veio {d}");
+        // e a distância bate com a própria EMA lenta reportada
+        let esperado = (x.ema_slow.unwrap() - x.price) / x.price;
+        assert!((d - esperado).abs() < 1e-12);
+    }
+
+    /// Onde não é preço que separa do setup, a distância não é inventada.
+    #[test]
+    fn distance_is_absent_when_price_is_not_the_obstacle() {
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), Vec::new());
+        store.insert("APTUSDT".to_string(), Vec::new());
+        let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &SwingParams::default());
+        assert!(snap.symbols[0].distance_pct.is_none());
     }
 
     /// Símbolo com posição aberta é reportado como tal, e não como bloqueio.
