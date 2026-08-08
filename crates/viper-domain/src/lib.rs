@@ -21,6 +21,13 @@ pub const REDIS_STREAM_CONTROL_EVENTS: &str = "viper:control_events";
 /// misturar com `market_data` faria um lado esperar pelo outro.
 pub const REDIS_STREAM_SWING_CANDLES: &str = "viper:swing_candles";
 
+/// Snapshot do checklist de swing por símbolo, para a matriz de decisão.
+///
+/// Chave simples, não stream: é estado corrente, não histórico. Quem lê quer
+/// sempre a última avaliação, e um stream obrigaria a API a rastrear offsets
+/// para descartar tudo menos a ponta.
+pub const REDIS_KEY_SWING_DIAGNOSTICS: &str = "viper:swing_diagnostics";
+
 pub const STREAM_GROUP_STRATEGY: &str = "strategy";
 pub const STREAM_GROUP_EXECUTOR: &str = "executor";
 pub const STREAM_GROUP_WS_BRIDGE: &str = "ws-bridge";
@@ -376,6 +383,44 @@ pub struct SwingCandlesEvent {
     pub symbol: String,
     pub interval: String,
     pub candles: Vec<OhlcCandle>,
+}
+
+/// Estado de um símbolo no checklist de swing, como a matriz de decisão mostra.
+///
+/// Os campos são o resultado das regras, não indicadores soltos: a tela anterior
+/// exibia RSI, %B e ADX — medidas do pipeline de scalp que não participam de
+/// nenhuma decisão desde 2026-08-07 — e por isso não conseguia dizer por que não
+/// havia entradas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwingSymbolDiagnostic {
+    pub symbol: String,
+    pub price: f64,
+    pub ema_slow: Option<f64>,
+    pub ema_fast: Option<f64>,
+    pub uptrend: bool,
+    pub pullback: bool,
+    pub stop: Option<f64>,
+    pub target: Option<f64>,
+    /// Fração do preço, não pontos percentuais.
+    pub risk_pct: Option<f64>,
+    pub risk_in_range: bool,
+    pub has_position: bool,
+    pub candles: usize,
+    /// Rótulo estável: `setup`, `position_open`, `macro_blocked`, `no_uptrend`,
+    /// `awaiting_pullback`, `risk_out_of_range`, `insufficient_history`.
+    pub status: String,
+}
+
+/// A avaliação inteira de um ciclo: filtro macro + todos os símbolos.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwingDiagnosticsSnapshot {
+    pub schema_version: String,
+    pub timestamp: String,
+    /// O filtro do BTC precede tudo: fechado, nenhum símbolo entra.
+    pub btc_uptrend: bool,
+    pub btc_price: Option<f64>,
+    pub btc_ema_slow: Option<f64>,
+    pub symbols: Vec<SwingSymbolDiagnostic>,
 }
 
 impl SwingCandlesEvent {

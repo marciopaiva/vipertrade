@@ -174,6 +174,93 @@ pub fn evaluate_long(candles: &[Candle], btc_uptrend: bool, p: &SwingParams) -> 
     })
 }
 
+/// Estado de cada regra do checklist para um símbolo, no instante da avaliação.
+///
+/// Existe para a matriz de decisão poder mostrar POR QUE não há entrada — a
+/// tela anterior herdou as colunas do scalp (RSI, %B, ADX, consenso) e passou a
+/// exibir onze linhas de indicadores que não participam mais de nenhuma decisão.
+///
+/// Deriva das mesmas funções que decidem (`is_uptrend`, `is_pullback`,
+/// `structural_low`), e não de uma cópia da regra: um diagnóstico que pode
+/// divergir do motor é pior que nenhum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwingDiagnosis {
+    pub price: f64,
+    pub ema_slow: Option<f64>,
+    pub ema_fast: Option<f64>,
+    /// Regra 1 — preço acima da média longa.
+    pub uptrend: bool,
+    /// Regra 2 — preço recuou até a média curta.
+    pub pullback: bool,
+    /// Fundo estrutural das últimas `swing_lookback` velas, já com a folga.
+    pub stop: Option<f64>,
+    /// Distância até o stop, em fração do preço.
+    pub risk_pct: Option<f64>,
+    /// Regra 3 — o risco cabe na faixa operável.
+    pub risk_in_range: bool,
+    /// Velas disponíveis; abaixo de `ema_slow` não há como avaliar.
+    pub candles: usize,
+}
+
+impl SwingDiagnosis {
+    /// Rótulo estável do estado, resolvido na ordem em que as regras barram.
+    ///
+    /// `has_position` e `btc_uptrend` entram aqui porque precedem o checklist:
+    /// não adianta dizer "sem recuo" para um símbolo que já está posicionado.
+    pub fn status(&self, has_position: bool, btc_uptrend: bool) -> &'static str {
+        if has_position {
+            return "position_open";
+        }
+        if self.candles < 200 {
+            return "insufficient_history";
+        }
+        if !btc_uptrend {
+            return "macro_blocked";
+        }
+        if !self.uptrend {
+            return "no_uptrend";
+        }
+        if !self.pullback {
+            return "awaiting_pullback";
+        }
+        if !self.risk_in_range {
+            return "risk_out_of_range";
+        }
+        "setup"
+    }
+}
+
+/// Avalia o checklist e devolve o estado de cada regra, sem decidir nada.
+pub fn diagnose(candles: &[Candle], p: &SwingParams) -> SwingDiagnosis {
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+    let price = closes.last().copied().unwrap_or(0.0);
+    let slow = ema(&closes, p.ema_slow);
+    let fast = ema(&closes, p.ema_fast);
+    let uptrend = is_uptrend(candles, p).unwrap_or(false);
+    let pullback = is_pullback(candles, p).unwrap_or(false);
+    let stop = structural_low(candles, p.swing_lookback).map(|l| l * (1.0 - p.stop_margin_pct));
+    let risk_pct = stop.and_then(|st| {
+        if price > 0.0 && st < price {
+            Some((price - st) / price)
+        } else {
+            None
+        }
+    });
+    let risk_in_range = risk_pct.is_some_and(|r| r >= p.min_stop_pct && r <= p.max_stop_pct);
+
+    SwingDiagnosis {
+        price,
+        ema_slow: slow,
+        ema_fast: fast,
+        uptrend,
+        pullback,
+        stop,
+        risk_pct,
+        risk_in_range,
+        candles: candles.len(),
+    }
+}
+
 /// Motivo de saída de uma posição swing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SwingExit {
@@ -267,6 +354,66 @@ mod tests {
             v.push(c(px + 1.5, px + 2.0, px - 1.5, px));
         }
         v
+    }
+
+    // ── diagnóstico do checklist ──────────────────────────────────
+    /// O diagnóstico só serve se concordar com quem decide. Se `diagnose` disser
+    /// "setup" e `evaluate_long` não devolver nada (ou vice-versa), a tela passa
+    /// a mentir sobre o motor — que é pior do que não ter tela.
+    #[test]
+    fn diagnosis_agrees_with_the_decision() {
+        let p = SwingParams::default();
+        let series = uptrend_with_pullback();
+        for corte in [200usize, 220, 240, series.len()] {
+            let janela = &series[..corte.min(series.len())];
+            let d = diagnose(janela, &p);
+            let diz_setup = d.status(false, true) == "setup";
+            let tem_setup = evaluate_long(janela, true, &p).is_some();
+            assert_eq!(
+                diz_setup, tem_setup,
+                "divergência com {corte} velas: diagnóstico={diz_setup} motor={tem_setup}"
+            );
+        }
+    }
+
+    /// Uma posição aberta precede o checklist: dizer "sem recuo" para um símbolo
+    /// já posicionado descreve uma avaliação que não vale.
+    #[test]
+    fn open_position_precedes_every_other_reason() {
+        let d = diagnose(&uptrend_with_pullback(), &SwingParams::default());
+        assert_eq!(d.status(true, true), "position_open");
+        assert_eq!(d.status(true, false), "position_open");
+    }
+
+    /// O filtro macro vem antes das regras do símbolo — quando o BTC fecha, o
+    /// estado individual não é o motivo de não haver entrada.
+    #[test]
+    fn macro_filter_precedes_the_symbol_rules() {
+        let d = diagnose(&uptrend_with_pullback(), &SwingParams::default());
+        assert_eq!(d.status(false, false), "macro_blocked");
+        assert_eq!(d.status(false, true), "setup");
+    }
+
+    /// Série curta não é "sem tendência": é ausência de avaliação.
+    #[test]
+    fn short_history_is_reported_as_such() {
+        let curta: Vec<Candle> = (0..50).map(|i| {
+            let b = 100.0 + i as f64;
+            c(b, b + 1.0, b - 1.0, b)
+        }).collect();
+        assert_eq!(diagnose(&curta, &SwingParams::default()).status(false, true),
+                   "insufficient_history");
+    }
+
+    /// O stop do diagnóstico tem de ser o MESMO que a entrada usaria.
+    #[test]
+    fn diagnosed_stop_matches_the_setup_stop() {
+        let p = SwingParams::default();
+        let série = uptrend_with_pullback();
+        let d = diagnose(&série, &p);
+        let setup = evaluate_long(&série, true, &p).expect("setup");
+        assert!((d.stop.unwrap() - setup.stop).abs() < 1e-9);
+        assert!((d.risk_pct.unwrap() - setup.risk_pct).abs() < 1e-9);
     }
 
     // ── saída por stop/alvo fixos ─────────────────────────────────

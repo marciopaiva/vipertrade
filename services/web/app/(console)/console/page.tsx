@@ -15,7 +15,7 @@ import { PositionGauge } from '@/components/console/PositionGauge';
 import { LiveFeed } from '@/components/console/LiveFeed';
 import { DeckSkeleton } from '@/components/console/DeckSkeleton';
 import { EquityCurve } from '@/components/analysis/EquityCurve';
-import { DecisionRow, ROW_GRID } from '@/components/cockpit/DecisionRow';
+import { SwingMatrix, type SwingMatrixData } from '@/components/cockpit/SwingMatrix';
 
 interface PositionItem {
   strategy_kind?: string;
@@ -60,7 +60,6 @@ type LooseSignal = any;
 export default function CommandDeckPage() {
   const t = useT('deck');
   const tc = useT('console');
-  const ts = useT('strategy');
   const locale = useLocale();
 
   const { data: dashboardData, loading } = useDashboard<DashboardData>(
@@ -68,6 +67,12 @@ export default function CommandDeckPage() {
     { refreshInterval: 5000, enabled: true }
   );
   const { decisions, live } = useDecisions();
+  // A matriz vem pronta do strategy: o checklist é avaliado a cada 60s no mesmo
+  // ciclo que decide, então recalcular aqui só criaria uma segunda verdade.
+  const { data: swingMatrix } = useDashboard<SwingMatrixData>(
+    '/api/strategy/swing-matrix',
+    { refreshInterval: 15000, enabled: true }
+  );
 
   // Slide a 24h window forward so the equity sparkline stays honest on a
   // long-open page (Date.now() is impure during render).
@@ -113,10 +118,6 @@ export default function CommandDeckPage() {
   }
 
   const openPositions = dashboardData?.positions?.items ?? [];
-  const guardedSetups = decisions.filter(d => {
-    const pb = d.consensus_bollinger_percent_b;
-    return typeof pb === 'number' && (pb > 0.85 || pb < 0.15);
-  }).length;
   const todayCount =
     dashboardData?.daily_trades_summary?.count ??
     dashboardData?.performance?.last_24h?.total_trades ??
@@ -130,12 +131,6 @@ export default function CommandDeckPage() {
   const winRate = dashboardData?.performance?.last_24h?.win_rate;
   const up = pnl24h >= 0;
 
-  // Entering symbols float to the top (the actionable ones), then alphabetical.
-  const ordered = [...decisions].sort((a, b) => {
-    const ae = a.action.startsWith('ENTER') ? 0 : 1;
-    const be = b.action.startsWith('ENTER') ? 0 : 1;
-    return ae - be || a.symbol.localeCompare(b.symbol);
-  });
 
   return (
     <div className="space-y-4">
@@ -230,38 +225,11 @@ export default function CommandDeckPage() {
       {/* Open positions — risk rail (self-framed) */}
       <PositionGauge
         positions={openPositions}
-        guardedSetups={guardedSetups}
         marketSignals={marketSignals}
       />
 
-      {/* Decision matrix (folded from /strategy) */}
-      <HudFrame title={t('decisionMatrix')}>
-        {decisions.length === 0 ? (
-          <div className="px-3 py-10 text-center text-sm text-muted-foreground">
-            {ts('empty')}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <div
-              className={cn(
-                ROW_GRID,
-                'border-b border-border px-3 py-2 text-3xs uppercase tracking-[0.15em] text-muted-foreground'
-              )}
-            >
-              <span>{ts('colSymbol')}</span>
-              <span>{ts('colState')}</span>
-              <span>{ts('colConsensus')}</span>
-              <span>{ts('colRsi')}</span>
-              <span>{ts('colPb')}</span>
-              <span>{ts('colAdx')}</span>
-              <span>{ts('colWhy')}</span>
-            </div>
-            {ordered.map(d => (
-              <DecisionRow key={d.symbol} d={d} />
-            ))}
-          </div>
-        )}
-      </HudFrame>
+      {/* Decision matrix — o checklist de swing que realmente decide */}
+      <SwingMatrix data={swingMatrix} />
     </div>
   );
 }

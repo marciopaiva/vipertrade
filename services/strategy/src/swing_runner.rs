@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use viper_domain::{
     stream_ensure_group, OhlcCandle, StrategyDecision, SwingCandlesEvent,
-    REDIS_STREAM_SWING_CANDLES,
+    SwingDiagnosticsSnapshot, SwingSymbolDiagnostic, REDIS_STREAM_SWING_CANDLES,
 };
 
 use crate::swing::{self, Candle, SwingParams};
@@ -188,6 +188,61 @@ pub(crate) async fn run_candle_reader(
     }
 }
 
+/// Monta o snapshot do checklist para a matriz de decisão.
+///
+/// Roda no MESMO ciclo que `evaluate_symbols` e a partir do mesmo store, para
+/// que a tela não possa discordar do motor. O alvo entra aqui já calculado
+/// porque é o que o operador compara com o preço — recalculá-lo no front seria
+/// espalhar a regra do R:R por outra linguagem.
+pub fn diagnose_symbols(
+    store: &HashMap<String, Vec<Candle>>,
+    open_symbols: &[String],
+    params: &SwingParams,
+) -> SwingDiagnosticsSnapshot {
+    let btc = store.get(MACRO_SYMBOL);
+    let btc_diag = btc.map(|c| swing::diagnose(c, params));
+    let btc_uptrend = btc
+        .and_then(|c| swing::is_uptrend(c, params))
+        .unwrap_or(false);
+
+    let mut symbols: Vec<SwingSymbolDiagnostic> = store
+        .iter()
+        .filter(|(s, _)| s.as_str() != MACRO_SYMBOL)
+        .map(|(symbol, candles)| {
+            let d = swing::diagnose(candles, params);
+            let has_position = open_symbols.iter().any(|s| s == symbol);
+            let target = d
+                .risk_pct
+                .map(|r| d.price * (1.0 + r * params.risk_reward));
+            SwingSymbolDiagnostic {
+                symbol: symbol.clone(),
+                price: d.price,
+                ema_slow: d.ema_slow,
+                ema_fast: d.ema_fast,
+                uptrend: d.uptrend,
+                pullback: d.pullback,
+                stop: d.stop,
+                target,
+                risk_pct: d.risk_pct,
+                risk_in_range: d.risk_in_range,
+                has_position,
+                candles: d.candles,
+                status: d.status(has_position, btc_uptrend).to_string(),
+            }
+        })
+        .collect();
+    symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
+    SwingDiagnosticsSnapshot {
+        schema_version: viper_domain::SCHEMA_VERSION.to_string(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        btc_uptrend,
+        btc_price: btc_diag.as_ref().map(|d| d.price),
+        btc_ema_slow: btc_diag.as_ref().and_then(|d| d.ema_slow),
+        symbols,
+    }
+}
+
 /// Símbolos com setup válido no momento.
 ///
 /// Devolve as decisões em vez de publicá-las: publicar é responsabilidade de
@@ -335,6 +390,35 @@ mod tests {
 
     /// A chave precisa separar símbolos E velas. Com uma constante, a primeira
     /// entrada bloqueava todas as outras no executor.
+    /// O diagnóstico cobre TODOS os símbolos do store, inclusive os que não têm
+    /// setup — é justamente para eles que a matriz existe.
+    #[test]
+    fn diagnostic_covers_every_symbol_except_the_macro_one() {
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), Vec::new());
+        store.insert("APTUSDT".to_string(), Vec::new());
+        store.insert("LINKUSDT".to_string(), Vec::new());
+        let snap = diagnose_symbols(&store, &[], &SwingParams::default());
+        let nomes: Vec<&str> = snap.symbols.iter().map(|s| s.symbol.as_str()).collect();
+        assert_eq!(nomes, vec!["APTUSDT", "LINKUSDT"]);
+    }
+
+    /// Símbolo com posição aberta é reportado como tal, e não como bloqueio.
+    #[test]
+    fn diagnostic_flags_open_positions() {
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), Vec::new());
+        store.insert("APTUSDT".to_string(), Vec::new());
+        let snap = diagnose_symbols(
+            &store,
+            &["APTUSDT".to_string()],
+            &SwingParams::default(),
+        );
+        let apt = &snap.symbols[0];
+        assert!(apt.has_position);
+        assert_eq!(apt.status, "position_open");
+    }
+
     #[test]
     fn idempotency_key_is_unique_per_symbol_and_candle() {
         let b = candle_bucket(1_754_568_000);

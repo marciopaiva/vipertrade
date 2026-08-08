@@ -39,7 +39,6 @@ interface Position {
 interface PositionGaugeProps {
   positions: Position[];
   marketSignals?: MarketSignal[];
-  guardedSetups?: number;
   className?: string;
 }
 
@@ -373,7 +372,6 @@ function Stat({
 export function PositionGauge({
   positions,
   marketSignals = [],
-  guardedSetups,
   className,
 }: PositionGaugeProps) {
   const t = useT('positions');
@@ -382,9 +380,7 @@ export function PositionGauge({
       <HudFrame title={t('title')} className={className}>
         <div className="py-8 text-center">
           <p className="font-medium text-foreground/80">
-            {guardedSetups && guardedSetups > 0
-              ? t('flatGuards', { n: guardedSetups })
-              : t('flatNoPos')}
+            {t('flatNoPos')}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">{t('flatNote')}</p>
         </div>

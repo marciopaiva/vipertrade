@@ -1171,6 +1171,56 @@ struct TradeQualityResponse {
     worst_symbols: Vec<SymbolPnlItem>,
 }
 
+/// Matriz de decisão do swing: o estado do checklist para cada símbolo.
+///
+/// Serve o snapshot que o strategy publica, sem recalcular nada. Reproduzir as
+/// regras aqui daria uma tela capaz de discordar do motor — e a API já pagou
+/// esse preço quando a fórmula do PnL líquido existia em cinco cópias.
+async fn swing_matrix_handler(_state: Arc<AppState>) -> impl Reply {
+    let url = resolve_redis_url();
+    let raw: Result<Option<String>, String> = async {
+        let client = redis::Client::open(url.as_str()).map_err(|e| e.to_string())?;
+        let mut conn = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| e.to_string())?;
+        redis::cmd("GET")
+            .arg(viper_domain::REDIS_KEY_SWING_DIAGNOSTICS)
+            .query_async::<Option<String>>(&mut conn)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    .await;
+
+    match raw {
+        // Chave ausente = avaliador parado ou snapshot expirado (TTL 5 min).
+        // Devolver 200 com `stale` deixa a tela dizer isso, em vez de renderizar
+        // uma matriz vazia que parece "nenhum símbolo".
+        Ok(None) => warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({ "stale": true, "symbols": [] })),
+            StatusCode::OK,
+        ),
+        Ok(Some(json)) => match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(mut v) => {
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("stale".to_string(), serde_json::Value::Bool(false));
+                }
+                warp::reply::with_status(warp::reply::json(&v), StatusCode::OK)
+            }
+            Err(e) => json_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid_snapshot",
+                &format!("swing diagnostics payload is not valid JSON: {e}"),
+            ),
+        },
+        Err(e) => json_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "redis_unavailable",
+            &format!("could not read swing diagnostics: {e}"),
+        ),
+    }
+}
+
 // LIVE trade-quality metrics over realized (closed, paper) trades — NOT a backtest.
 // Surfaces the diagnostics we actually validate by: close-reason attribution, entry
 // follow-through (did the trade ever reach net profit, or die stillborn?), and — only
@@ -3066,6 +3116,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and(with_state(state.clone()))
         .then(trade_quality_handler);
 
+    let swing_matrix = api_v1
+        .and(warp::path("strategy"))
+        .and(warp::path("swing-matrix"))
+        .and(warp::path::end())
+        .and(with_state(state.clone()))
+        .then(swing_matrix_handler);
+
     let risk_kpis = api_v1
         .and(warp::path("risk"))
         .and(warp::path("kpis"))
@@ -3186,6 +3243,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .or(performance)
         .or(symbol_pnl)
         .or(trade_quality)
+        .or(swing_matrix)
         .or(risk_kpis)
         .or(bybit_private_health)
         .or(bybit_wallet)

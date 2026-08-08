@@ -1557,6 +1557,33 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     eval_cfg.max_position_cap_usdt("", eval_fallback_equity),
                     &swing::SwingParams::default(),
                 );
+                // Snapshot do checklist para a matriz de decisão. Publicado a
+                // cada ciclo, tenha ou não setup — a tela precisa justamente
+                // dos símbolos que NÃO entraram.
+                let snap = swing_runner::diagnose_symbols(
+                    &snapshot,
+                    &open_symbols,
+                    &swing::SwingParams::default(),
+                );
+                match serde_json::to_string(&snap) {
+                    Ok(json) => {
+                        let r: Result<(), _> = redis::cmd("SET")
+                            .arg(viper_domain::REDIS_KEY_SWING_DIAGNOSTICS)
+                            .arg(json)
+                            // Expira em 5 min: se o avaliador parar, a matriz
+                            // fica vazia em vez de mostrar um estado velho como
+                            // se fosse atual.
+                            .arg("EX")
+                            .arg(300)
+                            .query_async(&mut conn)
+                            .await;
+                        if let Err(e) = r {
+                            warn!(error = %e, "Failed to publish swing diagnostics");
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "Failed to serialize swing diagnostics"),
+                }
+
                 for d in decisions {
                     let event_id = swing_runner::swing_event_id(&d.symbol, bucket);
                     if !published.insert(event_id.clone()) {
