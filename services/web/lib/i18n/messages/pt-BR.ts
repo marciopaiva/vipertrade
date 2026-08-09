@@ -295,7 +295,8 @@ const ptBR: Messages = {
     title: 'Matriz de decisão · swing 4H',
     macroFilter: 'Filtro macro',
     macroOpen: 'liberado',
-    macroBlocked: 'bloqueia todas as entradas',
+    sideLong: 'procurando COMPRA',
+    sideShort: 'procurando VENDA',
     macroUnknown: 'sem leitura',
     evaluatedAgo: 'avaliado há {age}',
     unavailable: 'Matriz indisponível — não foi possível ler a avaliação do strategy.',
@@ -317,7 +318,7 @@ const ptBR: Messages = {
     st_awaiting_pullback: 'aguarda recuo',
     st_risk_out_of_range: 'risco fora da faixa',
     st_no_uptrend: 'sem alta',
-    st_macro_blocked: 'BTC bloqueia',
+    st_no_downtrend: 'sem baixa',
     st_insufficient_history: 'histórico curto',
   },
   auth: {

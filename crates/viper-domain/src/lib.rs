@@ -394,11 +394,15 @@ pub struct SwingCandlesEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwingSymbolDiagnostic {
     pub symbol: String,
+    /// Lado que o filtro macro habilita agora: `Long` ou `Short`.
+    pub side: String,
     pub price: f64,
     pub ema_slow: Option<f64>,
     pub ema_fast: Option<f64>,
-    pub uptrend: bool,
-    pub pullback: bool,
+    /// Regra 1 do lado ativo — acima da EMA200 no long, abaixo no short.
+    pub trend_ok: bool,
+    /// Regra 2 do lado ativo — recuo à EMA50 no long, repique no short.
+    pub pullback_ok: bool,
     pub stop: Option<f64>,
     pub target: Option<f64>,
     /// Fração do preço, não pontos percentuais.

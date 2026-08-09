@@ -103,6 +103,7 @@ pub const SWING_ENTRY_PREFIX: &str = "swing_entry";
 /// arriscaria muito mais que um calmo com a mesma posição em dólar.
 pub fn build_entry(
     symbol: &str,
+    is_long: bool,
     setup: &swing::SwingSetup,
     equity_usdt: f64,
     risk_per_trade: f64,
@@ -126,7 +127,7 @@ pub fn build_entry(
     }
 
     Some(StrategyDecision {
-        action: "ENTER_LONG".to_string(),
+        action: if is_long { "ENTER_LONG" } else { "ENTER_SHORT" }.to_string(),
         symbol: symbol.to_string(),
         quantity,
         leverage,
@@ -237,40 +238,54 @@ pub(crate) fn diagnose_symbols(
     params: &SwingParams,
 ) -> SwingDiagnosticsSnapshot {
     let btc = store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice());
-    let btc_diag = btc.map(|c| swing::diagnose(c, params));
+    // O macro escolhe o LADO, não bloqueia: BTC acima da própria EMA200 procura
+    // compra, abaixo procura venda. Sem série do BTC não há lado definido, e aí
+    // nada é avaliado.
     let btc_uptrend = btc
         .and_then(|c| swing::is_uptrend(c, params))
         .unwrap_or(false);
+    let btc_diag = btc.map(|c| swing::diagnose(c, btc_uptrend, params));
 
     let mut symbols: Vec<SwingSymbolDiagnostic> = store
         .iter()
         .filter(|(s, _)| s.as_str() != MACRO_SYMBOL)
         .map(|(symbol, serie)| {
-            let d = swing::diagnose(&serie.candles, params);
+            let d = swing::diagnose(&serie.candles, btc_uptrend, params);
             let has_position = open_symbols.iter().any(|s| s == symbol);
             let cooling = cooling_symbols.iter().any(|s| s == symbol);
-            let target = d
-                .risk_pct
-                .map(|r| d.price * (1.0 + r * params.risk_reward));
+            let target = d.risk_pct.map(|r| {
+                if btc_uptrend {
+                    d.price * (1.0 + r * params.risk_reward)
+                } else {
+                    d.price * (1.0 - r * params.risk_reward)
+                }
+            });
             // O cooldown precede o checklist: dizer "sem recuo" para um símbolo
             // que está impedido de entrar descreve uma avaliação que não vale.
             let status = if !has_position && cooling {
                 "stop_cooldown"
             } else {
-                d.status(has_position, btc_uptrend)
+                d.status(has_position)
             };
             // O próximo obstáculo, não todos: um símbolo em queda precisa
             // primeiro recuperar a EMA200 — só depois o recuo passa a importar.
             let distance_pct = match status {
                 "setup" => Some(0.0),
-                "awaiting_pullback" => d
-                    .ema_fast
-                    .filter(|_| d.price > 0.0)
-                    .map(|f| ((d.price - f) / d.price).max(0.0)),
-                "no_uptrend" => d
-                    .ema_slow
-                    .filter(|_| d.price > 0.0)
-                    .map(|sl| ((sl - d.price) / d.price).max(0.0)),
+                // No long falta CAIR até a EMA50; no short, SUBIR até ela.
+                "awaiting_pullback" => d.ema_fast.filter(|_| d.price > 0.0).map(|f| {
+                    if btc_uptrend {
+                        ((d.price - f) / d.price).max(0.0)
+                    } else {
+                        ((f - d.price) / d.price).max(0.0)
+                    }
+                }),
+                "no_uptrend" => d.ema_slow.filter(|_| d.price > 0.0).map(|sl| {
+                    if btc_uptrend {
+                        ((sl - d.price) / d.price).max(0.0)
+                    } else {
+                        ((d.price - sl) / d.price).max(0.0)
+                    }
+                }),
                 _ => None,
             };
             SwingSymbolDiagnostic {
@@ -278,8 +293,9 @@ pub(crate) fn diagnose_symbols(
                 price: d.price,
                 ema_slow: d.ema_slow,
                 ema_fast: d.ema_fast,
-                uptrend: d.uptrend,
-                pullback: d.pullback,
+                side: d.side.to_string(),
+                trend_ok: d.trend_ok,
+                pullback_ok: d.pullback_ok,
                 stop: d.stop,
                 target,
                 risk_pct: d.risk_pct,
@@ -307,17 +323,21 @@ pub(crate) fn diagnose_symbols(
 ///
 /// Devolve as decisões em vez de publicá-las: publicar é responsabilidade de
 /// quem tem a conexão, e separar deixa esta função testável sem Redis.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn evaluate_symbols(
     store: &HashMap<String, Series>,
     open_symbols: &[String],
     cooling_symbols: &[String],
+    short_enabled: bool,
     equity_usdt: f64,
     risk_per_trade: f64,
     leverage: f64,
     max_notional_usdt: f64,
     params: &SwingParams,
 ) -> Vec<StrategyDecision> {
-    // Filtro macro: sem série do BTC não há como saber, e na dúvida não se opera.
+    // O macro escolhe o LADO. Sem série do BTC não há lado, e na dúvida não se
+    // opera — antes isto bloqueava as entradas; agora define se procuramos
+    // compra ou venda.
     let btc_uptrend = match store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice()) {
         Some(c) => swing::is_uptrend(c, params).unwrap_or(false),
         None => {
@@ -325,7 +345,10 @@ pub(crate) fn evaluate_symbols(
             return Vec::new();
         }
     };
-    if !btc_uptrend {
+    // O short é medido e positivo (+0,149%/trade), mas rende metade do long e
+    // depende do macro invertido. Fica atrás de uma flag para poder ser
+    // desligado sem rebuild se o funding real comer a margem.
+    if !btc_uptrend && !short_enabled {
         return Vec::new();
     }
 
@@ -343,9 +366,15 @@ pub(crate) fn evaluate_symbols(
         if cooling_symbols.iter().any(|s| s == symbol) {
             continue;
         }
-        if let Some(setup) = swing::evaluate_long(candles, btc_uptrend, params) {
+        let setup = if btc_uptrend {
+            swing::evaluate_long(candles, true, params)
+        } else {
+            swing::evaluate_short(candles, true, params)
+        };
+        if let Some(setup) = setup {
             if let Some(d) = build_entry(
                 symbol,
+                btc_uptrend,
                 &setup,
                 equity_usdt,
                 risk_per_trade,
@@ -384,7 +413,7 @@ mod tests {
     fn quantity_comes_from_the_risk_budget() {
         // Risco de 1% sobre 1000 = $10. Stop a 5% => notional de $200.
         let s = setup(100.0, 95.0, 2.0);
-        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0, 1e9).expect("decisão");
+        let d = build_entry("APTUSDT", true, &s, 1000.0, 0.01, 2.0, 1e9).expect("decisão");
         let notional = d.quantity * d.entry_price;
         assert!((notional - 200.0).abs() < 1e-6, "notional {notional}");
     }
@@ -392,8 +421,8 @@ mod tests {
     /// Stop mais distante tem de gerar posição MENOR — mesmo risco em dólar.
     #[test]
     fn wider_stop_yields_smaller_position() {
-        let apertado = build_entry("A", &setup(100.0, 98.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
-        let largo = build_entry("A", &setup(100.0, 90.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
+        let apertado = build_entry("A", true, &setup(100.0, 98.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
+        let largo = build_entry("A", true, &setup(100.0, 90.0, 2.0), 1000.0, 0.01, 2.0, 1e9).unwrap();
         assert!(
             largo.quantity < apertado.quantity,
             "stop largo deveria reduzir a posição"
@@ -406,7 +435,7 @@ mod tests {
     fn position_is_capped_regardless_of_how_tight_the_stop_is() {
         // Stop a 1% => a fórmula pediria notional de 100x o risco.
         let s = setup(100.0, 99.0, 2.0);
-        let d = build_entry("A", &s, 1000.0, 0.01, 2.0, 30.0).expect("decisão");
+        let d = build_entry("A", true, &s, 1000.0, 0.01, 2.0, 30.0).expect("decisão");
         let notional = d.quantity * d.entry_price;
         assert!(
             notional <= 30.0 + 1e-9,
@@ -417,7 +446,7 @@ mod tests {
     #[test]
     fn entry_carries_stop_and_target() {
         let s = setup(100.0, 95.0, 2.0);
-        let d = build_entry("APTUSDT", &s, 1000.0, 0.01, 2.0, 1e9).unwrap();
+        let d = build_entry("APTUSDT", true, &s, 1000.0, 0.01, 2.0, 1e9).unwrap();
         assert_eq!(d.action, "ENTER_LONG");
         assert!((d.stop_loss - 95.0).abs() < 1e-9);
         assert!((d.take_profit - s.target).abs() < 1e-9);
@@ -431,14 +460,14 @@ mod tests {
     #[test]
     fn rejects_degenerate_inputs() {
         let s = setup(100.0, 95.0, 2.0);
-        assert!(build_entry("A", &s, 0.0, 0.01, 2.0, 1e9).is_none());
+        assert!(build_entry("A", true, &s, 0.0, 0.01, 2.0, 1e9).is_none());
         let zero_risk = swing::SwingSetup {
             entry: 100.0,
             stop: 100.0,
             target: 110.0,
             risk_pct: 0.0,
         };
-        assert!(build_entry("A", &zero_risk, 1000.0, 0.01, 2.0, 1e9).is_none());
+        assert!(build_entry("A", true, &zero_risk, 1000.0, 0.01, 2.0, 1e9).is_none());
     }
 
     /// Sem série do BTC o filtro macro não existe. Operar assim seria ignorar
@@ -451,6 +480,7 @@ mod tests {
             &store,
             &[],
             &[],
+            false,
             1000.0,
             0.01,
             2.0,
@@ -571,6 +601,7 @@ mod tests {
             &store,
             &[],
             &esfriando,
+            false,
             1000.0,
             0.01,
             2.0,
@@ -639,6 +670,7 @@ mod tests {
             &store,
             &["APTUSDT".to_string()],
             &[],
+            false,
             1000.0,
             0.01,
             2.0,

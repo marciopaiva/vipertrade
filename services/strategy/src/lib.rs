@@ -1484,6 +1484,12 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     // com gestão sequencial: sem cooldown a estratégia rende −0,223%/trade; com
     // 24h, +0,337%. É positivo nas duas metades do histórico em qualquer valor
     // de 4h a 24h — o platô é que dá confiança, não o pico. 0 desliga.
+    // O espelho short do checklist. Medido no corpus: +0,149%/trade sozinho
+    // (metade do long), mas leva o out-of-sample do conjunto de −0,501% para
+    // +0,051% porque opera exatamente nos períodos em que o long fica parado.
+    let swing_short_enabled = std::env::var("STRATEGY_SWING_SHORT_ENABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let swing_cooldown_hours: i64 = std::env::var("STRATEGY_SWING_STOP_COOLDOWN_HOURS")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
@@ -1492,6 +1498,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     if swing_enabled {
         info!(
             cooldown_hours = swing_cooldown_hours,
+            short_enabled = swing_short_enabled,
             "Swing enabled"
         );
         let store: swing_runner::CandleStore = Arc::new(Mutex::new(HashMap::new()));
@@ -1581,6 +1588,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     &snapshot,
                     &open_symbols,
                     &cooling_symbols,
+                    swing_short_enabled,
                     eval_fallback_equity,
                     eval_cfg.risk_per_trade_fraction(),
                     eval_cfg.max_leverage(),

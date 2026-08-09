@@ -55,6 +55,25 @@ data:
   # e o swing seguem funcionando com ela em false.
   STRATEGY_REAL_DECISIONS: "false"
 
+  # Espelho short do checklist, habilitado em 2026-08-09.
+  #
+  # O filtro macro deixa de BLOQUEAR e passa a ESCOLHER o lado: com o BTC acima
+  # da própria EMA200 procura-se compra; abaixo, venda. Os dois lados nunca
+  # operam ao mesmo tempo.
+  #
+  # Medido no corpus de 166 dias (universo v5, gestão em 15m, custo real):
+  # o short sozinho rende +0,149%/trade contra +0,312% do long — metade — e
+  # depende do macro invertido (sem ele, −0,066%). O valor não está no retorno
+  # próprio e sim na alternância: o long faz 183 trades na 1ª metade e 48 na 2ª,
+  # o short faz 21 e 155. Combinados, o out-of-sample sai de −0,501% (só long)
+  # para +0,051%, e o volume vai de 231 para 400 trades.
+  #
+  # Ressalva registrada: a medição ignora funding, e no short isso pesa mais —
+  # em queda o funding costuma inverter e quem está vendido paga. O paper cobra
+  # funding real por lado, então o custo aparece nos trades daqui pra frente.
+  # Desligar aqui volta ao comportamento anterior sem rebuild.
+  STRATEGY_SWING_SHORT_ENABLED: "true"
+
   # Espera antes de reentrar num símbolo que acabou de ser estopado.
   #
   # Sem isto o sistema recompra em cima do próprio stop: em 2026-08-09 o

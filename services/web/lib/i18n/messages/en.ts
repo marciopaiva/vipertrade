@@ -292,7 +292,8 @@ const en = {
     title: 'Decision matrix · 4H swing',
     macroFilter: 'Macro filter',
     macroOpen: 'open',
-    macroBlocked: 'blocks every entry',
+    sideLong: 'looking for LONGS',
+    sideShort: 'looking for SHORTS',
     macroUnknown: 'no reading',
     evaluatedAgo: 'evaluated {age} ago',
     unavailable: 'Matrix unavailable — could not read the strategy evaluation.',
@@ -314,7 +315,7 @@ const en = {
     st_awaiting_pullback: 'awaiting pullback',
     st_risk_out_of_range: 'risk out of range',
     st_no_uptrend: 'no uptrend',
-    st_macro_blocked: 'BTC blocks',
+    st_no_downtrend: 'no downtrend',
     st_insufficient_history: 'short history',
   },
   auth: {

@@ -10,8 +10,10 @@ export interface SwingSymbolDiagnostic {
   price: number;
   ema_slow: number | null;
   ema_fast: number | null;
-  uptrend: boolean;
-  pullback: boolean;
+  /** Lado que o macro habilita agora: Long ou Short. */
+  side: string;
+  trend_ok: boolean;
+  pullback_ok: boolean;
   stop: number | null;
   target: number | null;
   /** Fração do preço, não pontos percentuais. */
@@ -52,8 +54,7 @@ const PESO: Record<string, number> = {
   awaiting_pullback: 3,
   risk_out_of_range: 4,
   no_uptrend: 5,
-  macro_blocked: 6,
-  insufficient_history: 7,
+  insufficient_history: 6,
 };
 
 function statusTone(status: string) {
@@ -77,9 +78,11 @@ function statusTone(status: string) {
 function Proximity({
   pct,
   status,
+  isLong,
 }: {
   pct: number | null;
   status: string;
+  isLong: boolean;
 }) {
   const t = useT('swing');
   const locale = useLocale();
@@ -98,7 +101,9 @@ function Proximity({
           ? 'bg-amber-500/50'
           : 'bg-muted-foreground/30';
   // Seta = para onde o preço precisa ir. Sem ela "falta 5,2%" é ambíguo.
-  const seta = status === 'no_uptrend' ? '↑' : status === 'awaiting_pullback' ? '↓' : '';
+  // No long falta subir até a EMA200 / cair até a EMA50; no short, o inverso.
+  const sobe = isLong ? status === 'no_uptrend' : status === 'awaiting_pullback';
+  const seta = status === 'setup' ? '' : sobe ? '↑' : '↓';
   return (
     <div className="flex items-center gap-1.5">
       <div className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-muted/50">
@@ -222,7 +227,7 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
             ? 'border-border bg-muted/20'
             : macroOk
               ? 'border-border bg-accent/5'
-              : 'border-destructive/30 bg-destructive/10'
+              : 'border-sky-500/30 bg-sky-500/5'
         )}
       >
         <span className="text-3xs uppercase tracking-[0.15em] text-muted-foreground">
@@ -241,14 +246,14 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
               ? 'border-border bg-muted/40 text-muted-foreground'
               : macroOk
                 ? 'border-accent/30 bg-accent/15 text-accent'
-                : 'border-destructive/30 bg-destructive/15 text-destructive'
+                : 'border-sky-500/30 bg-sky-500/15 text-sky-400'
           )}
         >
           {semDados
             ? t('macroUnknown')
             : macroOk
-              ? t('macroOpen')
-              : t('macroBlocked')}
+              ? t('sideLong')
+              : t('sideShort')}
         </span>
         <Frescor iso={data?.timestamp} />
       </div>
@@ -299,23 +304,25 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
                     statusTone(d.status)
                   )}
                 >
-                  {t(`st_${d.status}` as never)}
+                  {d.status === 'no_uptrend' && d.side === 'Short'
+                    ? t('st_no_downtrend')
+                    : t(`st_${d.status}` as never)}
                 </span>
 
                 <Rule
-                  ok={d.uptrend}
+                  ok={d.trend_ok}
                   muted={semDados}
                   left={formatPrice(locale, d.price)}
-                  op={d.uptrend ? '>' : '<'}
+                  op={d.price > (d.ema_slow ?? 0) ? '>' : '<'}
                   right={
                     d.ema_slow != null ? formatPrice(locale, d.ema_slow) : '—'
                   }
                 />
                 <Rule
-                  ok={d.pullback}
+                  ok={d.pullback_ok}
                   muted={semDados}
                   left={formatPrice(locale, d.price)}
-                  op={d.pullback ? '≤' : '>'}
+                  op={d.price > (d.ema_fast ?? 0) ? '>' : '≤'}
                   right={
                     d.ema_fast != null ? formatPrice(locale, d.ema_fast) : '—'
                   }
@@ -334,7 +341,11 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
                   {d.risk_pct != null ? formatPct(locale, d.risk_pct * 100, 2) : '—'}
                 </span>
 
-                <Proximity pct={d.distance_pct} status={d.status} />
+                <Proximity
+                  pct={d.distance_pct}
+                  status={d.status}
+                  isLong={d.side !== 'Short'}
+                />
 
                 {/* Stop e alvo que ESTE símbolo teria se entrasse agora — é o
                     que torna a linha acionável em vez de descritiva. */}

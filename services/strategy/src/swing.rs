@@ -174,6 +174,74 @@ pub fn evaluate_long(candles: &[Candle], btc_uptrend: bool, p: &SwingParams) -> 
     })
 }
 
+/// Topo estrutural: a maior máxima das últimas `lookback` velas.
+///
+/// Espelho de `structural_low`, para o short. Mesma restrição: só olha para
+/// trás, senão a regra dependeria do futuro.
+pub fn structural_high(candles: &[Candle], lookback: usize) -> Option<f64> {
+    if candles.is_empty() || lookback == 0 {
+        return None;
+    }
+    let start = candles.len().saturating_sub(lookback);
+    candles[start..]
+        .iter()
+        .map(|c| c.high)
+        .fold(None::<f64>, |acc, h| Some(acc.map_or(h, |a: f64| a.max(h))))
+}
+
+/// Tendência de baixa: preço abaixo da média longa.
+pub fn is_downtrend(candles: &[Candle], p: &SwingParams) -> Option<bool> {
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+    let slow = ema(&closes, p.ema_slow)?;
+    Some(closes.last()? < &slow)
+}
+
+/// Repique: o preço subiu de volta até a média curta.
+pub fn is_rally(candles: &[Candle], p: &SwingParams) -> Option<bool> {
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+    let fast = ema(&closes, p.ema_fast)?;
+    Some(closes.last()? >= &fast)
+}
+
+/// O espelho short do checklist.
+///
+/// Vale menos que o long (+0,149%/trade contra +0,312% no corpus de 166 dias)
+/// e depende do filtro macro INVERTIDO: sem ele o short rende −0,066%. O valor
+/// não está no retorno próprio e sim na alternância — long e short operam em
+/// regimes opostos, então onde um fica parado o outro trabalha. Medido nas
+/// metades do histórico, o long faz 183 trades na primeira e 48 na segunda; o
+/// short faz 21 e 155.
+pub fn evaluate_short(candles: &[Candle], btc_downtrend: bool, p: &SwingParams) -> Option<SwingSetup> {
+    if !btc_downtrend {
+        return None;
+    }
+    if candles.len() < p.ema_slow {
+        return None;
+    }
+    if !is_downtrend(candles, p)? || !is_rally(candles, p)? {
+        return None;
+    }
+
+    let entry = candles.last()?.close;
+    let high = structural_high(candles, p.swing_lookback)?;
+    let stop = high * (1.0 + p.stop_margin_pct);
+    if stop <= entry {
+        return None;
+    }
+
+    let risk_pct = (stop - entry) / entry;
+    if risk_pct < p.min_stop_pct || risk_pct > p.max_stop_pct {
+        return None;
+    }
+
+    Some(SwingSetup {
+        entry,
+        stop,
+        target: entry * (1.0 - risk_pct * p.risk_reward),
+        risk_pct,
+    })
+}
+
 /// Estado de cada regra do checklist para um símbolo, no instante da avaliação.
 ///
 /// Existe para a matriz de decisão poder mostrar POR QUE não há entrada — a
@@ -185,13 +253,15 @@ pub fn evaluate_long(candles: &[Candle], btc_uptrend: bool, p: &SwingParams) -> 
 /// divergir do motor é pior que nenhum.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwingDiagnosis {
+    /// Lado que o filtro macro habilita agora: `Long` ou `Short`.
+    pub side: &'static str,
     pub price: f64,
     pub ema_slow: Option<f64>,
     pub ema_fast: Option<f64>,
-    /// Regra 1 — preço acima da média longa.
-    pub uptrend: bool,
-    /// Regra 2 — preço recuou até a média curta.
-    pub pullback: bool,
+    /// Regra 1 do lado ativo — acima da média longa no long, abaixo no short.
+    pub trend_ok: bool,
+    /// Regra 2 do lado ativo — recuo à média curta no long, repique no short.
+    pub pullback_ok: bool,
     /// Fundo estrutural das últimas `swing_lookback` velas, já com a folga.
     pub stop: Option<f64>,
     /// Distância até o stop, em fração do preço.
@@ -207,20 +277,17 @@ impl SwingDiagnosis {
     ///
     /// `has_position` e `btc_uptrend` entram aqui porque precedem o checklist:
     /// não adianta dizer "sem recuo" para um símbolo que já está posicionado.
-    pub fn status(&self, has_position: bool, btc_uptrend: bool) -> &'static str {
+    pub fn status(&self, has_position: bool) -> &'static str {
         if has_position {
             return "position_open";
         }
         if self.candles < 200 {
             return "insufficient_history";
         }
-        if !btc_uptrend {
-            return "macro_blocked";
-        }
-        if !self.uptrend {
+        if !self.trend_ok {
             return "no_uptrend";
         }
-        if !self.pullback {
+        if !self.pullback_ok {
             return "awaiting_pullback";
         }
         if !self.risk_in_range {
@@ -230,18 +297,40 @@ impl SwingDiagnosis {
     }
 }
 
-/// Avalia o checklist e devolve o estado de cada regra, sem decidir nada.
-pub fn diagnose(candles: &[Candle], p: &SwingParams) -> SwingDiagnosis {
+/// Avalia o checklist DO LADO ATIVO e devolve o estado de cada regra.
+///
+/// `long_side` vem do filtro macro: com o BTC acima da própria EMA200 procura-se
+/// compra; abaixo, venda. Os dois lados nunca são avaliados ao mesmo tempo — é
+/// a alternância que faz o conjunto funcionar, e avaliar ambos produziria uma
+/// matriz que sugere entradas que o motor não vai tomar.
+pub fn diagnose(candles: &[Candle], long_side: bool, p: &SwingParams) -> SwingDiagnosis {
     let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
     let price = closes.last().copied().unwrap_or(0.0);
     let slow = ema(&closes, p.ema_slow);
     let fast = ema(&closes, p.ema_fast);
-    let uptrend = is_uptrend(candles, p).unwrap_or(false);
-    let pullback = is_pullback(candles, p).unwrap_or(false);
-    let stop = structural_low(candles, p.swing_lookback).map(|l| l * (1.0 - p.stop_margin_pct));
+
+    let (trend_ok, pullback_ok, stop) = if long_side {
+        (
+            is_uptrend(candles, p).unwrap_or(false),
+            is_pullback(candles, p).unwrap_or(false),
+            structural_low(candles, p.swing_lookback).map(|l| l * (1.0 - p.stop_margin_pct)),
+        )
+    } else {
+        (
+            is_downtrend(candles, p).unwrap_or(false),
+            is_rally(candles, p).unwrap_or(false),
+            structural_high(candles, p.swing_lookback).map(|h| h * (1.0 + p.stop_margin_pct)),
+        )
+    };
+
     let risk_pct = stop.and_then(|st| {
-        if price > 0.0 && st < price {
+        if price <= 0.0 {
+            return None;
+        }
+        if long_side && st < price {
             Some((price - st) / price)
+        } else if !long_side && st > price {
+            Some((st - price) / price)
         } else {
             None
         }
@@ -249,11 +338,12 @@ pub fn diagnose(candles: &[Candle], p: &SwingParams) -> SwingDiagnosis {
     let risk_in_range = risk_pct.is_some_and(|r| r >= p.min_stop_pct && r <= p.max_stop_pct);
 
     SwingDiagnosis {
+        side: if long_side { "Long" } else { "Short" },
         price,
         ema_slow: slow,
         ema_fast: fast,
-        uptrend,
-        pullback,
+        trend_ok,
+        pullback_ok,
         stop,
         risk_pct,
         risk_in_range,
@@ -356,6 +446,65 @@ mod tests {
         v
     }
 
+    // ── espelho short ─────────────────────────────────────────────
+    /// Série em queda com um repique no fim — o setup de venda.
+    fn downtrend_with_rally() -> Vec<Candle> {
+        let mut v: Vec<Candle> = (0..250)
+            .map(|i| {
+                let base = 300.0 - i as f64 * 0.5;
+                c(base, base + 1.0, base - 1.0, base - 0.5)
+            })
+            .collect();
+        // Repique final: sobe acima da EMA rápida sem recuperar a lenta.
+        let last = v.last().unwrap().close;
+        for k in 0..8 {
+            let px = last + (k as f64 + 1.0) * 3.0;
+            v.push(c(px - 1.5, px + 1.5, px - 2.0, px));
+        }
+        v
+    }
+
+    /// O short é o espelho exato: stop ACIMA do topo, alvo ABAIXO da entrada.
+    #[test]
+    fn short_setup_mirrors_the_long() {
+        let p = SwingParams::default();
+        let s = evaluate_short(&downtrend_with_rally(), true, &p).expect("setup short");
+        assert!(s.stop > s.entry, "stop {} deve ficar acima da entrada {}", s.stop, s.entry);
+        assert!(s.target < s.entry, "alvo {} deve ficar abaixo da entrada {}", s.target, s.entry);
+        // R:R obedecido no lado certo
+        let risco = (s.stop - s.entry) / s.entry;
+        let retorno = (s.entry - s.target) / s.entry;
+        assert!((retorno / risco - p.risk_reward).abs() < 1e-9);
+    }
+
+    /// Sem o macro invertido não há venda — medido, o short sem filtro rende
+    /// −0,066%/trade contra +0,149% com ele.
+    #[test]
+    fn short_needs_the_inverted_macro() {
+        let p = SwingParams::default();
+        assert!(evaluate_short(&downtrend_with_rally(), false, &p).is_none());
+    }
+
+    /// Uma série de ALTA não gera venda, e uma de baixa não gera compra.
+    #[test]
+    fn the_two_sides_never_fire_on_the_same_series() {
+        let p = SwingParams::default();
+        assert!(evaluate_short(&uptrend_with_pullback(), true, &p).is_none());
+        assert!(evaluate_long(&downtrend_with_rally(), true, &p).is_none());
+    }
+
+    /// O topo estrutural olha só para trás, como o fundo.
+    #[test]
+    fn structural_high_uses_only_the_lookback_window() {
+        let v = vec![
+            c(10.0, 99.0, 9.0, 10.0),   // pico antigo, fora da janela
+            c(10.0, 12.0, 9.0, 11.0),
+            c(11.0, 13.0, 10.0, 12.0),
+        ];
+        assert_eq!(structural_high(&v, 2), Some(13.0));
+        assert_eq!(structural_high(&v, 3), Some(99.0));
+    }
+
     // ── diagnóstico do checklist ──────────────────────────────────
     /// O diagnóstico só serve se concordar com quem decide. Se `diagnose` disser
     /// "setup" e `evaluate_long` não devolver nada (ou vice-versa), a tela passa
@@ -366,8 +515,8 @@ mod tests {
         let series = uptrend_with_pullback();
         for corte in [200usize, 220, 240, series.len()] {
             let janela = &series[..corte.min(series.len())];
-            let d = diagnose(janela, &p);
-            let diz_setup = d.status(false, true) == "setup";
+            let d = diagnose(janela, true, &p);
+            let diz_setup = d.status(false) == "setup";
             let tem_setup = evaluate_long(janela, true, &p).is_some();
             assert_eq!(
                 diz_setup, tem_setup,
@@ -380,18 +529,23 @@ mod tests {
     /// já posicionado descreve uma avaliação que não vale.
     #[test]
     fn open_position_precedes_every_other_reason() {
-        let d = diagnose(&uptrend_with_pullback(), &SwingParams::default());
-        assert_eq!(d.status(true, true), "position_open");
-        assert_eq!(d.status(true, false), "position_open");
+        let d = diagnose(&uptrend_with_pullback(), true, &SwingParams::default());
+        assert_eq!(d.status(true), "position_open");
+        
     }
 
-    /// O filtro macro vem antes das regras do símbolo — quando o BTC fecha, o
-    /// estado individual não é o motivo de não haver entrada.
+    /// O macro agora escolhe o LADO em vez de bloquear. Com o BTC em baixa, a
+    /// mesma série que era setup de compra deixa de ser — e passa a ser lida
+    /// pelas regras de venda, que ela não cumpre.
     #[test]
-    fn macro_filter_precedes_the_symbol_rules() {
-        let d = diagnose(&uptrend_with_pullback(), &SwingParams::default());
-        assert_eq!(d.status(false, false), "macro_blocked");
-        assert_eq!(d.status(false, true), "setup");
+    fn macro_selects_the_side_instead_of_blocking() {
+        let série = uptrend_with_pullback();
+        let p = SwingParams::default();
+        assert_eq!(diagnose(&série, true, &p).side, "Long");
+        assert_eq!(diagnose(&série, true, &p).status(false), "setup");
+        let curto = diagnose(&série, false, &p);
+        assert_eq!(curto.side, "Short");
+        assert_ne!(curto.status(false), "setup");
     }
 
     /// Série curta não é "sem tendência": é ausência de avaliação.
@@ -401,7 +555,7 @@ mod tests {
             let b = 100.0 + i as f64;
             c(b, b + 1.0, b - 1.0, b)
         }).collect();
-        assert_eq!(diagnose(&curta, &SwingParams::default()).status(false, true),
+        assert_eq!(diagnose(&curta, true, &SwingParams::default()).status(false),
                    "insufficient_history");
     }
 
@@ -410,7 +564,7 @@ mod tests {
     fn diagnosed_stop_matches_the_setup_stop() {
         let p = SwingParams::default();
         let série = uptrend_with_pullback();
-        let d = diagnose(&série, &p);
+        let d = diagnose(&série, true, &p);
         let setup = evaluate_long(&série, true, &p).expect("setup");
         assert!((d.stop.unwrap() - setup.stop).abs() < 1e-9);
         assert!((d.risk_pct.unwrap() - setup.risk_pct).abs() < 1e-9);
