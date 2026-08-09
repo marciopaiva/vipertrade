@@ -233,6 +233,7 @@ pub(crate) async fn run_candle_reader(
 pub(crate) fn diagnose_symbols(
     store: &HashMap<String, Series>,
     open_symbols: &[String],
+    cooling_symbols: &[String],
     params: &SwingParams,
 ) -> SwingDiagnosticsSnapshot {
     let btc = store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice());
@@ -247,10 +248,17 @@ pub(crate) fn diagnose_symbols(
         .map(|(symbol, serie)| {
             let d = swing::diagnose(&serie.candles, params);
             let has_position = open_symbols.iter().any(|s| s == symbol);
+            let cooling = cooling_symbols.iter().any(|s| s == symbol);
             let target = d
                 .risk_pct
                 .map(|r| d.price * (1.0 + r * params.risk_reward));
-            let status = d.status(has_position, btc_uptrend);
+            // O cooldown precede o checklist: dizer "sem recuo" para um símbolo
+            // que está impedido de entrar descreve uma avaliação que não vale.
+            let status = if !has_position && cooling {
+                "stop_cooldown"
+            } else {
+                d.status(has_position, btc_uptrend)
+            };
             // O próximo obstáculo, não todos: um símbolo em queda precisa
             // primeiro recuperar a EMA200 — só depois o recuo passa a importar.
             let distance_pct = match status {
@@ -302,6 +310,7 @@ pub(crate) fn diagnose_symbols(
 pub(crate) fn evaluate_symbols(
     store: &HashMap<String, Series>,
     open_symbols: &[String],
+    cooling_symbols: &[String],
     equity_usdt: f64,
     risk_per_trade: f64,
     leverage: f64,
@@ -328,6 +337,10 @@ pub(crate) fn evaluate_symbols(
         }
         // Uma posição por símbolo, como no scalp.
         if open_symbols.iter().any(|s| s == symbol) {
+            continue;
+        }
+        // E nada de reentrar em cima do próprio stop.
+        if cooling_symbols.iter().any(|s| s == symbol) {
             continue;
         }
         if let Some(setup) = swing::evaluate_long(candles, btc_uptrend, params) {
@@ -437,6 +450,7 @@ mod tests {
         let out = evaluate_symbols(
             &store,
             &[],
+            &[],
             1000.0,
             0.01,
             2.0,
@@ -456,7 +470,7 @@ mod tests {
         store.insert("BTCUSDT".to_string(), serie(Vec::new()));
         store.insert("APTUSDT".to_string(), serie(Vec::new()));
         store.insert("LINKUSDT".to_string(), serie(Vec::new()));
-        let snap = diagnose_symbols(&store, &[], &SwingParams::default());
+        let snap = diagnose_symbols(&store, &[], &[], &SwingParams::default());
         let nomes: Vec<&str> = snap.symbols.iter().map(|s| s.symbol.as_str()).collect();
         assert_eq!(nomes, vec!["APTUSDT", "LINKUSDT"]);
     }
@@ -485,7 +499,7 @@ mod tests {
         let mut store = HashMap::new();
         store.insert("BTCUSDT".to_string(), serie(alta));
         store.insert("XUSDT".to_string(), serie(queda));
-        let snap = diagnose_symbols(&store, &[], &p);
+        let snap = diagnose_symbols(&store, &[], &[], &p);
         let x = &snap.symbols[0];
         assert_eq!(x.status, "no_uptrend");
         let d = x.distance_pct.expect("distância até a EMA200");
@@ -501,7 +515,7 @@ mod tests {
         let mut store = HashMap::new();
         store.insert("BTCUSDT".to_string(), serie(Vec::new()));
         store.insert("APTUSDT".to_string(), serie(Vec::new()));
-        let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &SwingParams::default());
+        let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &[], &SwingParams::default());
         assert!(snap.symbols[0].distance_pct.is_none());
     }
 
@@ -541,6 +555,47 @@ mod tests {
         assert!(store.contains_key("XUSDT"));
     }
 
+    /// Símbolo estopado há pouco não pode reentrar — foi o que o ENAUSDT fez em
+    /// 2026-08-09, voltando 3,5 min depois no preço exato da saída.
+    #[test]
+    fn cooldown_blocks_reentry_and_is_reported() {
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), serie(Vec::new()));
+        store.insert("ENAUSDT".to_string(), serie(Vec::new()));
+        let esfriando = vec!["ENAUSDT".to_string()];
+
+        let snap = diagnose_symbols(&store, &[], &esfriando, &SwingParams::default());
+        assert_eq!(snap.symbols[0].status, "stop_cooldown");
+
+        let out = evaluate_symbols(
+            &store,
+            &[],
+            &esfriando,
+            1000.0,
+            0.01,
+            2.0,
+            30.0,
+            &SwingParams::default(),
+        );
+        assert!(out.is_empty(), "não pode entrar durante o cooldown");
+    }
+
+    /// Posição aberta precede o cooldown: quem já está posicionado é reportado
+    /// como posicionado, não como impedido de entrar.
+    #[test]
+    fn open_position_wins_over_cooldown() {
+        let mut store = HashMap::new();
+        store.insert("BTCUSDT".to_string(), serie(Vec::new()));
+        store.insert("ENAUSDT".to_string(), serie(Vec::new()));
+        let snap = diagnose_symbols(
+            &store,
+            &["ENAUSDT".to_string()],
+            &["ENAUSDT".to_string()],
+            &SwingParams::default(),
+        );
+        assert_eq!(snap.symbols[0].status, "position_open");
+    }
+
     /// Símbolo com posição aberta é reportado como tal, e não como bloqueio.
     #[test]
     fn diagnostic_flags_open_positions() {
@@ -550,6 +605,7 @@ mod tests {
         let snap = diagnose_symbols(
             &store,
             &["APTUSDT".to_string()],
+            &[],
             &SwingParams::default(),
         );
         let apt = &snap.symbols[0];
@@ -582,6 +638,7 @@ mod tests {
         let out = evaluate_symbols(
             &store,
             &["APTUSDT".to_string()],
+            &[],
             1000.0,
             0.01,
             2.0,

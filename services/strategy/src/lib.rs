@@ -1480,7 +1480,20 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let swing_enabled = std::env::var("STRATEGY_SWING_ENABLED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    // Horas de espera antes de reentrar num símbolo estopado. Medido no corpus
+    // com gestão sequencial: sem cooldown a estratégia rende −0,223%/trade; com
+    // 24h, +0,337%. É positivo nas duas metades do histórico em qualquer valor
+    // de 4h a 24h — o platô é que dá confiança, não o pico. 0 desliga.
+    let swing_cooldown_hours: i64 = std::env::var("STRATEGY_SWING_STOP_COOLDOWN_HOURS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(24)
+        .max(0);
     if swing_enabled {
+        info!(
+            cooldown_hours = swing_cooldown_hours,
+            "Swing enabled"
+        );
         let store: swing_runner::CandleStore = Arc::new(Mutex::new(HashMap::new()));
         tokio::spawn(swing_runner::run_candle_reader(
             redis_url.clone(),
@@ -1545,6 +1558,16 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         .unwrap_or_default(),
                     None => Vec::new(),
                 };
+                // Símbolos impedidos de reentrar por terem sido estopados há
+                // pouco. Sem isto o sistema recompra em cima do próprio stop.
+                let cooling_symbols: Vec<String> = match &eval_pool {
+                    Some(pool) => {
+                        crate::db::fetch_symbols_in_stop_cooldown(pool, swing_cooldown_hours)
+                            .await
+                            .unwrap_or_default()
+                    }
+                    None => Vec::new(),
+                };
                 // Poda antes de avaliar: um símbolo tirado do universo para de
                 // ser publicado, mas continuaria no mapa com velas congeladas.
                 let snapshot = {
@@ -1557,6 +1580,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 let decisions = swing_runner::evaluate_symbols(
                     &snapshot,
                     &open_symbols,
+                    &cooling_symbols,
                     eval_fallback_equity,
                     eval_cfg.risk_per_trade_fraction(),
                     eval_cfg.max_leverage(),
@@ -1571,6 +1595,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 let snap = swing_runner::diagnose_symbols(
                     &snapshot,
                     &open_symbols,
+                    &cooling_symbols,
                     &swing::SwingParams::default(),
                 );
                 match serde_json::to_string(&snap) {

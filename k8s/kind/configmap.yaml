@@ -55,6 +55,20 @@ data:
   # e o swing seguem funcionando com ela em false.
   STRATEGY_REAL_DECISIONS: "false"
 
+  # Espera antes de reentrar num símbolo que acabou de ser estopado.
+  #
+  # Sem isto o sistema recompra em cima do próprio stop: em 2026-08-09 o
+  # ENAUSDT foi estopado às 05:23:46 e reentrou às 05:27:16, no preço exato da
+  # saída, com stop 2,7x mais apertado porque o fundo estrutural passou a ser o
+  # da própria queda. Foi estopado de novo dez minutos depois.
+  #
+  # Medido no corpus com gestão SEQUENCIAL (uma posição por símbolo, como o
+  # executor faz) e velas de 15m: sem cooldown a estratégia rende −0,256%/trade
+  # com PF 0,810; com 24h, +0,310%/trade e PF 1,232. Positivo nas duas metades
+  # do histórico (+0,302% e +0,333%), e qualquer valor entre 4h e 24h funciona —
+  # é o platô que dá confiança, não o pico. 0 desliga.
+  STRATEGY_SWING_STOP_COOLDOWN_HOURS: "24"
+
   # Estratégia de swing em 4H, que substituiu o scalp. Stop estrutural abaixo do
   # fundo e alvo por risco/retorno 2:1. Validada out-of-sample, em símbolos
   # inéditos e contra buy-and-hold antes de entrar em paper.

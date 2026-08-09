@@ -48,17 +48,20 @@ const DISTANCIA_MAX_PCT = 5;
 const PESO: Record<string, number> = {
   setup: 0,
   position_open: 1,
-  awaiting_pullback: 2,
-  risk_out_of_range: 3,
-  no_uptrend: 4,
-  macro_blocked: 5,
-  insufficient_history: 6,
+  stop_cooldown: 2,
+  awaiting_pullback: 3,
+  risk_out_of_range: 4,
+  no_uptrend: 5,
+  macro_blocked: 6,
+  insufficient_history: 7,
 };
 
 function statusTone(status: string) {
   if (status === 'setup') return 'bg-accent/15 text-accent border-accent/30';
   if (status === 'position_open')
     return 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+  if (status === 'stop_cooldown')
+    return 'bg-destructive/10 text-destructive/90 border-destructive/25';
   if (status === 'awaiting_pullback')
     return 'bg-amber-500/10 text-amber-400/90 border-amber-500/25';
   return 'bg-muted/40 text-muted-foreground border-border';

@@ -313,6 +313,7 @@ const ptBR: Messages = {
     targetShort: 'alvo',
     st_setup: 'SETUP',
     st_position_open: 'posicionado',
+    st_stop_cooldown: 'espera pós-stop',
     st_awaiting_pullback: 'aguarda recuo',
     st_risk_out_of_range: 'risco fora da faixa',
     st_no_uptrend: 'sem alta',

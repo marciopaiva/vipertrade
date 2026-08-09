@@ -182,6 +182,37 @@ pub(crate) async fn has_recent_close_decision_for_symbol(
     .await
 }
 
+/// Símbolos estopados nas últimas `hours` horas.
+///
+/// O swing não pode reentrar logo depois de ser estopado. Em 2026-08-09 o
+/// ENAUSDT foi estopado às 05:23:46 e reentrou às 05:27:16 — no preço exato da
+/// saída, e com stop 2,7x mais apertado, porque o fundo estrutural passou a ser
+/// o da própria queda. Medido no corpus (modelo sequencial, gestão em 15m), o
+/// cooldown leva o resultado de −0,223%/trade para +0,337%, e é positivo nas
+/// DUAS metades do histórico — qualquer valor entre 4h e 24h funciona, o que
+/// indica efeito real e não ajuste à amostra.
+///
+/// Uma query para todos os símbolos: o avaliador roda a cada 60s sobre 23
+/// símbolos, e uma consulta por símbolo seria 23 idas ao banco por ciclo.
+pub(crate) async fn fetch_symbols_in_stop_cooldown(
+    pool: &PgPool,
+    hours: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    if hours <= 0 {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT symbol
+         FROM trades
+         WHERE status = 'closed'
+           AND close_reason = 'stop_loss'
+           AND closed_at >= NOW() - make_interval(hours => $1::int)",
+    )
+    .bind(hours as i32)
+    .fetch_all(pool)
+    .await
+}
+
 /// Símbolos com posição aberta, de qualquer família.
 ///
 /// O swing respeita uma posição por símbolo como o scalp — abrir swing onde já

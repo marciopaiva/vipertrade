@@ -310,6 +310,7 @@ const en = {
     targetShort: 'target',
     st_setup: 'SETUP',
     st_position_open: 'in position',
+    st_stop_cooldown: 'post-stop cooldown',
     st_awaiting_pullback: 'awaiting pullback',
     st_risk_out_of_range: 'risk out of range',
     st_no_uptrend: 'no uptrend',
