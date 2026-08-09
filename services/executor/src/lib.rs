@@ -126,6 +126,9 @@ struct PendingLimitOrder {
     limit_price: f64,
     quantity: f64,
     posted_at: Instant,
+    /// Epoch em ms de quando a ordem foi postada — a janela que se consulta em
+    /// velas de 1m. `Instant` é monotônico e não converte para tempo de parede.
+    posted_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -783,6 +786,7 @@ async fn post_limit_entry(
             limit_price,
             quantity,
             posted_at: Instant::now(),
+            posted_at_ms: chrono::Utc::now().timestamp_millis(),
         },
     );
 
@@ -801,6 +805,22 @@ async fn post_limit_entry(
 /// Preenche quando o book cruza o preço postado — para uma compra, quando o ASK
 /// desce até o bid onde estamos; para uma venda, quando o BID sobe até o ask.
 /// Ao preencher, cobra a taxa MAKER, que é o ponto de tudo isto.
+/// Uma ordem limite pendente foi atingida pelo que o mercado negociou?
+///
+/// Critério ESTRITO de propósito. Negócio ABAIXO do nosso preço de compra
+/// significa que o book foi varrido através do nosso nível — a ordem
+/// certamente teria sido atingida. Preço que apenas encosta no limite depende
+/// da posição na fila daquele nível, que não temos como saber; contá-lo como
+/// preenchido superestimaria sistematicamente a entrada passiva, que é o lado
+/// do erro que infla o resultado do paper.
+fn limit_order_filled(is_buy: bool, low: f64, high: f64, limit: f64) -> bool {
+    if is_buy {
+        low < limit
+    } else {
+        high > limit
+    }
+}
+
 async fn resolve_pending_limit_orders(
     state: &ExecutorState,
     http: &reqwest::Client,
@@ -819,21 +839,32 @@ async fn resolve_pending_limit_orders(
         let symbol = order.event.decision.symbol.clone();
         let expired = order.posted_at.elapsed() >= wait;
 
+        // Preenchimento pelo que foi NEGOCIADO na janela, não pelo book no
+        // instante da amostragem. O laço roda a cada 5s; com 300s de espera são
+        // 60 instantâneos, e um toque entre dois deles sumia — o 1000PEPEUSDT
+        // de 2026-08-09 teve mínima exatamente no preço limite e foi registrado
+        // como expirado.
+        //
+        // O critério é ESTRITO (`<` e não `<=`): negócio abaixo do nosso preço
+        // significa que o book foi varrido através do nosso nível, então a
+        // ordem certamente teria sido atingida. Preço que apenas encosta
+        // depende da posição na fila, que não temos como saber — e contar como
+        // preenchido superestimaria a entrada passiva.
+        //
         // O erro vira String na origem: `Box<dyn Error>` não é `Send` e este
         // trecho roda dentro de uma task spawned.
-        let quote = fetch_book_quote(http, cfg, &symbol)
+        let range = fetch_traded_range(http, cfg, &symbol, order.posted_at_ms)
             .await
             .map_err(|e| e.to_string());
-        let filled = match quote {
-            Ok(q) => {
-                if action_is_buy(&order.event.decision.action) {
-                    q.ask <= order.limit_price
-                } else {
-                    q.bid >= order.limit_price
-                }
-            }
+        let filled = match range {
+            Ok((low, high)) => limit_order_filled(
+                action_is_buy(&order.event.decision.action),
+                low,
+                high,
+                order.limit_price,
+            ),
             Err(e) => {
-                tracing::warn!(symbol = %symbol, error = %e, "Book unavailable while resolving limit order");
+                tracing::warn!(symbol = %symbol, error = %e, "Traded range unavailable while resolving limit order");
                 false
             }
         };
@@ -1875,6 +1906,25 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
+
+    /// O caso que motivou a mudança: o 1000PEPEUSDT teve mínima EXATAMENTE no
+    /// preço limite. Sem negócio abaixo, não há como afirmar que a fila chegou
+    /// na nossa ordem — encostar não preenche.
+    #[test]
+    fn touching_the_limit_is_not_a_fill() {
+        assert!(!limit_order_filled(true, 0.002841, 0.002844, 0.002841));
+        assert!(limit_order_filled(true, 0.002840, 0.002844, 0.002841));
+    }
+
+    /// Compra preenche quando o preço vem até nós; venda, quando foge para cima.
+    #[test]
+    fn fill_direction_follows_the_side() {
+        assert!(limit_order_filled(true, 3.98, 4.01, 3.99));
+        assert!(!limit_order_filled(true, 3.995, 4.01, 3.99));
+        assert!(limit_order_filled(false, 3.98, 4.00, 3.99));
+        assert!(!limit_order_filled(false, 3.98, 3.985, 3.99));
+    }
+
     use super::*;
 
     #[tokio::test]

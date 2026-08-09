@@ -182,6 +182,63 @@ pub(crate) async fn fetch_book_quote(
     })
 }
 
+/// Extremos negociados desde `start_ms`, em velas de 1 minuto.
+///
+/// Resolve as ordens limite pendentes olhando o que o mercado NEGOCIOU no
+/// intervalo, e não o book no instante da amostragem. Com amostra a cada 5s em
+/// 300s de espera, um toque curto no preço passava despercebido: o 1000PEPEUSDT
+/// de 2026-08-09 teve mínima exatamente no preço limite e foi registrado como
+/// "expirou sem preencher".
+///
+/// Devolve `(menor mínima, maior máxima)`.
+pub(crate) async fn fetch_traded_range(
+    http: &reqwest::Client,
+    cfg: &ExecutorConfig,
+    symbol: &str,
+    start_ms: i64,
+) -> Result<(f64, f64), Box<dyn Error>> {
+    let path = format!(
+        "/v5/market/kline?category=linear&symbol={}&interval=1&start={}&limit=30",
+        symbol.to_uppercase(),
+        start_ms.max(0)
+    );
+    let value = bybit_public_get(http, cfg, &path).await?;
+
+    let ret_code = value.get("retCode").and_then(Value::as_i64).unwrap_or(-1);
+    if ret_code != 0 {
+        return Err(format!("kline retCode={} body={}", ret_code, value).into());
+    }
+
+    let rows = value
+        .get("result")
+        .and_then(|r| r.get("list"))
+        .and_then(Value::as_array)
+        .ok_or("kline response missing result.list")?;
+    if rows.is_empty() {
+        return Err("kline returned no candles for the window".into());
+    }
+
+    let num = |row: &Value, i: usize| -> Option<f64> {
+        row.get(i).and_then(Value::as_str)?.parse::<f64>().ok()
+    };
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for row in rows {
+        // [start, open, high, low, close, volume, turnover]
+        let (h, l) = (num(row, 2), num(row, 3));
+        if let (Some(h), Some(l)) = (h, l) {
+            if h.is_finite() && l.is_finite() && l > 0.0 {
+                low = low.min(l);
+                high = high.max(h);
+            }
+        }
+    }
+    if !(low.is_finite() && high.is_finite()) {
+        return Err("kline window had no usable candle".into());
+    }
+    Ok((low, high))
+}
+
 /// Fee rates for a symbol, as fractions (0.00055 == 0.055%).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BybitFeeRate {
