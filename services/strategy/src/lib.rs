@@ -1487,6 +1487,14 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     // O espelho short do checklist. Medido no corpus: +0,149%/trade sozinho
     // (metade do long), mas leva o out-of-sample do conjunto de −0,501% para
     // +0,051% porque opera exatamente nos períodos em que o long fica parado.
+    // Alvo como múltiplo do risco. Ajustável sem rebuild porque foi medido em
+    // platô (1,0 a 1,5 funcionam) e não em ponto ótimo — se o corpus real
+    // discordar, dá para andar dentro da faixa sem imagem nova.
+    let swing_risk_reward: f64 = std::env::var("STRATEGY_SWING_RISK_REWARD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(1.5);
     let swing_short_enabled = std::env::var("STRATEGY_SWING_SHORT_ENABLED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
@@ -1499,6 +1507,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         info!(
             cooldown_hours = swing_cooldown_hours,
             short_enabled = swing_short_enabled,
+            risk_reward = swing_risk_reward,
             "Swing enabled"
         );
         let store: swing_runner::CandleStore = Arc::new(Mutex::new(HashMap::new()));
@@ -1591,6 +1600,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 };
                 // Poda antes de avaliar: um símbolo tirado do universo para de
                 // ser publicado, mas continuaria no mapa com velas congeladas.
+                let swing_params = swing::SwingParams {
+                    risk_reward: swing_risk_reward,
+                    ..swing::SwingParams::default()
+                };
                 let snapshot = {
                     let mut g = eval_store.lock().await;
                     for morto in swing_runner::prune(&mut g) {
@@ -1609,7 +1622,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     // Mesmo teto do scalp: a fórmula de risco dimensiona a
                     // posição, mas não a limita.
                     eval_cfg.max_position_cap_usdt("", eval_fallback_equity),
-                    &swing::SwingParams::default(),
+                    &swing_params,
                 );
                 // Snapshot do checklist para a matriz de decisão. Publicado a
                 // cada ciclo, tenha ou não setup — a tela precisa justamente
@@ -1618,7 +1631,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     &snapshot,
                     &open_symbols,
                     &cooling_symbols,
-                    &swing::SwingParams::default(),
+                    &swing_params,
                 );
                 match serde_json::to_string(&snap) {
                     Ok(json) => {

@@ -40,6 +40,17 @@ pub struct SwingParams {
     /// Folga abaixo do fundo, em fração. Evita ser estopado no pavio exato.
     pub stop_margin_pct: f64,
     /// Alvo como múltiplo da distância até o stop.
+    ///
+    /// 1,5 e não 2,0 desde 2026-08-10. Com 2R apenas 36% dos trades chegavam ao
+    /// alvo; a 1,5R sobem para 46%, e o ganho de acerto mais que compensa o
+    /// ganho menor por acerto. Medido na régua v6 (sequencial, cooldown, macro
+    /// exato, long+short): a faixa 1,0–1,5R é positiva nas DUAS metades do
+    /// histórico, enquanto de 1,75R para cima a 1ª metade melhora e a 2ª piora —
+    /// assinatura de parâmetro ajustado ao passado.
+    ///
+    /// 1,5 fica no meio do platô e não na borda: 1,25R mede um pouco melhor
+    /// fora da amostra (+0,463% contra +0,399%), mas a diferença é menor que o
+    /// ruído e a borda é mais frágil se o mercado mudar.
     pub risk_reward: f64,
     /// Stop mais apertado que isto vira ruído; mais largo, risco demais.
     pub min_stop_pct: f64,
@@ -53,7 +64,7 @@ impl Default for SwingParams {
             ema_fast: 50,
             swing_lookback: 10,
             stop_margin_pct: 0.005,
-            risk_reward: 2.0,
+            risk_reward: 1.5,
             min_stop_pct: 0.003,
             max_stop_pct: 0.12,
         }
@@ -444,6 +455,17 @@ mod tests {
             v.push(c(px + 1.5, px + 2.0, px - 1.5, px));
         }
         v
+    }
+
+    /// O R:R é decisão medida, não preferência. Se alguém mudar o default sem
+    /// refazer a validação, este teste quebra e obriga a justificar.
+    #[test]
+    fn default_risk_reward_is_the_measured_one() {
+        assert!(
+            (SwingParams::default().risk_reward - 1.5).abs() < 1e-9,
+            "o default validado é 1,5R (platô 1,0-1,5, positivo nas duas metades); \
+             de 1,75R para cima a 2ª metade degrada"
+        );
     }
 
     // ── espelho short ─────────────────────────────────────────────

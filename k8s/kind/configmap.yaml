@@ -55,6 +55,29 @@ data:
   # e o swing seguem funcionando com ela em false.
   STRATEGY_REAL_DECISIONS: "false"
 
+  # Alvo como múltiplo do risco (distância entrada->stop).
+  #
+  # 1,5 e não 2,0 desde 2026-08-10. Com 2R só 36,3% dos trades chegavam ao alvo;
+  # a 1,5R sobem para 46,3%, e acertar mais compensa ganhar menos por acerto.
+  # Medido na régua v6 (sequencial, cooldown 24h, macro exato, long+short,
+  # gestão em 15m com custo e slippage reais):
+  #
+  #   R:R    1ª metade        2ª metade (não vista)
+  #   1,00   +0,240%  1,247   +0,311%  1,254
+  #   1,25   +0,272%  1,247   +0,463%  1,355
+  #   1,50   +0,327%  1,280   +0,399%  1,284   <- escolhido
+  #   1,75   +0,330%  1,263   +0,248%  1,162
+  #   2,00   +0,359%  1,274   +0,297%  1,189   <- o anterior
+  #   2,50   +0,505%  1,370   +0,219%  1,131
+  #
+  # A faixa 1,0-1,5 é positiva nas duas metades; de 1,75 para cima a 1ª melhora
+  # e a 2ª piora, que é a assinatura de ajuste ao passado. 1,25R mede um pouco
+  # melhor fora da amostra, mas fica na BORDA do platô — 1,5 fica no meio, que
+  # é mais robusto se o regime mudar.
+  #
+  # Não afeta posições já abertas: o alvo é gravado no trade na entrada.
+  STRATEGY_SWING_RISK_REWARD: "1.5"
+
   # Espelho short do checklist, habilitado em 2026-08-09.
   #
   # O filtro macro deixa de BLOQUEAR e passa a ESCOLHER o lado: com o BTC acima
