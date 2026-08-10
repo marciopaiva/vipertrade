@@ -190,6 +190,20 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             }
         };
         loop {
+            // Mesmo motivo do laço principal: sem reabrir, um restart do Redis
+            // faz o feed de 4H parar de publicar para sempre — e sem as velas o
+            // strategy fica sem filtro macro e sem avaliar nada.
+            match viper_domain::ensure_redis_alive(&client, &mut conn).await {
+                viper_domain::RedisHealth::Alive => {}
+                viper_domain::RedisHealth::Reopened => {
+                    tracing::warn!("Swing feed: Redis estava morto — conexão reaberta")
+                }
+                viper_domain::RedisHealth::Failed(e) => {
+                    tracing::error!(error = %e, "Swing feed: Redis inacessível, pulando ciclo");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            }
             swing_feed::collect_and_publish(&swing_http, &mut conn, &swing_base, &swing_universe)
                 .await;
             tokio::select! {
@@ -203,6 +217,21 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         if *shutdown_rx.borrow() {
             tracing::info!("Received shutdown signal, stopping viper-market-data");
             break;
+        }
+
+        // A conexão multiplexada não se recupera quando o Redis reinicia — todo
+        // publish seguinte falha com "broken pipe" indefinidamente, e o serviço
+        // segue "rodando" enquanto ninguém recebe dado nenhum.
+        match viper_domain::ensure_redis_alive(&client, &mut conn).await {
+            viper_domain::RedisHealth::Alive => {}
+            viper_domain::RedisHealth::Reopened => {
+                tracing::warn!("Redis estava morto — conexão reaberta")
+            }
+            viper_domain::RedisHealth::Failed(e) => {
+                tracing::error!(error = %e, "Redis inacessível, pulando ciclo");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue;
+            }
         }
 
         let weights =

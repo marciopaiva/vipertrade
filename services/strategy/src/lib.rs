@@ -1548,6 +1548,20 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     _ = tokio::time::sleep(Duration::from_secs(60)) => {}
                 }
 
+                // A conexão não se recupera sozinha quando o Redis reinicia:
+                // sem isto, todo publish seguinte falha com "broken pipe" para
+                // sempre. Em 2026-08-10 foram 3h48min de silêncio.
+                match viper_domain::ensure_redis_alive(&client, &mut conn).await {
+                    viper_domain::RedisHealth::Alive => {}
+                    viper_domain::RedisHealth::Reopened => {
+                        warn!("Swing evaluator: Redis estava morto — conexão reaberta")
+                    }
+                    viper_domain::RedisHealth::Failed(e) => {
+                        error!(error = %e, "Swing evaluator: Redis inacessível, pulando ciclo");
+                        continue;
+                    }
+                }
+
                 let bucket = swing_runner::candle_bucket(
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)

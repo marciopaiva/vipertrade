@@ -35,6 +35,52 @@ pub const STREAM_GROUP_WS_BRIDGE: &str = "ws-bridge";
 /// Redis stream XREAD/XREADGROUP result type.
 pub type StreamEntries = Vec<(String, Vec<(String, Vec<(String, String)>)>)>;
 
+/// Garante que a conexão está viva, reabrindo-a se tiver caído.
+///
+/// A conexão multiplexada do `redis-rs` NÃO se recupera sozinha quando o
+/// servidor reinicia: todo comando seguinte falha com "broken pipe", para
+/// sempre. Em 2026-08-10 o Redis do cluster reiniciou (9 vezes em 8 dias, com o
+/// WSL suspendendo) e deixou market-data, strategy e api mudos por 3h48min —
+/// sem posições, sem matriz e sem nenhum alerta, porque cada serviço seguia
+/// "rodando" e apenas logando warn a cada ciclo.
+///
+/// Chamar no topo de cada iteração do laço custa um PING e transforma uma
+/// parada permanente em uma falha de um ciclo.
+pub async fn ensure_redis_alive(
+    client: &redis::Client,
+    conn: &mut redis::aio::MultiplexedConnection,
+) -> RedisHealth {
+    if redis::cmd("PING").query_async::<String>(conn).await.is_ok() {
+        return RedisHealth::Alive;
+    }
+    match client.get_multiplexed_async_connection().await {
+        Ok(nova) => {
+            *conn = nova;
+            RedisHealth::Reopened
+        }
+        Err(e) => RedisHealth::Failed(e.to_string()),
+    }
+}
+
+/// O que `ensure_redis_alive` encontrou. Quem chama é que loga — o domínio não
+/// depende de `tracing` de propósito.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RedisHealth {
+    /// Conexão respondeu ao PING.
+    Alive,
+    /// Estava morta e foi reaberta; quem chama deve logar.
+    Reopened,
+    /// Não foi possível reabrir — o Redis provavelmente ainda está subindo.
+    Failed(String),
+}
+
+impl RedisHealth {
+    /// Dá para usar a conexão neste ciclo?
+    pub fn usable(&self) -> bool {
+        !matches!(self, RedisHealth::Failed(_))
+    }
+}
+
 /// Publica no stream com retenção padrão.
 ///
 /// 10.000 mensagens serve para payloads pequenos (sinais, decisões). Séries de
