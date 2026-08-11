@@ -1494,7 +1494,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(1.5);
+        .unwrap_or(1.25);
     let swing_short_enabled = std::env::var("STRATEGY_SWING_SHORT_ENABLED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);

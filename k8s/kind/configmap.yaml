@@ -57,26 +57,23 @@ data:
 
   # Alvo como múltiplo do risco (distância entrada->stop).
   #
-  # 1,5 e não 2,0 desde 2026-08-10. Com 2R só 36,3% dos trades chegavam ao alvo;
-  # a 1,5R sobem para 46,3%, e acertar mais compensa ganhar menos por acerto.
-  # Medido na régua v6 (sequencial, cooldown 24h, macro exato, long+short,
-  # gestão em 15m com custo e slippage reais):
+  # 1,25 desde 2026-08-11. O alvo governa duas coisas: o ganho por acerto E o
+  # giro, porque a posição prende o símbolo até fechar. Medido por retorno/DIA,
+  # que é a métrica certa quando o parâmetro afeta a frequência:
   #
-  #   R:R    1ª metade        2ª metade (não vista)
-  #   1,00   +0,240%  1,247   +0,311%  1,254
-  #   1,25   +0,272%  1,247   +0,463%  1,355
-  #   1,50   +0,327%  1,280   +0,399%  1,284   <- escolhido
-  #   1,75   +0,330%  1,263   +0,248%  1,162
-  #   2,00   +0,359%  1,274   +0,297%  1,189   <- o anterior
-  #   2,50   +0,505%  1,370   +0,219%  1,131
+  #   R:R    trades/dia   corpus completo   fora da amostra
+  #   0,75      3,80        +1,066%/dia       +1,015%/dia
+  #   1,00      3,33        +0,912%/dia       +1,002%/dia
+  #   1,25      3,00        +1,095%/dia       +1,351%/dia   <- escolhido
+  #   1,50      2,80        +1,011%/dia       +1,082%/dia
+  #   2,00      2,51        +0,767%/dia       +0,747%/dia
   #
-  # A faixa 1,0-1,5 é positiva nas duas metades; de 1,75 para cima a 1ª melhora
-  # e a 2ª piora, que é a assinatura de ajuste ao passado. 1,25R mede um pouco
-  # melhor fora da amostra, mas fica na BORDA do platô — 1,5 fica no meio, que
-  # é mais robusto se o regime mudar.
+  # Girar mais ajuda até 1,25 e passa a atrapalhar abaixo disso: o alvo fica
+  # perto demais e o custo fixo come a margem. Continua platô — 1,0 e 1,5 também
+  # são positivos nas duas metades.
   #
   # Não afeta posições já abertas: o alvo é gravado no trade na entrada.
-  STRATEGY_SWING_RISK_REWARD: "1.5"
+  STRATEGY_SWING_RISK_REWARD: "1.25"
 
   # Espelho short do checklist, habilitado em 2026-08-09.
   #

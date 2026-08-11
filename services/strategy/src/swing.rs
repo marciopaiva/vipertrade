@@ -41,16 +41,25 @@ pub struct SwingParams {
     pub stop_margin_pct: f64,
     /// Alvo como múltiplo da distância até o stop.
     ///
-    /// 1,5 e não 2,0 desde 2026-08-10. Com 2R apenas 36% dos trades chegavam ao
-    /// alvo; a 1,5R sobem para 46%, e o ganho de acerto mais que compensa o
-    /// ganho menor por acerto. Medido na régua v6 (sequencial, cooldown, macro
-    /// exato, long+short): a faixa 1,0–1,5R é positiva nas DUAS metades do
-    /// histórico, enquanto de 1,75R para cima a 1ª metade melhora e a 2ª piora —
-    /// assinatura de parâmetro ajustado ao passado.
+    /// 1,25 desde 2026-08-11 (era 2,0 até 10/08, depois 1,5 por um dia).
     ///
-    /// 1,5 fica no meio do platô e não na borda: 1,25R mede um pouco melhor
-    /// fora da amostra (+0,463% contra +0,399%), mas a diferença é menor que o
-    /// ruído e a borda é mais frágil se o mercado mudar.
+    /// O alvo governa duas coisas ao mesmo tempo: quanto se ganha por acerto e
+    /// quanto tempo a posição ocupa o símbolo. Olhando só o retorno por TRADE,
+    /// 1,5 parecia equivalente; olhando o retorno por DIA — que é o que importa
+    /// quando o alvo também define o giro — 1,25 vence nas duas janelas:
+    ///
+    /// ```text
+    ///          corpus completo      fora da amostra
+    ///  1,00R     +0,912%/dia          +1,002%/dia
+    ///  1,25R     +1,095%/dia          +1,351%/dia   <- escolhido
+    ///  1,50R     +1,011%/dia          +1,082%/dia
+    ///  2,00R     +0,767%/dia          +0,747%/dia
+    /// ```
+    ///
+    /// Continua sendo platô e não pico: os vizinhos 1,0 e 1,5 também são
+    /// positivos nas duas metades. Abaixo de 1,25 o giro aumenta mas o
+    /// resultado cai — o alvo fica perto demais e o custo fixo pesa, o mesmo
+    /// efeito que consumiu 40% do risco no ENAUSDT de 09/08.
     pub risk_reward: f64,
     /// Stop mais apertado que isto vira ruído; mais largo, risco demais.
     pub min_stop_pct: f64,
@@ -64,7 +73,7 @@ impl Default for SwingParams {
             ema_fast: 50,
             swing_lookback: 10,
             stop_margin_pct: 0.005,
-            risk_reward: 1.5,
+            risk_reward: 1.25,
             min_stop_pct: 0.003,
             max_stop_pct: 0.12,
         }
@@ -462,9 +471,9 @@ mod tests {
     #[test]
     fn default_risk_reward_is_the_measured_one() {
         assert!(
-            (SwingParams::default().risk_reward - 1.5).abs() < 1e-9,
-            "o default validado é 1,5R (platô 1,0-1,5, positivo nas duas metades); \
-             de 1,75R para cima a 2ª metade degrada"
+            (SwingParams::default().risk_reward - 1.25).abs() < 1e-9,
+            "o default validado é 1,25R — melhor retorno por DIA nas duas \
+             janelas (+1,095% e +1,351%), com 1,0 e 1,5 também positivos (platô)"
         );
     }
 
