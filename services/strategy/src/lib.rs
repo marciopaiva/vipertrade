@@ -1577,9 +1577,21 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0),
                 );
+                // "Ainda não avaliei esta vela", e não "o bucket mudou".
+                //
+                // A diferença importa no restart: subindo no meio de uma vela, a
+                // primeira volta do laço já vê um bucket diferente e gastava a
+                // única avaliação do período — só que o store de velas leva até
+                // 5 min para ser repovoado pelo market-data, então a avaliação
+                // saía vazia e o serviço ficava mudo até a virada seguinte. Com
+                // decisão a cada 4h, isso custava até 4 horas de inatividade a
+                // cada deploy.
+                //
+                // Marcando o bucket só DEPOIS de uma avaliação com dados, a
+                // tentativa se repete a cada 60s até haver série — e continua
+                // valendo uma decisão por vela.
                 let vela_virou = bucket != current_bucket;
-                if vela_virou {
-                    current_bucket = bucket;
+                if bucket != current_bucket {
                     published.clear();
                 }
                 let agora_ms = std::time::SystemTime::now()
@@ -1622,7 +1634,11 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                 // por trade, porque o lado do macro alterna dentro da vela.
                 // A matriz segue sendo publicada a cada ciclo: ela é leitura,
                 // não decisão.
-                let decisions = if vela_virou {
+                // Sem série não há avaliação — e sem avaliação o bucket NÃO é
+                // marcado, para tentar de novo no próximo ciclo.
+                let tem_serie = snapshot.contains_key("BTCUSDT");
+                let decisions = if vela_virou && tem_serie {
+                    current_bucket = bucket;
                     swing_runner::evaluate_symbols(
                         &snapshot,
                         &open_symbols,

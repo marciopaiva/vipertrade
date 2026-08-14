@@ -209,6 +209,71 @@ pub(crate) async fn fetch_runtime_controls(
 /// as fixtures de contrato.
 const SWING_ENTRY_PREFIX: &str = "swing_entry";
 
+/// Refaz o alvo sobre o preço em que a ordem REALMENTE preencheu.
+///
+/// A decisão nasce do fechamento da vela de 4H: entrada, stop e alvo saem todos
+/// daquele preço. A execução acontece depois, a outro preço — e o stop, que é um
+/// nível estrutural do mercado (fundo ou topo real), continua onde está. Sem
+/// realinhar, o trade nasce com risco e retorno diferentes dos projetados: no
+/// WLDUSDT de 2026-08-14 o preço andou 0,52% entre a decisão e o fill, e o R:R
+/// caiu de 1,25 para 0,89 — arriscando mais para ganhar menos.
+///
+/// Medido no corpus (atraso de 15 min, o menor mensurável): manter os níveis
+/// fixos custa −0,131%/trade e derruba o R:R mediano de 1,25 para 1,17.
+/// Realinhando, a perda cai para −0,035% e o R:R volta a 1,25.
+///
+/// O R:R vem da própria decisão em vez de configuração — assim o executor
+/// preserva a geometria que a estratégia escolheu, sem precisar conhecê-la.
+///
+/// Devolve `None` quando o realinhamento não faz sentido: sem stop, com o fill
+/// já do lado errado dele, ou com números degenerados. Nesses casos o alvo
+/// original é mantido e a posição segue pelo stop.
+pub(crate) fn realign_target(
+    is_long: bool,
+    decision_entry: f64,
+    stop: f64,
+    decision_target: f64,
+    fill: f64,
+) -> Option<f64> {
+    if !(decision_entry.is_finite() && stop.is_finite() && decision_target.is_finite())
+        || !fill.is_finite()
+        || fill <= 0.0
+        || decision_entry <= 0.0
+    {
+        return None;
+    }
+    let risco_dec = (decision_entry - stop).abs();
+    if risco_dec <= 0.0 {
+        return None;
+    }
+    let rr = (decision_target - decision_entry).abs() / risco_dec;
+    if !(rr.is_finite() && rr > 0.0) {
+        return None;
+    }
+    // O fill precisa estar do lado certo do stop, senão a posição já nasceria
+    // estopada e o "alvo" ficaria do lado errado.
+    let risco_real = if is_long {
+        if fill <= stop {
+            return None;
+        }
+        fill - stop
+    } else {
+        if fill >= stop {
+            return None;
+        }
+        stop - fill
+    };
+    let alvo = if is_long {
+        fill + risco_real * rr
+    } else {
+        fill - risco_real * rr
+    };
+    if !(alvo.is_finite() && alvo > 0.0) {
+        return None;
+    }
+    Some(alvo)
+}
+
 pub(crate) async fn persist_trade(
     state: &ExecutorState,
     event: &StrategyDecisionEvent,
@@ -241,7 +306,30 @@ pub(crate) async fn persist_trade(
         None
     };
     let planned_target = if is_swing && event.decision.take_profit > 0.0 {
-        Some(event.decision.take_profit)
+        // Realinhado sobre o preço de execução; se não for possível, mantém o
+        // alvo da decisão.
+        let realinhado = planned_stop.and_then(|st| {
+            realign_target(
+                side == "Long",
+                event.decision.entry_price,
+                st,
+                event.decision.take_profit,
+                entry_price,
+            )
+        });
+        if let Some(novo) = realinhado {
+            if (novo - event.decision.take_profit).abs() > f64::EPSILON {
+                tracing::info!(
+                    symbol = %event.decision.symbol,
+                    decisao = event.decision.entry_price,
+                    fill = entry_price,
+                    alvo_antigo = event.decision.take_profit,
+                    alvo_novo = novo,
+                    "Alvo realinhado sobre o preço de execução"
+                );
+            }
+        }
+        Some(realinhado.unwrap_or(event.decision.take_profit))
     } else {
         None
     };

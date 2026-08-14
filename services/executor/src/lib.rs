@@ -1907,6 +1907,58 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
 
+    /// O caso real: WLDUSDT short, decisão a 0,3459 e fill a 0,3441. O stop é
+    /// estrutural e não se move, então o alvo precisa acompanhar a entrada —
+    /// senão o R:R cai de 1,25 para 0,89.
+    #[test]
+    fn realign_restores_the_intended_geometry() {
+        let alvo = crate::state::realign_target(
+            false, 0.3459, 0.35546849, 0.333939375, 0.3441,
+        )
+        .expect("alvo realinhado");
+        let risco = (0.35546849f64 - 0.3441) / 0.3441;
+        let ganho = (0.3441 - alvo) / 0.3441;
+        // Tolerância de 1e-4 e não 1e-6: o R:R preservado é o da DECISÃO, e os
+        // níveis dela vêm arredondados (1,2500013 no caso real). O executor
+        // reproduz a geometria que a estratégia mandou, não um 1,25 ideal.
+        assert!(
+            (ganho / risco - 1.25).abs() < 1e-4,
+            "R:R deveria voltar a ~1,25, veio {}",
+            ganho / risco
+        );
+        assert!(alvo < 0.3441, "alvo de short fica abaixo da entrada");
+    }
+
+    /// Long é o espelho: alvo acima da entrada, R:R preservado.
+    #[test]
+    fn realign_works_for_long() {
+        let alvo = crate::state::realign_target(true, 100.0, 98.0, 102.5, 101.0)
+            .expect("alvo");
+        let risco = (101.0 - 98.0) / 101.0;
+        let ganho = (alvo - 101.0) / 101.0;
+        assert!((ganho / risco - 1.25).abs() < 1e-6);
+        assert!(alvo > 101.0);
+    }
+
+    /// Preencher já do lado errado do stop não gera alvo — a posição nasceria
+    /// estopada, e inventar um alvo do lado oposto seria pior que manter o
+    /// original e deixar o stop resolver.
+    #[test]
+    fn realign_refuses_when_fill_is_past_the_stop() {
+        assert!(crate::state::realign_target(true, 100.0, 98.0, 102.5, 97.0).is_none());
+        assert!(crate::state::realign_target(false, 100.0, 102.0, 97.5, 103.0).is_none());
+    }
+
+    /// Entradas degeneradas não podem produzir alvo.
+    #[test]
+    fn realign_refuses_degenerate_input() {
+        // stop igual à entrada: risco zero
+        assert!(crate::state::realign_target(true, 100.0, 100.0, 102.5, 100.0).is_none());
+        assert!(crate::state::realign_target(true, 100.0, 98.0, 102.5, 0.0).is_none());
+        assert!(crate::state::realign_target(true, 0.0, 98.0, 102.5, 101.0).is_none());
+    }
+
+
     /// O caso que motivou a mudança: o 1000PEPEUSDT teve mínima EXATAMENTE no
     /// preço limite. Sem negócio abaixo, não há como afirmar que a fila chegou
     /// na nossa ordem — encostar não preenche.
