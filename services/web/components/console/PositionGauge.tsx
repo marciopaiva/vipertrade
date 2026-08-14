@@ -89,8 +89,15 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
         : Math.min(mark, entry);
 
   // TP trigger = the price at which the trailing stop arms (no fixed TP).
-  const tpTrigger =
-    typeof p.trailing_activation_price === 'number'
+  // No swing o nível de realização é o ALVO fixo; no scalp é o gatilho que arma
+  // a trilha. Olhar só `trailing_activation_price` deixava a posição swing sem
+  // nenhum alvo na tira numérica — a barra desenhava a ponta direita, mas o
+  // valor não aparecia em lugar nenhum.
+  const tpTrigger = isSwing
+    ? (typeof p.fixed_take_profit_price === 'number'
+        ? p.fixed_take_profit_price
+        : null)
+    : typeof p.trailing_activation_price === 'number'
       ? p.trailing_activation_price
       : null;
 
@@ -296,26 +303,43 @@ function PositionRow({ p, signal }: { p: Position; signal?: MarketSignal }) {
         </span>
       </div>
 
-      {/* numeric strip */}
+      {/* Tira numérica ORDENADA POR PREÇO, do maior para o menor.
+          Num short saudável lê-se stop > entry > mark > alvo; num long,
+          alvo > mark > entry > stop. A ordem fixa (entry, mark, alvo, stop)
+          obrigava a comparar números de cabeça para saber se a posição estava
+          ganhando — ordenar torna a relação visível sem esforço, e a troca de
+          lugar entre mark e entry é o próprio sinal de lucro ou prejuízo. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-10 text-2xs text-muted-foreground">
-        <Stat label={t('entry')} value={formatPrice(locale, entry)} dashed />
-        <Stat
-          label={t('mark')}
-          value={formatPrice(locale, mark)}
-          dotClass={inProfit ? 'bg-accent' : 'bg-destructive'}
-        />
-        {tpTrigger !== null && (
-          <Stat
-            label={isSwing ? t('target') : t('tpArm')}
-            value={formatPrice(locale, tpTrigger)}
-            tpFlag
-          />
-        )}
-        <Stat
-          label={trailing ? t('trail') : t('stop')}
-          value={formatPrice(locale, stop)}
-          barClass={trailLocking ? 'bg-accent/70' : 'bg-destructive/70'}
-        />
+        {[
+          { key: 'entry', value: entry, node: (
+              <Stat label={t('entry')} value={formatPrice(locale, entry)} dashed />
+            ) },
+          { key: 'mark', value: mark, node: (
+              <Stat
+                label={t('mark')}
+                value={formatPrice(locale, mark)}
+                dotClass={inProfit ? 'bg-accent' : 'bg-destructive'}
+              />
+            ) },
+          ...(tpTrigger !== null
+            ? [{ key: 'tp', value: tpTrigger, node: (
+                <Stat
+                  label={isSwing ? t('target') : t('tpArm')}
+                  value={formatPrice(locale, tpTrigger)}
+                  tpFlag
+                />
+              ) }]
+            : []),
+          { key: 'stop', value: stop, node: (
+              <Stat
+                label={trailing ? t('trail') : t('stop')}
+                value={formatPrice(locale, stop)}
+                barClass={trailLocking ? 'bg-accent/70' : 'bg-destructive/70'}
+              />
+            ) },
+        ]
+          .sort((a, b) => b.value - a.value)
+          .map(item => <span key={item.key}>{item.node}</span>)}
         <span className="ml-auto">
           {t('cushion')}{' '}
           <span className="font-mono font-semibold tabular-nums text-foreground">

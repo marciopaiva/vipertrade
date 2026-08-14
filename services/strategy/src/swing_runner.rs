@@ -18,6 +18,9 @@ use viper_domain::{
 use crate::swing::{self, Candle, SwingParams};
 
 const GROUP: &str = "swing";
+/// Pontos de fechamento enviados para o gráfico da matriz. 48 velas de 4H são
+/// 8 dias — o bastante para ler a forma recente sem carregar as 300 da série.
+const SPARK_POINTS: usize = 48;
 /// O BTC é coletado para o filtro macro, nunca operado.
 const MACRO_SYMBOL: &str = "BTCUSDT";
 
@@ -40,6 +43,23 @@ pub(crate) type CandleStore = Arc<Mutex<HashMap<String, Series>>>;
 /// 20 min tolera quatro ciclos perdidos antes de considerar a série morta.
 const SERIES_TTL: Duration = Duration::from_secs(20 * 60);
 
+/// A série SEM a vela ainda em formação.
+///
+/// A estratégia decide sobre vela FECHADA — é assim que o corpus inteiro foi
+/// medido. A série publicada traz a vela corrente como último elemento, e usá-la
+/// significa reavaliar o mesmo período a cada atualização: medido, isso derruba
+/// o retorno de +0,365% para +0,219% por trade, porque o lado do filtro macro
+/// alterna dentro da própria vela. Em 13/08/2026 produziu dois longs numa janela
+/// de 27 minutos entre dois shorts, e os dois estoparam.
+pub(crate) fn apenas_fechadas(candles: &[Candle], agora_ms: i64) -> &[Candle] {
+    match candles.last() {
+        Some(u) if u.open_time_ms + (CANDLE_SECS as i64) * 1000 > agora_ms => {
+            &candles[..candles.len() - 1]
+        }
+        _ => candles,
+    }
+}
+
 /// Descarta séries que pararam de ser atualizadas.
 pub(crate) fn prune(store: &mut HashMap<String, Series>) -> Vec<String> {
     let agora = std::time::Instant::now();
@@ -57,6 +77,7 @@ pub(crate) fn prune(store: &mut HashMap<String, Series>) -> Vec<String> {
 fn to_candles(raw: &[OhlcCandle]) -> Vec<Candle> {
     raw.iter()
         .map(|c| Candle {
+            open_time_ms: c.open_time_ms,
             open: c.open,
             high: c.high,
             low: c.low,
@@ -235,9 +256,12 @@ pub(crate) fn diagnose_symbols(
     store: &HashMap<String, Series>,
     open_symbols: &[String],
     cooling_symbols: &[String],
+    agora_ms: i64,
     params: &SwingParams,
 ) -> SwingDiagnosticsSnapshot {
-    let btc = store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice());
+    let btc = store
+        .get(MACRO_SYMBOL)
+        .map(|s| apenas_fechadas(&s.candles, agora_ms));
     // O macro escolhe o LADO, não bloqueia: BTC acima da própria EMA200 procura
     // compra, abaixo procura venda. Sem série do BTC não há lado definido, e aí
     // nada é avaliado.
@@ -250,7 +274,8 @@ pub(crate) fn diagnose_symbols(
         .iter()
         .filter(|(s, _)| s.as_str() != MACRO_SYMBOL)
         .map(|(symbol, serie)| {
-            let d = swing::diagnose(&serie.candles, btc_uptrend, params);
+            let fechadas = apenas_fechadas(&serie.candles, agora_ms);
+            let d = swing::diagnose(fechadas, btc_uptrend, params);
             let has_position = open_symbols.iter().any(|s| s == symbol);
             let cooling = cooling_symbols.iter().any(|s| s == symbol);
             let target = d.risk_pct.map(|r| {
@@ -303,6 +328,13 @@ pub(crate) fn diagnose_symbols(
                 distance_pct,
                 has_position,
                 candles: d.candles,
+                spark: fechadas
+                    .iter()
+                    .rev()
+                    .take(SPARK_POINTS)
+                    .rev()
+                    .map(|c| c.close)
+                    .collect(),
                 status: status.to_string(),
             }
         })
@@ -329,6 +361,7 @@ pub(crate) fn evaluate_symbols(
     open_symbols: &[String],
     cooling_symbols: &[String],
     short_enabled: bool,
+    agora_ms: i64,
     equity_usdt: f64,
     risk_per_trade: f64,
     leverage: f64,
@@ -338,7 +371,10 @@ pub(crate) fn evaluate_symbols(
     // O macro escolhe o LADO. Sem série do BTC não há lado, e na dúvida não se
     // opera — antes isto bloqueava as entradas; agora define se procuramos
     // compra ou venda.
-    let btc_uptrend = match store.get(MACRO_SYMBOL).map(|s| s.candles.as_slice()) {
+    let btc_uptrend = match store
+        .get(MACRO_SYMBOL)
+        .map(|s| apenas_fechadas(&s.candles, agora_ms))
+    {
         Some(c) => swing::is_uptrend(c, params).unwrap_or(false),
         None => {
             warn!("No BTC 4H series yet — macro filter unavailable, skipping entries");
@@ -354,7 +390,7 @@ pub(crate) fn evaluate_symbols(
 
     let mut out = Vec::new();
     for (symbol, serie) in store {
-        let candles = &serie.candles;
+        let candles = apenas_fechadas(&serie.candles, agora_ms);
         if symbol == MACRO_SYMBOL {
             continue;
         }
@@ -393,6 +429,10 @@ mod tests {
     use super::*;
 
     /// Série "recém-chegada", como o reader a insere.
+    /// Instante de referência dos testes: bem no futuro, para que qualquer
+    /// vela sintética (open_time_ms = 0) conte como FECHADA.
+    const AGORA: i64 = 4_000_000_000_000;
+
     fn serie(candles: Vec<Candle>) -> Series {
         Series { candles, updated_at: std::time::Instant::now() }
     }
@@ -481,7 +521,8 @@ mod tests {
             &[],
             &[],
             false,
-            1000.0,
+            AGORA,
+             1000.0,
             0.01,
             2.0,
             30.0,
@@ -500,7 +541,7 @@ mod tests {
         store.insert("BTCUSDT".to_string(), serie(Vec::new()));
         store.insert("APTUSDT".to_string(), serie(Vec::new()));
         store.insert("LINKUSDT".to_string(), serie(Vec::new()));
-        let snap = diagnose_symbols(&store, &[], &[], &SwingParams::default());
+        let snap = diagnose_symbols(&store, &[], &[], AGORA, &SwingParams::default());
         let nomes: Vec<&str> = snap.symbols.iter().map(|s| s.symbol.as_str()).collect();
         assert_eq!(nomes, vec!["APTUSDT", "LINKUSDT"]);
     }
@@ -514,7 +555,7 @@ mod tests {
         let queda: Vec<Candle> = (0..250)
             .map(|i| {
                 let b = 200.0 - i as f64 * 0.4;
-                Candle { open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
+                Candle { open_time_ms: 0, open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
             })
             .collect();
         // O BTC precisa estar em ALTA, senão o filtro macro barra antes e o
@@ -523,13 +564,13 @@ mod tests {
         let alta: Vec<Candle> = (0..250)
             .map(|i| {
                 let b = 100.0 + i as f64 * 0.5;
-                Candle { open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
+                Candle { open_time_ms: 0, open: b, high: b + 1.0, low: b - 1.0, close: b, volume: 1.0 }
             })
             .collect();
         let mut store = HashMap::new();
         store.insert("BTCUSDT".to_string(), serie(alta));
         store.insert("XUSDT".to_string(), serie(queda));
-        let snap = diagnose_symbols(&store, &[], &[], &p);
+        let snap = diagnose_symbols(&store, &[], &[], AGORA, &p);
         let x = &snap.symbols[0];
         assert_eq!(x.status, "no_uptrend");
         let d = x.distance_pct.expect("distância até a EMA200");
@@ -545,7 +586,7 @@ mod tests {
         let mut store = HashMap::new();
         store.insert("BTCUSDT".to_string(), serie(Vec::new()));
         store.insert("APTUSDT".to_string(), serie(Vec::new()));
-        let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &[], &SwingParams::default());
+        let snap = diagnose_symbols(&store, &["APTUSDT".to_string()], &[], AGORA, &SwingParams::default());
         assert!(snap.symbols[0].distance_pct.is_none());
     }
 
@@ -585,6 +626,41 @@ mod tests {
         assert!(store.contains_key("XUSDT"));
     }
 
+    /// A vela ainda em formação não pode entrar na decisão: é ela que faz o
+    /// lado do macro alternar dentro do mesmo período. Medido, isso custa 40%
+    /// do retorno (+0,365% -> +0,219%/trade).
+    #[test]
+    fn forming_candle_is_excluded() {
+        const H4: i64 = 4 * 3600 * 1000;
+        let série = vec![
+            Candle { open_time_ms: 0, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+            Candle { open_time_ms: H4, open: 2.0, high: 2.0, low: 2.0, close: 2.0, volume: 1.0 },
+        ];
+        // agora = meio da segunda vela -> ela ainda está aberta
+        let fechadas = apenas_fechadas(&série, H4 + H4 / 2);
+        assert_eq!(fechadas.len(), 1, "a vela corrente tem de ficar de fora");
+        assert_eq!(fechadas[0].close, 1.0);
+    }
+
+    /// Depois que a vela fecha, ela passa a valer.
+    #[test]
+    fn closed_candle_is_included() {
+        const H4: i64 = 4 * 3600 * 1000;
+        let série = vec![
+            Candle { open_time_ms: 0, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+            Candle { open_time_ms: H4, open: 2.0, high: 2.0, low: 2.0, close: 2.0, volume: 1.0 },
+        ];
+        let fechadas = apenas_fechadas(&série, H4 * 2 + 1);
+        assert_eq!(fechadas.len(), 2);
+        assert_eq!(fechadas[1].close, 2.0);
+    }
+
+    /// Série vazia não pode causar pânico no fatiamento.
+    #[test]
+    fn empty_series_survives_the_cut() {
+        assert!(apenas_fechadas(&[], 1_000).is_empty());
+    }
+
     /// Símbolo estopado há pouco não pode reentrar — foi o que o ENAUSDT fez em
     /// 2026-08-09, voltando 3,5 min depois no preço exato da saída.
     #[test]
@@ -594,7 +670,7 @@ mod tests {
         store.insert("ENAUSDT".to_string(), serie(Vec::new()));
         let esfriando = vec!["ENAUSDT".to_string()];
 
-        let snap = diagnose_symbols(&store, &[], &esfriando, &SwingParams::default());
+        let snap = diagnose_symbols(&store, &[], &esfriando, AGORA, &SwingParams::default());
         assert_eq!(snap.symbols[0].status, "stop_cooldown");
 
         let out = evaluate_symbols(
@@ -602,6 +678,7 @@ mod tests {
             &[],
             &esfriando,
             false,
+            AGORA,
             1000.0,
             0.01,
             2.0,
@@ -622,6 +699,7 @@ mod tests {
             &store,
             &["ENAUSDT".to_string()],
             &["ENAUSDT".to_string()],
+            AGORA,
             &SwingParams::default(),
         );
         assert_eq!(snap.symbols[0].status, "position_open");
@@ -637,6 +715,7 @@ mod tests {
             &store,
             &["APTUSDT".to_string()],
             &[],
+            AGORA,
             &SwingParams::default(),
         );
         let apt = &snap.symbols[0];
@@ -671,7 +750,8 @@ mod tests {
             &["APTUSDT".to_string()],
             &[],
             false,
-            1000.0,
+            AGORA,
+             1000.0,
             0.01,
             2.0,
             30.0,

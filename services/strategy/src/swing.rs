@@ -18,6 +18,10 @@
 /// Uma vela OHLCV de 4 horas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Candle {
+    /// Início da vela em epoch ms. Necessário para saber qual vela já FECHOU:
+    /// a estratégia decide sobre vela fechada, e a série publicada traz a
+    /// corrente (ainda em formação) como último elemento.
+    pub open_time_ms: i64,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -439,6 +443,9 @@ mod tests {
 
     fn c(open: f64, high: f64, low: f64, close: f64) -> Candle {
         Candle {
+            // Os testes deste módulo não dependem do relógio: o corte por vela
+            // fechada é responsabilidade do runner, não das regras.
+            open_time_ms: 0,
             open,
             high,
             low,

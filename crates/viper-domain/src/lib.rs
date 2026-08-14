@@ -463,7 +463,14 @@ pub struct SwingSymbolDiagnostic {
     /// de outro a 8% — que é a diferença entre "olhe hoje" e "esqueça".
     pub distance_pct: Option<f64>,
     pub has_position: bool,
+    /// Velas de 4H disponíveis na série. 300 é o cheio; abaixo de 200 não há
+    /// EMA longa e o símbolo nem chega a ser avaliado.
     pub candles: usize,
+    /// Fechamentos recentes de 4H para o gráfico da linha, do mais antigo ao
+    /// mais novo. Truncado de propósito: a série inteira são 300 pontos por
+    /// símbolo e 23 símbolos por snapshot, o que inflaria o payload sem que a
+    /// tela use nada além da forma recente.
+    pub spark: Vec<f64>,
     /// Rótulo estável: `setup`, `position_open`, `macro_blocked`, `no_uptrend`,
     /// `awaiting_pullback`, `risk_out_of_range`, `insufficient_history`.
     pub status: String,

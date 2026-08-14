@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useT, useLocale, formatPrice, formatPct } from '@/lib/i18n';
 import { HudFrame } from '@/components/ui/HudFrame';
+import { Sparkline } from '@/components/console/Sparkline';
 
 export interface SwingSymbolDiagnostic {
   symbol: string;
@@ -23,6 +24,8 @@ export interface SwingSymbolDiagnostic {
   distance_pct: number | null;
   has_position: boolean;
   candles: number;
+  /** Fechamentos de 4H recentes, do mais antigo ao mais novo. */
+  spark: number[];
   status: string;
 }
 
@@ -40,7 +43,8 @@ export interface SwingMatrixData {
 // tela mostrava onze linhas de indicadores que não decidiam nada e ainda
 // alertava "tendência fraca (ADX 14)" como se algo estivesse filtrando por ali.
 const GRID =
-  'grid grid-cols-[104px_96px_150px_150px_84px_150px_minmax(170px,1fr)] items-center gap-x-3';
+  'grid grid-cols-[104px_92px_138px_138px_74px_128px_92px_92px_minmax(120px,1fr)] ' +
+  'items-center gap-x-3';
 
 // Acima disto o símbolo não é acionável no horizonte de dias — a barra satura e
 // para de disputar atenção com quem está a menos de 1%.
@@ -276,7 +280,9 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
             <span>{t('colPullback')}</span>
             <span>{t('colRisk')}</span>
             <span>{t('colDistance')}</span>
-            <span>{t('colLevels')}</span>
+            <span>{t('colStop')}</span>
+            <span>{t('colTarget')}</span>
+            <span>{t('colChart')}</span>
           </div>
 
           {ordered.map(d => {
@@ -348,18 +354,49 @@ export function SwingMatrix({ data }: { data?: SwingMatrixData | null }) {
                 />
 
                 {/* Stop e alvo que ESTE símbolo teria se entrasse agora — é o
-                    que torna a linha acionável em vez de descritiva. */}
-                <span className="font-mono text-2xs text-muted-foreground">
-                  {d.stop != null && d.target != null ? (
-                    <>
-                      {t('stopShort')} {formatPrice(locale, d.stop)}
-                      <span className="px-1.5 text-muted-foreground/40">·</span>
-                      {t('targetShort')} {formatPrice(locale, d.target)}
-                    </>
-                  ) : (
-                    '—'
-                  )}
+                    que torna a linha acionável em vez de descritiva. Colunas
+                    separadas porque são dois números que se lê um contra o
+                    outro, não uma frase. */}
+                <span className="font-mono text-2xs text-destructive/80">
+                  {d.stop != null ? formatPrice(locale, d.stop) : '—'}
                 </span>
+                <span className="font-mono text-2xs text-accent/80">
+                  {d.target != null ? formatPrice(locale, d.target) : '—'}
+                </span>
+
+                {/* Forma recente da série de 4H, com a contagem de velas: 300 é
+                    a série cheia, e abaixo de 200 o símbolo nem é avaliado —
+                    então o número diz se a leitura da linha é confiável. */}
+                <div className="flex items-center gap-2">
+                  {d.spark && d.spark.length >= 2 ? (
+                    <Sparkline
+                      values={d.spark}
+                      width={92}
+                      height={22}
+                      showZero={false}
+                      colorClassName={
+                        d.spark[d.spark.length - 1] >= d.spark[0]
+                          ? 'text-accent'
+                          : 'text-destructive'
+                      }
+                    />
+                  ) : (
+                    <span className="text-3xs text-muted-foreground/40">—</span>
+                  )}
+                  <span
+                    className={cn(
+                      'font-mono text-3xs tabular-nums',
+                      d.candles >= 300
+                        ? 'text-muted-foreground/60'
+                        : d.candles >= 200
+                          ? 'text-amber-400/80'
+                          : 'text-destructive/80'
+                    )}
+                    title={`${d.candles} velas de 4H`}
+                  >
+                    {d.candles}
+                  </span>
+                </div>
               </div>
             );
           })}

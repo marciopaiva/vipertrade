@@ -1577,10 +1577,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0),
                 );
-                if bucket != current_bucket {
+                let vela_virou = bucket != current_bucket;
+                if vela_virou {
                     current_bucket = bucket;
                     published.clear();
                 }
+                let agora_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
 
                 let open_symbols: Vec<String> = match &eval_pool {
                     Some(pool) => crate::db::fetch_open_symbols(pool)
@@ -1611,19 +1616,30 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     }
                     g.clone()
                 };
-                let decisions = swing_runner::evaluate_symbols(
-                    &snapshot,
-                    &open_symbols,
-                    &cooling_symbols,
-                    swing_short_enabled,
-                    eval_fallback_equity,
-                    eval_cfg.risk_per_trade_fraction(),
-                    eval_cfg.max_leverage(),
-                    // Mesmo teto do scalp: a fórmula de risco dimensiona a
-                    // posição, mas não a limita.
-                    eval_cfg.max_position_cap_usdt("", eval_fallback_equity),
-                    &swing_params,
-                );
+                // As entradas saem UMA VEZ por vela de 4H, quando ela fecha —
+                // é assim que o corpus foi medido. Reavaliar a cada 60s sobre a
+                // vela em formação derruba o retorno de +0,365% para +0,219%
+                // por trade, porque o lado do macro alterna dentro da vela.
+                // A matriz segue sendo publicada a cada ciclo: ela é leitura,
+                // não decisão.
+                let decisions = if vela_virou {
+                    swing_runner::evaluate_symbols(
+                        &snapshot,
+                        &open_symbols,
+                        &cooling_symbols,
+                        swing_short_enabled,
+                        agora_ms,
+                        eval_fallback_equity,
+                        eval_cfg.risk_per_trade_fraction(),
+                        eval_cfg.max_leverage(),
+                        // Mesmo teto do scalp: a fórmula de risco dimensiona a
+                        // posição, mas não a limita.
+                        eval_cfg.max_position_cap_usdt("", eval_fallback_equity),
+                        &swing_params,
+                    )
+                } else {
+                    Vec::new()
+                };
                 // Snapshot do checklist para a matriz de decisão. Publicado a
                 // cada ciclo, tenha ou não setup — a tela precisa justamente
                 // dos símbolos que NÃO entraram.
@@ -1631,6 +1647,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
                     &snapshot,
                     &open_symbols,
                     &cooling_symbols,
+                    agora_ms,
                     &swing_params,
                 );
                 match serde_json::to_string(&snap) {
